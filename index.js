@@ -8,7 +8,6 @@ var proc;
 
 var mqtt = require('mqtt')
 var mqtt_topic_take_pic = 'helmsman/take_pic'
-var mqtt_topic_take_pic = 'helmsman/take_pic'
 var mqtt_topic_set_speed = 'helmsman/set_speed'
 var mqtt_topic_steer = 'helmsman/steer'
 
@@ -93,7 +92,7 @@ io.on('connection', function(socket) {
     mqttc.publish(mqtt_topic_set_speed, 's')
   });
   socket.on(socket_event_take_pic, function() {
-    mqttc.publish(mqtt_topic_take_pic, 'now')
+    mqttc.publish(mqtt_topic_take_pic, '{}')
   });
   socket.on(socket_event_steer_straight, function() {
     mqttc.publish(mqtt_topic_steer, 's')

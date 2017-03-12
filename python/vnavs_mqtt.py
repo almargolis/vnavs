@@ -28,6 +28,7 @@ class mqtt_node(object):
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
+        self.mqttc = None
         if self.blocking_mode:
             print("Blocking Mode")
         else:

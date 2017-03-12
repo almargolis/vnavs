@@ -257,24 +257,73 @@ def DrawContourFilled(img, contours):
     #cv2.drawContours(final, contours, i, (0,0,255), 1)    # draw contour outlines
   return final
 
-def ColorString(color, bw_threshold=20):
+
+def CrayolaFilter2(im, bw_threshold=20, mix_threshold=50):
+    #im = simplest_cb(im, 20)
+    hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+    mask = np.asarray([224, 224, 224], dtype=np.uint8)
+    mask = np.asarray([192, 128, 128], dtype=np.uint8)
+    mask = np.asarray([192, 192, 192], dtype=np.uint8)
+    mask = np.asarray([224, 128, 128], dtype=np.uint8)
+    out = cv2.bitwise_and(hsv, mask)
+    im = cv2.cvtColor(out, cv2.COLOR_HSV2BGR)
+    bw = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    canny_image = auto_canny(bw, 0.33)
+    (imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    im = cv2.drawContours(im, opencv_contours, -1, (255, 0, 255), 1)
+    #return canny_image
+    return im
+    
+
+def CrayolaFilter(im, bw_threshold=20, mix_threshold=50):
+    color_map = {
+        'b': np.asarray([0, 0, 0], dtype=np.uint8),
+        'w': np.asarray([255, 255, 255], dtype=np.uint8),
+        'l': np.asarray([255, 0, 0], dtype=np.uint8),
+        'g': np.asarray([0, 255, 0], dtype=np.uint8),
+        'r': np.asarray([0, 0, 255], dtype=np.uint8),
+        'y': np.asarray([0, 128, 128], dtype=np.uint8),
+        'z': np.asarray([128, 128, 128], dtype=np.uint8),
+    }
+    height, width, channels = im.shape
+    out_im = np.zeros(im.shape, np.uint8)
+    for y in range(height):
+        for x in range(width):
+            color = im[y, x]			# BGR
+            t = ColorString(color, bw_threshold=bw_threshold, mix_threshold=mix_threshold)
+            tc = t[0]
+            if tc in color_map:
+                c_out = color_map[tc]
+            else:
+                c_out = color_map['z']
+            print(y, x, t, color, c_out)
+            out_im[y, x] = c_out
+    return out_im
+    
+def ColorString(color, bw_threshold=20, mix_threshold=50):
   # bw_sthreshold of 30 was about right for white line
   min_v = min(color)
   max_v = max(color)
+  blue = color[0]
+  green = color[1]
+  red = color[2]
   if ((max_v - min_v) < bw_threshold):
-    if (min_v > 128):
-      c = "white"
-    else:
-      c =  "black"
-  elif color[0] >= max_v:
-    c = "blue"
-  elif color[1] >= max_v:
-    c = "green"
+      if (min_v > 128):
+          c = "white"
+      else:
+          c =  "black"
+  elif blue >= max_v:
+      c = "l-blue"
+  elif green >= max_v:
+      if abs(green - red) < mix_threshold:
+          c = "yellow"
+      else:
+          c = "green"
   else:
-    c = "red"
+      c = "red"
   return c + ' ' + `color`
 
-def FilterContours(img, contours, select_color='r'):
+def FilterContours(img, contours, SelectColors='r'):
   image_shape = img.shape
   mask_shape = (image_shape[0], image_shape[1], 1)
   final = img.copy()
@@ -292,7 +341,7 @@ def FilterContours(img, contours, select_color='r'):
     color_str = ColorString(avg_color)
     this_c = contours[i]
     area = cv2.contourArea(this_c)
-    if color_str[0] != select_color:
+    if color_str[0] in SelectColors:
       continue
     if area < area_threshold:
       continue
@@ -322,7 +371,10 @@ class ImageAnalyzer(object):
         self.img_fname_suffix = ''
         self.annotate_fill_method = ContourFill
         self.annotate_contour_outline = ContourOutline
+        self.annotate_opencv_contours = True
         self.do_filter_contours = DoFilterContours
+        self.img_contour_colors = "r"
+        self.img_contour_colors = "wy"
         self.snap_shots = []
         self.snap_titles = []
         self.do_save_snaps = True
@@ -382,19 +434,25 @@ class ImageAnalyzer(object):
         elif self.img_canny_method == 2:
             # based on pyimagesearch method
             canny_image = cv2.Canny(bw_image, 30, 200)
-        (imgxx, contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        print("Contour Ct:", len(contours))
+        (imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        print("Contour Ct:", len(opencv_contours))
 
         print("FindLines() elapsed time:", time.clock() - start_clock)
         if self.do_filter_contours:
-            contours = FilterContours(cropped_image, contours)
+            contours = FilterContours(cropped_image, opencv_contours, SelectColors=self.img_contour_colors)
             print("Filtered Contour Ct:", len(contours))
             self.ClassifyContours(cropped_image, contours)
+        else:
+            contours = opencv_contours
         print("FindLines() elapsed time:", time.clock() - start_clock)
 
         annotated_cropped_image = cropped_image.copy()
         outline_color = (0, 255, 0)	# green
+        opencv_color = (255, 0, 0)	# red
         path_guide_color = (0, 255, 255)
+        if self.annotate_opencv_contours:
+            cv2.drawContours(annotated_cropped_image, opencv_contours, -1, opencv_color, 1)
+
         if self.vert_line is not None:
             cv2.line(annotated_cropped_image, self.vert_line[0], self.vert_line[1], path_guide_color, 2)
         if self.horz_line is not None:
