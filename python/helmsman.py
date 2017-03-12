@@ -2,6 +2,8 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import base64
+import json
 import traceback
 import io
 import sys
@@ -202,18 +204,60 @@ class vehicle(object):
         self.steering.write(90+direction)
         self.steering_last = direction
 
-def cameraman(helmsman, Verbose=False):
+class helmsman(vnavs_mqtt.mqtt_node):
+    def __init__(self):
+        super().__init__(Subscriptions=('helmsman/set_speed', 'helmsman/steer', 'helmsman/take_pic'), Blocking=False)
+        self.v = vehicle()
+        self.camera_mode = 's'		# set by helmsman, s=single, r=run
+        self.camera_snap = False	# set by helmsman, cleared by cameraman
+        self.camera_last_fn = None	# set by camerman
+        self.camera_iso = 800
+        self.camera_shutter_speed = 10000
+        self.camera_run = str(int(time.clock() * 1000))		# set by helmsman, id for series of pics
+        self.speed_goal = 0		# (int) mm/sec
+        self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
+        self.camera = threading.Thread(target=cameraman, args=(self,))
+        self.camera.start()
+
+    def rmsg_helmsman_take_pic(self, msg):
+        # should we verify mode and report if a problem?
+        try:
+            parms = json.loads(msg)
+        except ValueError:
+            parms = {}
+            print("Invalid JSON", `msg`)
+        if 'iso' in parms:
+            iso = int(parms['iso'])
+            self.camera_iso = iso
+        if 'shutter_speed' in parms:
+            shutter_speed = int(parms['shutter_speed'])
+            self.camera_shutter_speed = shutter_speed
+        self.camera_snap = True
+
+class cameraman(object):
+      def __init__(self, helmsman, Verbose=False):
+          self.helmsman = helmsman
+          self.verbose = Verbose
     # This will run in its own thread.
     # Touch helmsman as little as possible to avoid thread glitches.
+    Verbose = True
     with picamera.PiCamera() as camera:
-        camera.iso = 800
-        camera.shutter_speed = 10000		# microseconds, 1000 = 1ms
+        camera_iso = 800
+        camera_shutter_speed = helmsman.camera_shutter_speed		# microseconds, 1000 = 1ms
         camera.vflip = True
         camera.hflip = True
         # Camera warm-up time
         time.sleep(2)
         prev_mode = 'x'				# x is invalid, forces startup in single mode
         while True:
+            if camera_iso != helmsman.camera_iso:
+                new_iso = helmsman.camera_iso
+                if (new_iso >= 0) and (new_iso <= 800):
+                    camera_iso = new_iso
+                    camera.iso = camera_iso
+            if camera_shutter_speed != helmsman.camera_shutter_speed:
+               camera_shutter_speed = helmsman.camera_shutter_speed
+               camera.shutter_speed = camera_shutter_speed
             if helmsman.camera_mode != prev_mode:
                 if prev_mode == 's':
                     # switching to run mode
@@ -229,24 +273,27 @@ def cameraman(helmsman, Verbose=False):
             else: 
                 run_ct += 1
                 picfn = 'temp/R%s_%s_%s_S%s_T%s.jpg' % (helmsman.camera_run, run_ct, int(time.clock()*1000), helmsman.speed_goal, helmsman.steering_goal)
-            #my_stream = io.BytesIO()
-            #camera.capture(my_stream, 'jpeg')
             if (prev_mode == 'r') or (helmsman.camera_snap == True):
-              camera.capture(picfn)
-              (res, mid) = helmsman.mqttc.publish('helmsman/pic_ready', picfn)
-              if Verbose:
-                  print("PIC", picfn)
-              if res != mqtt.MQTT_ERR_SUCCESS:
-                  print("MQTT Publish Error")
-              """
-              with picamera.array.PiRGBArray(camera) as stream:
-                  camera.capture(stream, format='bgr')
-                  brain = OpticChiasm.ImageAnalyzer()
-                  brain.do_save_snaps = False
-                  brain.img_crop=(250,450)
-                  brain.FindLines(image=stream.array)
-                  cv2.imwrite(picfn, brain.img_annotated)
-              """
+              image_ct = 0
+              start_time = time.clock()
+              stream = io.BytesIO()
+              for foo in camera.capture_continuous(stream, format='bgr', use_video_port=True):
+                  image_ct += 1
+                  payload = {}
+                  payload['filename'] = picfn
+                  #payload['imageBGR64'] = base64.b64encode(stream.getvalue())
+                  res = 0
+                  #(res, mid) = helmsman.mqttc.publish('helmsman/pic_ready', json.dumps(payload))
+                  if res != mqtt.MQTT_ERR_SUCCESS:
+                      print("MQTT Publish Error")
+                  stream.truncate()
+                  stream.seek(0)
+                  if Verbose:
+                      print("PIC", picfn)
+                  if image_ct >= 10:
+                      break
+              stop_time = time.clock()
+              print("%d images %f %5.2d fps" % (image_ct, stop_time - start_time, image_ct / (stop_time - start_time)))
               helmsman.camera_last_fn = picfn
               if prev_mode == 's':
                   # There is a potential race condition here where we miss the second of two
@@ -262,6 +309,8 @@ class helmsman(vnavs_mqtt.mqtt_node):
         self.camera_mode = 's'		# set by helmsman, s=single, r=run
         self.camera_snap = False	# set by helmsman, cleared by cameraman
         self.camera_last_fn = None	# set by camerman
+        self.camera_iso = 800
+        self.camera_shutter_speed = 10000
         self.camera_run = str(int(time.clock() * 1000))		# set by helmsman, id for series of pics
         self.speed_goal = 0		# (int) mm/sec
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
@@ -270,6 +319,17 @@ class helmsman(vnavs_mqtt.mqtt_node):
 
     def rmsg_helmsman_take_pic(self, msg):
         # should we verify mode and report if a problem?
+        try:
+            parms = json.loads(msg)
+        except ValueError:
+            parms = {}
+            print("Invalid JSON", `msg`)
+        if 'iso' in parms:
+            iso = int(parms['iso'])
+            self.camera_iso = iso
+        if 'shutter_speed' in parms:
+            shutter_speed = int(parms['shutter_speed'])
+            self.camera_shutter_speed = shutter_speed
         self.camera_snap = True
 
     def rmsg_helmsman_set_speed(self, msg):
