@@ -1,8 +1,12 @@
 from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
-import sys
+
+import multiprocessing
 import os
+import Queue
+import socket
+import sys
 import time
 
 import paho.mqtt.client as mqtt
@@ -15,8 +19,79 @@ else:
 config_file_path = os.path.expanduser("~/vnavs.ini")
 handler_method_prefix = 'rmsg_'
 
+def Streamer(q, q_len, host_ip, host_socket):
+    lifo = []
+    while True:
+        # This process runs forever
+        while True:
+            # After sending each file, quickly read the stream and turn it into a LIFO
+            try:
+                stream = q.get_nowait()
+                print("LIFO", len(lifo))
+                if len(lifo) > 6:
+                    lifo = lifo[-3:]
+                    print("DISCARD")
+                lifo.append(stream)
+                q_len.value = len(lifo)
+            except Queue.Empty:
+                #print("NO QUEUE", len(lifo))
+                break			# the interprocess queue is empty
+        if len(lifo) > 0:
+            stream = lifo.pop()
+            print("SEND", len(lifo), len(stream))
+            q_len.value = len(lifo)
+            s = socket.socket()
+            s.connect((host_ip, host_socket))
+            ix = 0
+            while ix <= len(stream):
+                s.send(stream[ix:ix+1024])
+                ix += 1024
+            s.close()
+
+class socket_xfer(object):
+    def __init__(self):
+        self.server_ip = "192.168.8.11"
+        self.server_socket = 3050
+        self.capture_ct = 0
+        self.start = time.time()
+        self.queue = multiprocessing.Queue()
+        self.q_len = multiprocessing.Value('i', 0)
+        self.streamer = multiprocessing.Process(target=Streamer, args=(self.queue, self.q_len, self.server_ip, self.server_socket))
+        self.streamer.start()
+        self.timer_ct = 0
+        self.timer_skip_ct = 0
+        self.timer_start = time.clock()
+
+    def stop(self):
+        self.streamer.join()
+
+    def write(self, stream):
+        self.capture_ct += 1
+        if self.q_len.value > 3:
+            self.timer_skip_ct += 1
+            print("NO Q")
+            return
+        print("Q IT")
+        self.queue.put(stream)
+        self.timer_ct += 1
+        if self.timer_ct >= 10:
+            timer_stop = time.clock()
+            print("Qd %d in %f secs SKIPPED %d" % (self.timer_ct, timer_stop - self.timer_start, self.timer_skip_ct))
+            self.timer_ct = 0
+            self.timer_skip_ct = 0
+            self.timer_start = timer_stop
+        #s.connect((self.server_ip, self.server_socket))
+        ix = 0
+        #im_size = len(stream)
+        #while ix < im_size:
+        #    ix_end = ix + 1024
+        #    if ix_end > im_size:
+        #        ex_end = im_size
+        #    s.send(stream[ix:ix_end])
+        #    ix += 1024
+
 class mqtt_node(object):
-    def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0):
+    def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, Verbose=True):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.blocking_mode = Blocking
@@ -29,6 +104,7 @@ class mqtt_node(object):
         self.verbose = False
         self.debug = 0
         self.mqttc = None
+        self.verbose = Verbose
         if self.blocking_mode:
             print("Blocking Mode")
         else:

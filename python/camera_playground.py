@@ -105,6 +105,7 @@ class Method4(object):
         capture_ct = 10
         start = time.time()
         for ix, frame in enumerate(camera.capture_continuous(rawCapture, format="bgr", use_video_port=True)):
+            print ix
             img = frame.array.copy()
             imgRGB = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
             r, jpg = cv2.imencode(".jpg",imgRGB)
