@@ -19,6 +19,61 @@ else:
 config_file_path = os.path.expanduser("~/vnavs.ini")
 handler_method_prefix = 'rmsg_'
 
+
+class collector(object):
+    def __init__(self):
+        self.my_ip = "192.168.8.11"
+        self.my_socket = 3050
+        self.s = socket.socket()
+        self.s.bind((my_ip, my_socket))
+        self.s.listen(10)
+
+    def receiver(self):
+        image_ct = 0
+        timer_ct = 0
+        timer_start = time.clock()
+        while True:
+            sc, address = s.accept()
+
+            #print image_ct,  address
+            fn = 'temp/Q%d.jpg' % image_ct
+            f = open(fn,'wb') #open in binary
+            image_ct += 1
+            image_sz = 0
+            json_str = ''
+            json_rdy = False
+            socket_data = sc.recv(1024)
+            while (socket_data):
+                if json_rdy:
+                    # we are past the json packet, write the image file
+                    img_ix = 0
+                else:
+                    # collect the json packet
+                    ix = socket_data.find(chr(26))
+                    if ix >= 0:
+                        # this is the end of the json packet
+                        json_str += socket_data[:ix]
+                        img_ix = ix + 1
+                        json_rdy = True
+                    else:
+                        # this is an intermediate part of the json packet
+                        json_str += socket_data
+                if json_rdy:
+                    image_sz += len(socket_data) - img_ix
+                    f.write(socket_data[img_ix:])
+                socket_data = sc.recv(1024)
+            f.close()
+            sc.close()
+            print(image_sz, fn, json_str)
+            timer_ct += 1
+            if timer_ct >= 10:
+                timer_stop = time.clock()
+                print("Received %d in %f seconds" % (timer_ct, timer_stop - timer_start))
+                timer_ct = 0
+                timer_start = timer_stop
+        s.close()
+
+
 def Streamer(q, q_len, host_ip, host_socket):
     lifo = []
     while True:
@@ -136,6 +191,13 @@ class mqtt_node(object):
         else:
             self.mqttc.loop_stop(force=False)
 
+    def MessageStr(self, msg):
+        max = 25
+        s = str(msg)
+        if len(s) <= max:
+            return s
+        return s[:max] + ' [...]'
+
     def RegisterMessageHandlers(self):
         self.handlers = {}
         for this_topic in self.subscriptions:
@@ -151,7 +213,7 @@ class mqtt_node(object):
         self.RegisterMessageHandlers()
 
     def on_message(self, client, userdata, message):
-        print("on_message()", message.topic + " " + str(message.qos) + " " + str(message.payload))
+        print("on_message()", message.topic + " " + str(message.qos) + " " + self.MessageStr(message.payload))
         handler_method = self.handlers[message.topic]
         handler_method(message.payload.decode("utf-8"))
 

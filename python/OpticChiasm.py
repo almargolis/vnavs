@@ -15,6 +15,18 @@ def auto_canny(img_to_canny, auto_canny_sigma):
     upper_canny_thresh = int(max(255, (1 + auto_canny_sigma) * img_to_canny_median ))
     return cv2.Canny(img_to_canny,lower_canny_thresh,upper_canny_thresh)
 
+#
+# BGR / RGB Conversions
+# thanks to https://www.scivision.co/numpy-image-bgr-to-rgb/
+#
+def BGR2RGB(bgr):
+    # OpenCV image to Matplotlib or Pillow Image.fromarray()
+    return bgr[...,::-1]
+
+def RGB2BGR(rgb):
+    # image to OpenCV
+    return rgb[...,::-1]
+
 
 def apply_mask(channel, mask, fill_value):
     masked = np.ma.array(channel, mask=mask, fill_value=fill_value)
