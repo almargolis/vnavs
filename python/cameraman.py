@@ -3,16 +3,17 @@ from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
 import base64
+import cv2
 import datetime
-import json
-import traceback
 import io
+import json
+import numpy
+import pickle
 import sys
 import threading
 import time
-import cv2
+import traceback
 
-from pyfirmata import Arduino, util
 
 import picamera
 import picamera.array
@@ -73,12 +74,10 @@ class cameraman(vnavs_mqtt.mqtt_node):
             if shutter_speed != self.camera_shutter_speed:
                 configuration_changed = True
                 self.camera_shutter_speed = shutter_speed
-        if configuration_changed:
-            self.ConfigureCamera()
 
     def Loop(self):
         while True:
-            print("LOOP")
+            #print("LOOP")
             if self.configuration_changed:
                 # there is a small posibility of a race condition if a new configuration change
                 # arrives between this if and setting the flag to False. This should be
@@ -111,7 +110,8 @@ class cameraman(vnavs_mqtt.mqtt_node):
         #
         if burst_publish in 'ms':
             im_format = 'bgr'
-            im_dest = io.BytesIO()
+            #im_dest = io.BytesIO()
+            im_dest = picamera.array.PiRGBArray(self.camera)
         else:
             im_format = 'jpeg'
             im_dest = 'temp/' + fn
@@ -127,10 +127,13 @@ class cameraman(vnavs_mqtt.mqtt_node):
             if burst_publish in 'ms':
                 im_fn = fn.format(counter=burst_ct)
             if burst_publish == 'm':
+                buffer = pickle.dumps(im_dest.array)
                 payload = {}
                 payload['filename'] = im_fn
-                payload['imageBGR64'] = base64.b64encode(im_dest.getvalue())
-                (res, mid) = helmsman.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
+                payload['buflen'] = len(buffer)
+                #payload['imageBGR64'] = base64.b64encode(buffer)
+                payload['imageBGRpk'] = buffer
+                (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
                 if res != mqtt.MQTT_ERR_SUCCESS:
                     print("MQTT Publish Error")
             if burst_publish == 's':
@@ -143,7 +146,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             if burst_publish in 'ms':
                 # prepare for next image
                 im_dest.truncate()
-                im_dest.seek(0)
+                #im_dest.seek(0)   ?? needed for io.Bytes?? maybe not after truncate -- may not be supported by PiRGBArray
             if self.verbose:
                 print("PIC", im_fn)
             if burst_mode == 's':

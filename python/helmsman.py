@@ -2,24 +2,29 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
-import base64
 import json
 import traceback
 import io
 import sys
 import threading
 import time
-import cv2
 
 from pyfirmata import Arduino, util
 
-import picamera
-import picamera.array
-
-import OpticChiasm
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
+#
+# time.sleep() seems to match real time seconds.
+# time.clock() has much finer granularity but seems to be arbitrary units and
+# system dependent. This normalizes time.clock() for this execution.
+# pi: 3.58e-5  macbook: 6.3e-6
+#
+c_start = time.clock()
+time.sleep(10)
+c_end = time.clock()
+CLOCK_INCREMENT_PER_SECOND = (c_end - c_start) / 10
+print("time.clock() increment per second:", CLOCK_INCREMENT_PER_SECOND)
 
 TICK_PATTERNS = [
 	[],				# 0 tick bits
@@ -151,6 +156,8 @@ class vehicle(object):
 
     def Estop(self):
         self.motor.write(self.mot_offset)	# Stop motor if on
+        self.mot_speed_goal = 0
+        self.mot_speed_ramp = 0
 
     def Motor(self, speed_goal):
         # This sends commands to the hardware motor controller (ESC or H-Bridge).
@@ -206,165 +213,56 @@ class vehicle(object):
 
 class helmsman(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=('helmsman/set_speed', 'helmsman/steer', 'helmsman/take_pic'), Blocking=False)
+        super().__init__(Subscriptions=('helmsman/orders',), Blocking=False)
         self.v = vehicle()
-        self.camera_mode = 's'		# set by helmsman, s=single, r=run
-        self.camera_snap = False	# set by helmsman, cleared by cameraman
-        self.camera_last_fn = None	# set by camerman
-        self.camera_iso = 800
-        self.camera_shutter_speed = 10000
-        self.camera_run = str(int(time.clock() * 1000))		# set by helmsman, id for series of pics
         self.speed_goal = 0		# (int) mm/sec
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
-        self.camera = threading.Thread(target=cameraman, args=(self,))
-        self.camera.start()
+        self.deadman_clock = 0		# E-Stop if time.clock() exceeds this
+        self.state = 'x'
 
-    def rmsg_helmsman_take_pic(self, msg):
-        # should we verify mode and report if a problem?
+    def rmsg_helmsman_orders(self, msg):
         try:
-            parms = json.loads(msg)
+            orders = json.loads(msg)
         except ValueError:
-            parms = {}
-            print("Invalid JSON", `msg`)
-        if 'iso' in parms:
-            iso = int(parms['iso'])
-            self.camera_iso = iso
-        if 'shutter_speed' in parms:
-            shutter_speed = int(parms['shutter_speed'])
-            self.camera_shutter_speed = shutter_speed
-        self.camera_snap = True
-
-class cameraman(object):
-      def __init__(self, helmsman, Verbose=False):
-          self.helmsman = helmsman
-          self.verbose = Verbose
-    # This will run in its own thread.
-    # Touch helmsman as little as possible to avoid thread glitches.
-    Verbose = True
-    with picamera.PiCamera() as camera:
-        camera_iso = 800
-        camera_shutter_speed = helmsman.camera_shutter_speed		# microseconds, 1000 = 1ms
-        camera.vflip = True
-        camera.hflip = True
-        # Camera warm-up time
-        time.sleep(2)
-        prev_mode = 'x'				# x is invalid, forces startup in single mode
-        while True:
-            if camera_iso != helmsman.camera_iso:
-                new_iso = helmsman.camera_iso
-                if (new_iso >= 0) and (new_iso <= 800):
-                    camera_iso = new_iso
-                    camera.iso = camera_iso
-            if camera_shutter_speed != helmsman.camera_shutter_speed:
-               camera_shutter_speed = helmsman.camera_shutter_speed
-               camera.shutter_speed = camera_shutter_speed
-            if helmsman.camera_mode != prev_mode:
-                if prev_mode == 's':
-                    # switching to run mode
-                    prev_mode = 'r'
-                    sleep_interval = 0.1
-                    run_ct = 0
-                else:
-                    # switching to single mode
-                    prev_mode = 's'
-                    sleep_interval = 10
-            if prev_mode == 's':
-                picfn = 'temp/single.jpg'
-            else: 
-                run_ct += 1
-                picfn = 'temp/R%s_%s_%s_S%s_T%s.jpg' % (helmsman.camera_run, run_ct, int(time.clock()*1000), helmsman.speed_goal, helmsman.steering_goal)
-            if (prev_mode == 'r') or (helmsman.camera_snap == True):
-              image_ct = 0
-              start_time = time.clock()
-              stream = io.BytesIO()
-              for foo in camera.capture_continuous(stream, format='bgr', use_video_port=True):
-                  image_ct += 1
-                  payload = {}
-                  payload['filename'] = picfn
-                  #payload['imageBGR64'] = base64.b64encode(stream.getvalue())
-                  res = 0
-                  #(res, mid) = helmsman.mqttc.publish('helmsman/pic_ready', json.dumps(payload))
-                  if res != mqtt.MQTT_ERR_SUCCESS:
-                      print("MQTT Publish Error")
-                  stream.truncate()
-                  stream.seek(0)
-                  if Verbose:
-                      print("PIC", picfn)
-                  if image_ct >= 10:
-                      break
-              stop_time = time.clock()
-              print("%d images %f %5.2d fps" % (image_ct, stop_time - start_time, image_ct / (stop_time - start_time)))
-              helmsman.camera_last_fn = picfn
-              if prev_mode == 's':
-                  # There is a potential race condition here where we miss the second of two
-                  # closely timed requests. We will still have taken a photo very recently
-                  # and published that. That shoud be good enough.
-                  helmsman.camera_snap = False
-            time.sleep(sleep_interval)
-
-class helmsman(vnavs_mqtt.mqtt_node):
-    def __init__(self):
-        super().__init__(Subscriptions=('helmsman/set_speed', 'helmsman/steer', 'helmsman/take_pic'), Blocking=False)
-        self.v = vehicle()
-        self.camera_mode = 's'		# set by helmsman, s=single, r=run
-        self.camera_snap = False	# set by helmsman, cleared by cameraman
-        self.camera_last_fn = None	# set by camerman
-        self.camera_iso = 800
-        self.camera_shutter_speed = 10000
-        self.camera_run = str(int(time.clock() * 1000))		# set by helmsman, id for series of pics
-        self.speed_goal = 0		# (int) mm/sec
-        self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
-        self.camera = threading.Thread(target=cameraman, args=(self,))
-        self.camera.start()
-
-    def rmsg_helmsman_take_pic(self, msg):
-        # should we verify mode and report if a problem?
-        try:
-            parms = json.loads(msg)
-        except ValueError:
-            parms = {}
-            print("Invalid JSON", `msg`)
-        if 'iso' in parms:
-            iso = int(parms['iso'])
-            self.camera_iso = iso
-        if 'shutter_speed' in parms:
-            shutter_speed = int(parms['shutter_speed'])
-            self.camera_shutter_speed = shutter_speed
-        self.camera_snap = True
-
-    def rmsg_helmsman_set_speed(self, msg):
-        self.GetGoalSpeed(msg)
-
-    def rmsg_helmsman_steer(self, msg):
-        self.GetGoalSteering(msg)
+            orders = {}
+            print("JSON Error")
+        if 'speed' in orders:
+            print("SPEED", orders['speed'])
+            self.GetGoalSpeed(orders['speed'])
+        if 'heading' in orders:
+            print ("STEER", orders['heading'])
+            self.GetGoalSteering(orders['heading'])
+        if 'timer' in orders:
+            print("TIMER", orders['timer'])
+            timer = int(orders['timer'])
+        else:
+            timer = 1
+        #self.deadman_clock = time.clock() + (timer * CLOCK_INCREMENT_PER_SECOND)
+        self.deadman_clock = time.clock() + (timer / 6)
+        print("ORDERS C:", time.clock(), "D:", self.deadman_clock, orders)
+        self.state = 'x'
 
     def Loop(self):
         try:
             while True:
-                self.Process()
+                if time.clock() > self.deadman_clock:
+                    self.v.Estop()
+                    new_state = 'i'
+                else:
+                    # Speed and Steering goals are set asynchronously via MQTT messages
+                    self.v.Motor(self.speed_goal)
+                    self.v.Steering(self.steering_goal)
+                    new_state = 'r'
+                if new_state != self.state:
+                    print("STATE", self.state, new_state, "C:", time.clock(), "D:", self.deadman_clock) 
+                    self.state = new_state
                 sleep_secs = 0.1			# This was my first try, slow speeds choppy
                 sleep_secs = 2				# This is very slow, for testing
-                sleep_secs = 0.01
+                sleep_secs = 0.001
                 time.sleep(sleep_secs)
         except:
             traceback.print_exc()
         self.v.Estop()
-        self.camera.stop()
-
-    def Process(self):
-        # Speed and Steering goals are set asynchronously via MQTT messages
-        if self.speed_goal == 0:
-            self.camera_mode = 's'
-        else:
-            self.camera_mode = 'r'
-            self.camera_run = str(int(time.clock() * 1000))
-        self.v.Motor(self.speed_goal)
-        self.v.Steering(self.steering_goal)
-
-    def ProcessImage(self):
-        brain = OpticChiasm.ImageAnalyzer()
-        brain.do_save_snaps = False
-        #brain.FindLines(image(
 
     def GetGoalSpeed(self, speed_request):
         # from Loop(). It is possible that Loop() has not seen or acted upon
