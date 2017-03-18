@@ -9,6 +9,7 @@ import tkFileDialog
 
 import base64
 import json
+import math
 import os
 import pickle
 import sys
@@ -33,7 +34,7 @@ BOT_1_MAP_TRANSPOSE = [
 			[ -2.95275685e-18,  -3.83178162e-03,   1.00000000e+00]
 		]
 
-BOT_1_H = pts_dst = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
+BOT_1_H = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class TkWidgetDef(object):
     root = None
@@ -103,6 +104,19 @@ class TkWidgetDef(object):
         self.tkd.set(Value)
         if Caption is not None:
             self.tkw_label.config(text=Caption)
+
+    def AddLabel(self, text='', Width=10, Value='', row=-2, col=-2):
+        refname = 'X'
+        row, col = self.Position(row=row, col=col)
+        tk_label = ttk.Label(self.tkw, text=text)
+        tk_label.grid(column=col, row=row, sticky=W)
+        frame = TkWidgetDef(refname, tk_label)
+        self.RememberPosition(frame, row, col, 1)
+        self.children.append(frame)
+        return frame
+
+    def UpdateLabel(self, text):
+        self.tkw.config(text=text)
 
     def AddListbox(self, caption, s_items, Selection=None, row=-2, col=-2, height=5, rowspan=0, Command=None):
         row, col = self.Position(row=row, col=col)
@@ -245,17 +259,22 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def AddLabelFrame(self, caption):
-        self.last_row += 1
+    def AddLabelFrame(self, caption, row=-2, col=-2, colspan=1):
+        row, col = self.Position(row=row, col=col)
         refname = caption.lower().replace(' ', '_')
         frame = TkWidgetDef(refname, ttk.Labelframe(self.tkw, text=caption))
-        frame.tkw.pack(expand="yes")
+        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=W)
+        self.RememberPosition(frame, row, col, colspan)
+        #frame.tkw.pack(expand="yes")
         self.children.append(frame)
         return frame
 
-    def AddNotebook(self):
+    def AddNotebook(self, row=-2, col=-2, colspan=1):
+        row, col = self.Position(row=row, col=col)
 	frame = TkWidgetDef('', ttk.Notebook(self.tkw))
-        frame.tkw.pack(expand="yes")
+        #frame.tkw.pack(expand="yes")
+        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=W)
+        self.RememberPosition(frame, row, col, colspan)
         self.children.append(frame)
         return frame
 
@@ -315,7 +334,9 @@ FILTERS = [
 						'Code':  'cv2.HoughLinesP(im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
                                                 'Flags': ['inprev', 'outlines']
 						},
-		{'Name': 'Map',			'Parms': []
+		{'Name': 'Map',			'Parms': [],
+						'Code':             'cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))',
+						'Flags': ['inprev', 'outim']
 						},
 		{'Name': 'FL',			'Parms': []
 						},
@@ -339,14 +360,18 @@ class ProcessStep(object):
         self.cv_filter = ''			# this gets set by NewFilter()
         self.parm_values = kwargs
         self.tab = self.app.notebook.AddTab("Step %d" % self.ix)
-        #self.option_panel = self.tab.AddLabelFrame('Options')
-        self.filter_selection = self.tab.AddListbox('Filters', self.filter_labels, Selection=cv_filter, Command=self.NewFilter, rowspan=4)
+        self.input_panel = self.tab.AddLabelFrame('Input')
+        self.output_panel = self.tab.AddLabelFrame('Output')
+        #
+        self.filter_selection = self.input_panel.AddListbox('Filters', self.filter_labels, Selection=cv_filter, Command=self.NewFilter, rowspan=4)
         self.parmEntries = []
-        self.parmEntries.append(self.tab.AddEntryField('Parm1', row=self.filter_selection.row, col=-3)) 
-        self.parmEntries.append(self.tab.AddEntryField('Parm2')) 
-        self.parmEntries.append(self.tab.AddEntryField('Parm3')) 
-        self.parmEntries.append(self.tab.AddEntryField('Parm4')) 
-        self.image = self.tab.AddImage(row=-3, colspan=4)
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=-3)) 
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm2')) 
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm3')) 
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm4'))
+        #
+        self.image = self.output_panel.AddImage()
+        self.deposition = self.output_panel.AddLabel(col=2)
         self.thumbnail = self.app.thumbnailFrame.AddImage(thumbnailof=self.image, row=0, col=-3)
         self.opencv = None			# captured image
         self.colorspace = None
@@ -488,6 +513,13 @@ class ProcessStep(object):
             else:
                 exec_g['c'] = 1
         exec_g['contours'] = None
+        w = exec_g['w']
+        h = exec_g['h']
+        h3 = h * 4
+        sq = (w * 0.5) / 2
+        pts_src = np.array([(sq, 0), (w-sq, 0), (w, h), (0, h)], dtype="float32")
+        pts_dst = np.array([(0,0), (w, 0), (w, h3), (0, h3)], dtype="float32")
+        exec_g['transform'] = cv2.getPerspectiveTransform(pts_src, pts_dst)
         if ('incont' in flags) and (self.ix > 0):
             exec_g['contours'] = self.steps[self.ix - 1].contours
             print("GET CONTOURS")
@@ -508,7 +540,7 @@ class ProcessStep(object):
             self.im = None
             self.contours = None
             self.lines = None
-            print("EXEC", e)
+            print("EXEC", e, exec_g['w'], exec_g['h'])
             try:
                 exec(e, exec_g)
             except:
@@ -520,10 +552,31 @@ class ProcessStep(object):
         if 'outlines' in flags:
             print("CONTOURS")
             self.im = ProcessStep.annotation_base.im.copy()
+            deposition = "Lines\n"
             if self.lines is not None:
+                map_lines = []
+                h, w, c = self.im.shape
+                m = int(w/2)
                 for x in range(0, len(self.lines)):
                     for x1,y1,x2,y2 in self.lines[x]:
                         cv2.line(self.im,(x1,y1),(x2,y2),(0,255,0),2)
+                        deposition += "%d. (%d,%d) (%d,%d)\n" % (x, x1, y1, x2, y2)
+                        mx1 = x1 - m
+                        mx2 = x2 - m
+                        my1 = h - y1
+                        my2 = h - y2
+                        mrise = my2 - my1
+                        mrun = mx2 - mx1
+                        mslope = mrise / mrun
+                        mlen = math.sqrt((mrise ** 2) + (mrun ** 2))
+                        p1dist = math.sqrt((mx1 ** 2) + (my1 ** 2))
+                        p2dist = math.sqrt((mx2 ** 2) + (my2 ** 2))
+                        mdist = min(p1dist, p2dist)
+                        map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2)))
+            deposition += "** Lines\n"
+            map_lines.sort()
+            deposition += `map_lines`
+            self.deposition.UpdateLabel(deposition)
         if trace is None:
             self.image.UpdateImage(opencv=self.im)
         else:
@@ -533,9 +586,6 @@ class ProcessStep(object):
         return
         if self.cv_filter == 'Crayola':
             self.image.UpdateImage(opencv=OpticChiasm.CrayolaFilter2(im))
-            return
-        if self.cv_filter == "Map":
-            self.image.UpdateImage(opencv=cv2.warpPerspective(im, BOT_1_H, (w, h)))
             return
         if self.cv_filter == 'FL':
             self.image.UpdateImage(opencv=self.app.image.FindLines(image=im))
@@ -568,9 +618,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
         self.tk = TkWidgetDef('root', Tk())
         self.tk.tkw.title("VNAVS OpenCV Visualizer")
-	self.statusFrame = self.tk.AddLabelFrame('Status')
-	self.thumbnailFrame = self.tk.AddLabelFrame('Thumbnails')
-        self.notebook = self.tk.AddNotebook()
+	self.statusFrame = self.tk.AddLabelFrame('Status', row=1)
+	self.thumbnailFrame = self.tk.AddLabelFrame('Thumbnails', row=2)
+        self.notebook = self.tk.AddNotebook(row=3)
         self.camera_iso = self.statusFrame.AddEntryField('ISO', Value=800) 
         self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', Value=10000, row=-1, col=-3) 
         self.camera_snap = False
