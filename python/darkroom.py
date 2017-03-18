@@ -7,16 +7,19 @@ import tkFileDialog
 #from Tkinter import *		# python 2.7
 #import ttk			# python 2.7
 
+import base64
 import json
-import sys
 import os
+import pickle
+import sys
+import traceback
 from PIL import ImageTk, Image
 
 import threading
 import time
 
 import cv2
-import numpy
+import numpy as np
 
 import OpticChiasm
 import vnavs_mqtt
@@ -30,15 +33,16 @@ BOT_1_MAP_TRANSPOSE = [
 			[ -2.95275685e-18,  -3.83178162e-03,   1.00000000e+00]
 		]
 
-BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
+BOT_1_H = pts_dst = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class TkWidgetDef(object):
     root = None
     defaultDir = '.'
 
-    def __init__(self, wname, tkw, Data=None):
+    def __init__(self, wname, tkw, Data=None, tkw_label=None, parm_id=None):
         self.wname = wname		# reference name for this widget
         self.tkw = tkw			# tk widget
+        self.tkw_label = tkw_label	# tk widget of associated label
         self.tkd = Data			# the tk data (usually StringVar) for this widget
         self.opencv_im = None
         self.row = None			# row where positioned
@@ -51,6 +55,7 @@ class TkWidgetDef(object):
         self.thumbnail = None		# update this thumbnail if image is changed
         self.thumbnailwidth = 0		# width of thumbnail
         self.children = []
+        self.parm_id = parm_id		# associated application field, not directly used for TK stuff
         if self.root is None:
             self.root = self
 
@@ -85,13 +90,19 @@ class TkWidgetDef(object):
 
         tk_data = StringVar()
         tk_data.set(Value)
-        tk_label = ttk.Label(self.tkw, text=caption).grid(column=col, row=row, sticky=W)
+        tk_label = ttk.Label(self.tkw, text=caption)
+        tk_label.grid(column=col, row=row, sticky=W)
         tk_entry = ttk.Entry(self.tkw, width=Width, textvariable=tk_data)
         tk_entry.grid(column=col+1, row=row, sticky=(W, E))
-        frame = TkWidgetDef(refname, tk_entry, Data=tk_data)
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
         self.RememberPosition(frame, row, col, 2)
         self.children.append(frame)
         return frame
+
+    def UpdateEntryField(self, Value='', Caption=None):
+        self.tkd.set(Value)
+        if Caption is not None:
+            self.tkw_label.config(text=Caption)
 
     def AddListbox(self, caption, s_items, Selection=None, row=-2, col=-2, height=5, rowspan=0, Command=None):
         row, col = self.Position(row=row, col=col)
@@ -131,7 +142,9 @@ class TkWidgetDef(object):
 
     def CurrentValue(self):
         if isinstance(self.tkw, ttk.Entry):
-            return self.tkd.get()
+            v = self.tkd.get()
+            print("CurrentValue", v)
+            return v
         if isinstance(self.tkw, Listbox):
             # ix is a tuple like (2,). I assume the 2nd element would be the end of
             # the range. Or maybe it a list of items for multi-selection.
@@ -139,9 +152,14 @@ class TkWidgetDef(object):
             ix = self.tkw.curselection()
             return self.tkw.get(ix)
          
-    def UpdateImage(self, fn=None, opencv=None, opencvfn=None):
+    def UpdateImage(self, fn=None, opencv=None, opencvfn=None, text=None):
         img_pil = None
         img_tk = None
+        if text is not None:
+            # This is intended to replace an image with an error message.
+            # should also do something about thumbnail but ignoring for now.
+            self.tkw.configure(image=None, text=text)
+            return
         if fn is not None:
             path = os.path.join(self.defaultDir, fn)
             try:
@@ -252,132 +270,288 @@ class TkWidgetDef(object):
 TEST_FILTER = 'bw'
 TEST_FILTER = 'crayola'
 
+# Filter functions should modify only:
+#	ProcessStep.annotation_base
+#	xstep.im
+# GetParm() must filter parameters to avoid code injection attacks 
 FILTERS = [
-		'None',
-		'BaseImage',
-		'Crop',
-		'BW',
-                'Blur',
-		'Canny',
-		'Contours',
-		'Map',
-		'FL'
-		'Crayola',
+		{'Name': 'None',		'Parms': [],
+						'Code': None,
+						'Flags': []
+						},
+		{'Name': 'CapturedImage',	'Parms': [],
+						'Code': "im.copy()",
+						'Flags': ['inex', 'outim', 'isbase']
+						},
+		{'Name': 'FileImage',		'Parms': [('opencvfn', 's', '')],
+						'Code': "cv2.imread('{opencvfn}')",
+						'Flags': ['outim', 'isbase']
+						},
+		{'Name': 'Crop',		'Parms': [('x', 'l', 'm-50:m+50', 'w'), ('y', 'l', '-100:', 'h')],
+						'Code': "im.copy()[{y}, {x}]",
+						'Flags': ['inprev', 'outim', 'isbase']
+						},
+		{'Name': 'BW',			'Parms': [],
+						'Code': 'cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)',
+						'Flags': ['inprev', 'outim']
+						},
+                {'Name': 'Blur',		'Parms': [('ksize', 'p', '3,3')],
+						'Code': 'cv2.blur(im, {ksize})',
+						'Flags': ['inprev', 'outim']
+						},
+		{'Name': 'CannyAuto',		'Parms': [('sigma', 'f', '0.33')],
+						'Code': 'OpticChiasm.auto_canny(im, {sigma})',
+						'Flags': ['inprev', 'outim']
+						},
+                {'Name': 'ColorBalance',	'Parms': [('pct', 'i', '20')],
+						'Code': 'OpticChiasm.simplest_cb(im, {pct})',
+						'Flags': ['inprev', 'outim']
+						},
+		{'Name': 'Contours',		'Parms': [],
+						'Code': 'cv2.findContours(im, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)',
+						'Flags': ['inprev', 'outcont']
+						},
+		{'Name': 'HoughLinesP',		'Parms': [('MinLineLength', 'i', '30'), ('MaxLineGap', 'i', 10)],
+						'Code':  'cv2.HoughLinesP(im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
+                                                'Flags': ['inprev', 'outlines']
+						},
+		{'Name': 'Map',			'Parms': []
+						},
+		{'Name': 'FL',			'Parms': []
+						},
+		{'Name': 'Crayola',		'Parms': []
+						}
 ]
 
 class ProcessStep(object):
     app = None
+    filter_labels = []
+    filter_specs = {}
+    for this in FILTERS:
+        this_label = this['Name']
+        filter_labels.append(this_label)
+        filter_specs[this_label] = this
     steps = []
     annotation_base = None
-    def __init__(self, filter, Parms=[], **kwargs):
+    def __init__(self, cv_filter, **kwargs):
         self.ix = len(self.steps)
         self.steps.append(self)
-        self.filter = filter
-        self.parms = kwargs
+        self.cv_filter = ''			# this gets set by NewFilter()
+        self.parm_values = kwargs
         self.tab = self.app.notebook.AddTab("Step %d" % self.ix)
         #self.option_panel = self.tab.AddLabelFrame('Options')
-        self.filter_selection = self.tab.AddListbox('Filters', FILTERS, Selection=self.filter, Command=self.NewFilter, rowspan=4)
-        while len(Parms) < 4:
-            Parms.append('')
-        self.parm1 = self.tab.AddEntryField('Parm1', Value=Parms[0], row=self.filter_selection.row, col=-3) 
-        self.parm2 = self.tab.AddEntryField('Parm2', Value=Parms[1]) 
-        self.parm3 = self.tab.AddEntryField('Parm3', Value=Parms[2]) 
-        self.parm4 = self.tab.AddEntryField('Parm4', Value=Parms[3]) 
+        self.filter_selection = self.tab.AddListbox('Filters', self.filter_labels, Selection=cv_filter, Command=self.NewFilter, rowspan=4)
+        self.parmEntries = []
+        self.parmEntries.append(self.tab.AddEntryField('Parm1', row=self.filter_selection.row, col=-3)) 
+        self.parmEntries.append(self.tab.AddEntryField('Parm2')) 
+        self.parmEntries.append(self.tab.AddEntryField('Parm3')) 
+        self.parmEntries.append(self.tab.AddEntryField('Parm4')) 
         self.image = self.tab.AddImage(row=-3, colspan=4)
         self.thumbnail = self.app.thumbnailFrame.AddImage(thumbnailof=self.image, row=0, col=-3)
-        self.Update()
+        self.opencv = None			# captured image
+        self.colorspace = None
+        self.NewFilter()
 
     def UpdateAll(self):
         for this_step in self.steps:
             this_step.Update()
 
+    def SaveParameters(self):
+        for ix, this_entry in enumerate(self.parmEntries):
+            if this_entry.parm_id is not None:
+                # save prior value
+                self.parm_values[this_entry.parm_id] = this_entry.CurrentValue()
+
     def NewFilter(self, *args):
         # TK callbacks seem to incude *args
+        self.SaveParameters()
         new_filter = self.filter_selection.CurrentValue()
-        if new_filter != self.filter:
-            self.filter = new_filter
+        print("NewFilter()", new_filter,  self.cv_filter)
+        if new_filter != self.cv_filter:
+            self.cv_filter = new_filter
+            self.cv_specs = self.filter_specs[self.cv_filter]
+            self.parms_specs = self.cv_specs['Parms']
+            for ix, this_entry in enumerate(self.parmEntries):
+                if ix < len(self.parms_specs):
+                    parm_label = self.parms_specs[ix][0]
+                    parm_type = self.parms_specs[ix][1]
+                    parm_default = self.parms_specs[ix][2]
+                    if parm_label not in self.parm_values:
+                        self.parm_values[parm_label] = parm_default
+                    parm_value = self.parm_values[parm_label]
+                    parm_id = parm_label
+                else:
+                    parm_label = "Parm" + str(ix+1)
+                    parm_value = ""
+                    parm_id = None
+                this_entry.UpdateEntryField(parm_value, Caption=parm_label)
+                this_entry.parm_id = parm_label
         self.UpdateAll()
 
-    def Update(self):
-        if self.filter == 'BaseImage':
-            self.image.UpdateImage(opencvfn=self.parms['opencvfn'])
-            ProcessStep.annotation_base = self
-            return
-        im = self.steps[self.ix - 1].image.opencv_im
-        if len(im.shape) > 2:
-            h, w, c = im.shape
+    def GetParm(self, d, parm_spec, exec_g):
+        # All parameters are returned as strings which are put in a string.format()
+        # dictionary. Whenever appropriate, the incoming strings are evaluated
+        # via int(), float(), etc as a means to validate data types. This is
+        # both to help assure correct operation and to avoid code insertion attacks.
+        #
+        # Tkinter sometimes converts types so its not safe to make assumptions
+        # about the class of raw_value
+        #
+        parm_name = parm_spec[0]
+        parm_type = parm_spec[1]
+        if len(parm_spec) >= 4:
+            v1 = exec_g[parm_spec[3]]
         else:
-            h, w = im.shape
-            c = 1
-        parm1 = self.parm1.CurrentValue()
-        parm2 = self.parm2.CurrentValue()
-        try:
-            spec1 = int(parm1)
-        except ValueError:
-            spec1 = 0
-        try:
-            spec1f = float(parm1)
-        except ValueError:
-            spec1f = 0.0
-        try:
-            spec2 = int(parm2)
-        except ValueError:
-            spec2 = 0
-        if self.filter == 'Crop':
-            x1 = 0
-            x2 = w
-            y1 = 0
-            y2 = h
-            if spec1 < 0:
-                m = int(w / 2)
-                x1 = m + spec1
-                x2 = m - spec1
-                if x1 < 0:
-                    x1 = 0
-                if x2 > w:
-                    x2 = w
-            if spec2 < 0:
-                y1 = h + spec2
-                if y1 < 0:
-                    y1 = 0
-            self.image.UpdateImage(opencv=im.copy()[y1:y2, x1:x2])
+            v1 = None
+        raw_value = self.parm_values[parm_name]
+        if parm_type == 'i':
+            # integer number
+            if isinstance(raw_value, basestring):
+                raw_value = raw_value.strip()
+            d[parm_name] = str(int(raw_value))
+            return
+        if parm_type == 'f':
+            # floating point number
+            if isinstance(raw_value, basestring):
+                raw_value = raw_value.strip()
+            d[parm_name] = str(float(raw_value))
+            return
+        if parm_type == 'l':
+            # this is a np slice s:e
+            v = raw_value.split(':')
+            s = v[0].strip()
+            if s == '':
+                s = 0
+            elif s[0] == 'm':
+                adj = int(s[1:])
+                s = str(int(v1 / 2) + adj)
+            else:
+                s = int(s)
+                if s < 0:
+                    s = v1 + s
+            e = v[1].strip()
+            if e == '':
+                e = v1
+            elif e[0] == 'm':
+                adj = int(e[1:])
+                e = str(int(v1 / 2) + adj)
+            else:
+                e = str(int(s))
+            d[parm_name] = "%s:%s" % (s, e)
+            return
+        if parm_type == 'p':
+            # this is a point (x,y)
+            v = raw_value.split(',')
+            x = int(v[0].strip())
+            y = int(v[1].strip())
+            d[parm_name] = "(%d,%d)" % (x, y)
+            return
+        if parm_type == 's':
+            # this is a string
+            v = raw_value.strip()
+            if '"' in v:
+                v = ''
+            if "'" in v:
+                v = ''
+            d[parm_name] = v
+            return
+
+    def Update(self):
+        flags = self.cv_specs['Flags']
+        code = self.cv_specs['Code']
+        exec_g = {}
+        exec_g['__builtins__'] = __builtins__
+        exec_g['cv2'] = cv2
+        exec_g['np'] = np
+        exec_g['OpticChiasm'] = OpticChiasm
+        exec_g['xstep'] = self
+        if 'inprev' in flags:
+            if self.ix > 0:
+                im = self.steps[self.ix - 1].im
+            else:
+                im = None
+        elif 'inex' in flags:
+            im = self.opencv
+        else:
+            im = None
+        if im is None:
+            exec_g['im'] = None
+            exec_g['h'] = 0
+            exec_g['w'] = 0
+            exec_g['c'] = 0
+        else:
+            exec_g['im'] = im
+            exec_g['h'] = im.shape[0]
+            exec_g['w'] = im.shape[1]
+            if len(im.shape) > 2:
+                exec_g['c'] = im.shape[2]
+            else:
+                exec_g['c'] = 1
+        exec_g['contours'] = None
+        if ('incont' in flags) and (self.ix > 0):
+            exec_g['contours'] = self.steps[self.ix - 1].contours
+            print("GET CONTOURS")
+        p = {}
+        for this_parm in self.parms_specs:
+            self.GetParm(p, this_parm, exec_g)
+        trace = None
+        if code is not None:
+            if 'outim' in flags:
+                e = 'xstep.im = '
+            elif 'outcont' in flags:
+                e = '(imgxx, xstep.contours, hierarchy) = '
+            elif 'outlines' in flags:
+                e = 'xstep.lines = '
+            else:
+                e = ''
+            e += self.cv_specs['Code'].format(**p)
+            self.im = None
+            self.contours = None
+            self.lines = None
+            print("EXEC", e)
+            try:
+                exec(e, exec_g)
+            except:
+                trace = traceback.format_exc()
+        if 'outcont' in flags:
+            print("SAVE CONTOURS")
+            self.im = ProcessStep.annotation_base.im.copy()
+            cv2.drawContours(self.im, self.contours, -1, (0, 0, 255), 1)
+        if 'outlines' in flags:
+            print("CONTOURS")
+            self.im = ProcessStep.annotation_base.im.copy()
+            if self.lines is not None:
+                for x in range(0, len(self.lines)):
+                    for x1,y1,x2,y2 in self.lines[x]:
+                        cv2.line(self.im,(x1,y1),(x2,y2),(0,255,0),2)
+        if trace is None:
+            self.image.UpdateImage(opencv=self.im)
+        else:
+            self.image.UpdateImage(text=trace)
+        if 'isbase' in flags:
             ProcessStep.annotation_base = self
-            return
-        if self.filter == 'Blur':
-            if spec1 < 1:
-                spec1 = 1
-            self.image.UpdateImage(opencv=cv2.blur(im, (spec1, spec1)))
-            return
-        if self.filter == 'BW':
-            self.image.UpdateImage(opencv=cv2.cvtColor(im, cv2.COLOR_BGR2GRAY))
-            return
-        if self.filter == 'Canny':
-            self.image.UpdateImage(opencv=OpticChiasm.auto_canny(im, spec1f))
-            return
-        if self.filter == 'Contours':
-            (imgxx, opencv_contours, hierarchy) = cv2.findContours(im, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            im2 = ProcessStep.annotation_base.image.opencv_im.copy()
-            cv2.drawContours(im2, opencv_contours, -1, (0, 0, 255), 1)
-            self.image.UpdateImage(opencv=im2)
-            return
-        if self.filter == 'Crayola':
+        return
+        if self.cv_filter == 'Crayola':
             self.image.UpdateImage(opencv=OpticChiasm.CrayolaFilter2(im))
             return
-        if self.filter == "Map":
+        if self.cv_filter == "Map":
             self.image.UpdateImage(opencv=cv2.warpPerspective(im, BOT_1_H, (w, h)))
             return
-        if self.filter == 'FL':
+        if self.cv_filter == 'FL':
             self.image.UpdateImage(opencv=self.app.image.FindLines(image=im))
             return
         # This should be filter "None"
-        self.image.UpdateImage(opencv=im.copy())
+        if im is None:
+            self.image.UpdateImage()
+        else:
+            self.image.UpdateImage(opencv=im.copy())
         return
 
             
         
 class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=['helmsman/pic_ready'], Blocking=True, BlockingTimeoutSecs=0.1)
+        super().__init__(Subscriptions=['cameraman/pic_ready'], Blocking=True, BlockingTimeoutSecs=0.1)
         self.tk_is_initialized = False
         self.lastfn = ""
         self.Connect()			# This starts the mqtt client in another thread
@@ -404,19 +578,22 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=-1, col=-3)
 
         ProcessStep.app = self
-        ProcessStep('BaseImage', opencvfn='python/samples/opencv_4_s.jpg')
-        ProcessStep('Crop', Parms=[-50, -100])
+        ProcessStep('FileImage', opencvfn='python/samples/opencv_4_s.jpg')
+        ProcessStep('ColorBalance')
+        ProcessStep('Crop')
         ProcessStep('BW')
-        ProcessStep('Blur', Parms=[3])
-        ProcessStep('Canny', Parms=[0.33])
+        ProcessStep('Blur')
+        ProcessStep('CannyAuto')
         ProcessStep('Contours')
+        #ProcessStep('HoughLinesP')
         
         # self.f1_run_name_entry.focus()
 
     def ChooseImageFile(self):
         self.camera_snap = False
         fn = self.statusFrame.DoFileNameDialog()
-        ProcessStep.steps[0].parms['opencvfn'] = fn
+        ProcessStep.steps[0].filter = 'FileImage'
+        ProcessStep.steps[0].parm_values['opencvfn'] = fn
         ProcessStep.steps[0].UpdateAll()
 
     def CaptureImageFile(self):
@@ -430,18 +607,36 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             settings['shutter_speed'] = int(self.camera_shutter_speed.CurrentValue())
         except TypeError:
             pass
+        settings['mode'] = 's'
+        settings['publish'] = 'm'
+        settings['format'] = 'b'
         settings_j = json.dumps(settings)
         print("SNAP", settings_j)
-        self.mqttc.publish('helmsman/take_pic', settings_j)
+        self.mqttc.publish('camerman/take_pic', settings_j)
 
-    def rmsg_helmsman_pic_ready(self, msg):
+    def rmsg_cameraman_pic_ready(self, msg):
         if not self.tk_is_initialized:
             return
         if not self.camera_snap:
             return
-        fn = os.path.join(bot_path, msg)
-        print("PIC", msg, fn)
-        ProcessStep.steps[0].parms['opencvfn'] = fn
+        payload = json.loads(msg)
+        fn = payload['filename']
+        buflen = int(payload['buflen'])
+        #im = base64.b64decode(payload['imageBGR64'])
+        #im = payload['imageBGR64']
+        buffer = payload['imageBGRpk']
+        bgr = pickle.loads(buffer)
+        opencv = bgr[...,::-1]
+        print("IMAGE", fn, buflen, len(buffer), opencv.shape)
+        #fn = os.path.join(bot_path, msg)
+        #print("PIC", msg, fn)
+        #ProcessStep.steps[0].parms['opencvfn'] = fn
+        #opencv =  np.fromstring(im, dtype=np.uint8)
+        cv2.imwrite('bgr.jpeg', opencv)
+        print("IMWRITE")
+        ProcessStep.steps[0].filter = 'CapturedImage'
+        ProcessStep.steps[0].colorspace = 'BGR'
+        ProcessStep.steps[0].opencv = opencv
         ProcessStep.steps[0].UpdateAll()
 
     def mainloop(self):
