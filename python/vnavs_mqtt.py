@@ -19,67 +19,23 @@ else:
 config_file_path = os.path.expanduser("~/vnavs.ini")
 handler_method_prefix = 'rmsg_'
 
-
-class collector(object):
-    def __init__(self):
-        self.my_ip = "192.168.8.11"
-        self.my_socket = 3050
-        self.s = socket.socket()
-        self.s.bind((my_ip, my_socket))
-        self.s.listen(10)
-
-    def receiver(self):
-        image_ct = 0
-        timer_ct = 0
-        timer_start = time.clock()
-        while True:
-            sc, address = s.accept()
-
-            #print image_ct,  address
-            fn = 'temp/Q%d.jpg' % image_ct
-            f = open(fn,'wb') #open in binary
-            image_ct += 1
-            image_sz = 0
-            json_str = ''
-            json_rdy = False
-            socket_data = sc.recv(1024)
-            while (socket_data):
-                if json_rdy:
-                    # we are past the json packet, write the image file
-                    img_ix = 0
-                else:
-                    # collect the json packet
-                    ix = socket_data.find(chr(26))
-                    if ix >= 0:
-                        # this is the end of the json packet
-                        json_str += socket_data[:ix]
-                        img_ix = ix + 1
-                        json_rdy = True
-                    else:
-                        # this is an intermediate part of the json packet
-                        json_str += socket_data
-                if json_rdy:
-                    image_sz += len(socket_data) - img_ix
-                    f.write(socket_data[img_ix:])
-                socket_data = sc.recv(1024)
-            f.close()
-            sc.close()
-            print(image_sz, fn, json_str)
-            timer_ct += 1
-            if timer_ct >= 10:
-                timer_stop = time.clock()
-                print("Received %d in %f seconds" % (timer_ct, timer_stop - timer_start))
-                timer_ct = 0
-                timer_start = timer_stop
-        s.close()
-
-
+#
+# Streamer() is the socket_xfer writer function which runs in its own process.
+# It empties the FIFO system queue as quickly as it can and converts that to a
+# LIFO queue so the receiver has the most recent image for navigation. Older
+# images are sent if possible for archiving. The buffer size is limited due to
+# memory contraints and excess images are discarded.
+#
+# This process assumes that we have a network that is faster than storage (SDCARD).
+# We therefore manage memory to avoid hitting the swap disk.
+# Getting 
+#
 def Streamer(q, q_len, host_ip, host_socket):
     lifo = []
     while True:
         # This process runs forever
         while True:
-            # After sending each file, quickly read the stream and turn it into a LIFO
+            # After sending each file, quickly empty the system queue and turn it into a LIFO
             try:
                 stream = q.get_nowait()
                 print("LIFO", len(lifo))
@@ -99,10 +55,20 @@ def Streamer(q, q_len, host_ip, host_socket):
             s.connect((host_ip, host_socket))
             ix = 0
             while ix <= len(stream):
+                # potentially check queue here. we want to keep the queue empty and
+                # discard from the LIFO so we are always sending the most recent
+                # images. We don't want socket_xfer.write() to discard. Need more
+                # more stats to see if this is an issue.
                 s.send(stream[ix:ix+1024])
                 ix += 1024
             s.close()
 
+#
+# socket_xfer encapsulates a multi-processing point-to-point file transfer process.
+# It was developed to transfer files between an RPI and a faster host for VNAVS.
+# The client application just writes as if this were a reliable, single-threaded
+# application. The ugly detals are completely hidden.
+#
 class socket_xfer(object):
     def __init__(self):
         self.server_ip = "192.168.8.11"
@@ -135,15 +101,6 @@ class socket_xfer(object):
             self.timer_ct = 0
             self.timer_skip_ct = 0
             self.timer_start = timer_stop
-        #s.connect((self.server_ip, self.server_socket))
-        ix = 0
-        #im_size = len(stream)
-        #while ix < im_size:
-        #    ix_end = ix + 1024
-        #    if ix_end > im_size:
-        #        ex_end = im_size
-        #    s.send(stream[ix:ix_end])
-        #    ix += 1024
 
 class mqtt_node(object):
     def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, Verbose=True):
