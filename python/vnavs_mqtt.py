@@ -19,6 +19,8 @@ else:
 config_file_path = os.path.expanduser("~/vnavs.ini")
 handler_method_prefix = 'rmsg_'
 
+stop_process = False
+
 #
 # Streamer() is the socket_xfer writer function which runs in its own process.
 # It empties the FIFO system queue as quickly as it can and converts that to a
@@ -52,14 +54,27 @@ def Streamer(q, q_len, host_ip, host_socket):
             print("SEND", len(lifo), len(stream))
             q_len.value = len(lifo)
             s = socket.socket()
-            s.connect((host_ip, host_socket))
+            try:
+                s.connect((host_ip, host_socket))
+            except socket.error as e:
+                # most likely errno=111, strerror="Connection refused"
+                print(e.errno, e.strerror)
+                return
+            except (KeyboardInterrupt, SystemExit):
+                print("Terminated @ connect() via KeyboardInterrupt")
+                return
             ix = 0
             while ix <= len(stream):
                 # potentially check queue here. we want to keep the queue empty and
                 # discard from the LIFO so we are always sending the most recent
                 # images. We don't want socket_xfer.write() to discard. Need more
                 # more stats to see if this is an issue.
-                s.send(stream[ix:ix+1024])
+                try:
+                    s.send(stream[ix:ix+1024])
+                except (KeyboardInterrupt, SystemExit):
+                    print("Terminated @ send() via KeyboardInterrupt")
+                    #s.close()
+                    return
                 ix += 1024
             s.close()
 
@@ -78,16 +93,24 @@ class socket_xfer(object):
         self.queue = multiprocessing.Queue()
         self.q_len = multiprocessing.Value('i', 0)
         self.streamer = multiprocessing.Process(target=Streamer, args=(self.queue, self.q_len, self.server_ip, self.server_socket))
+        self.streamer.daemon = True		# causes child process to terminate with its parent
         self.streamer.start()
         self.timer_ct = 0
         self.timer_skip_ct = 0
         self.timer_start = time.clock()
+        self.f = open("temp.text", "w")
 
     def stop(self):
         self.streamer.join()
 
     def write(self, stream):
         self.capture_ct += 1
+        self.f.write(u"%d\n" % (self.capture_ct))
+        self.f.flush()
+        if not self.streamer.is_alive():
+            self.timer_skip_ct += 1
+            print("NO Q -- DEAD")
+            return
         if self.q_len.value > 3:
             self.timer_skip_ct += 1
             print("NO Q")
@@ -103,7 +126,7 @@ class socket_xfer(object):
             self.timer_start = timer_stop
 
 class mqtt_node(object):
-    def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, Verbose=True):
+    def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, Streamer=False, Verbose=True):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.blocking_mode = Blocking
@@ -117,6 +140,9 @@ class mqtt_node(object):
         self.debug = 0
         self.mqttc = None
         self.verbose = Verbose
+        self.streamer = None
+        if Streamer:
+            self.streamer = socket_xfer()
         if self.blocking_mode:
             print("Blocking Mode")
         else:
@@ -147,6 +173,32 @@ class mqtt_node(object):
             pass
         else:
             self.mqttc.loop_stop(force=False)
+
+    def Loop(self):
+        try:
+            while True:
+                self.DoLoop()
+                if self.CheckExceptions():
+                    sys.exit(0)
+        except KeyboardInterrupt:
+            sys.exit(0)
+
+    #
+    # Long running processes should call this periodically.
+    # It was a particular problem when when capturing a long
+    # long sequence with the RPI camera and hte sender socket died.
+    #
+    def CheckExceptions(self):
+        if stop_process:
+            return True
+        if self.streamer is not None:
+            if not self.streamer.streamer.is_alive():
+                # if the streamer has the focus when it dies or gets killed by ctrl-c,
+                # the main program continues to run with no console. The shell seems
+                # to be dead. The process has to be killed from another shell.
+                # this avoids that, killing the parent if the child dies.
+                return True
+        return False
 
     def MessageStr(self, msg):
         max = 25

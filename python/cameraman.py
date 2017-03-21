@@ -22,9 +22,22 @@ import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
 
+import signal
+print("CONFIGURING SIGNAL")
+stop_process = False
+def signal_handler(signal, frame):
+        global stop_process
+        print('You pressed Ctrl+C!')
+        stop_process = True
+        vnavs_mqtt.stop_process = True
+signal.signal(signal.SIGINT, signal_handler)
+
+#
+# Streamer() is the socket_xfer writer function which runs in its own process.
+
 class cameraman(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=['camerman/take_pic'], Blocking=False, Verbose=Verbose)
+        super().__init__(Subscriptions=['camerman/orders'], Blocking=False, Streamer=True, Verbose=Verbose)
         self.mode = 'p'			# s=single, r=run, p=paused
         self.burst_fps = 0		# capture speed of last burst
         self.camera_last_fn = None
@@ -33,13 +46,12 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.camera = picamera.PiCamera()
         self.configuration_changed = True
         self.run = ''
-        self.publish = 's'		# f=file system, m=mqtt, s=socket
+        self.publish = 's'		# f=file system, m=mqtt, s=streamer
         self.image_ct = 0		# ct of images captured since __init__
         time.sleep(2)			# camera setling time, needed?
         self.timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-        self.socket = vnavs_mqtt.socket_xfer()
 
-    def rmsg_camerman_take_pic(self, msg):
+    def rmsg_camerman_orders(self, msg):
         # should we verify mode and report if a problem?
         try:
             parms = json.loads(msg)
@@ -75,21 +87,22 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 configuration_changed = True
                 self.camera_shutter_speed = shutter_speed
 
-    def Loop(self):
-        while True:
-            #print("LOOP")
-            if self.configuration_changed:
-                # there is a small posibility of a race condition if a new configuration change
-                # arrives between this if and setting the flag to False. This should be
-                # infrequent enough and quick enough to recover that its not worth managing
-                # a propper queue or semaphore.
-                self.configuration_changed = False
-                self.camera_iso = self.camera_iso
-                self.camera_shutter_speed = self.camera_shutter_speed		# microseconds, 1000 = 1ms
-                self.camera.vflip = True
-                self.camera.hflip = True
-            # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
-            self.ImageBurst()
+    def DoLoop(self):
+        # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
+        #
+        #print("LOOP")
+        if self.configuration_changed:
+            # there is a small posibility of a race condition if a new configuration change
+            # arrives between this if and setting the flag to False. This should be
+            # infrequent enough and quick enough to recover that its not worth managing
+            # a propper queue or semaphore.
+            self.configuration_changed = False
+            self.camera_iso = self.camera_iso
+            self.camera_shutter_speed = self.camera_shutter_speed		# microseconds, 1000 = 1ms
+            self.camera.vflip = True
+            self.camera.hflip = True
+        # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
+        self.ImageBurst()
 
     def ImageBurst(self):
         # establish paramters for this burst. Since MQTT is running in a separate thread
@@ -131,7 +144,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 payload = {}
                 payload['filename'] = im_fn
                 payload['buflen'] = len(buffer)
-                #payload['imageBGR64'] = base64.b64encode(buffer)
                 payload['imageBGRpk'] = buffer
                 (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
                 if res != mqtt.MQTT_ERR_SUCCESS:
@@ -141,12 +153,11 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 payload = {}
                 payload['filename'] = im_fn
                 payload['buflen'] = len(buffer)
-                self.socket.write(json.dumps(payload) + chr(26) + buffer)
-                #self.socket.write(im_dest)
+                self.streamer.write(json.dumps(payload) + chr(26) + buffer)
             if burst_publish in 'ms':
                 # prepare for next image
                 im_dest.truncate()
-                #im_dest.seek(0)   ?? needed for io.Bytes?? maybe not after truncate -- may not be supported by PiRGBArray
+                im_dest.seek(0)   # ?? needed for io.Bytes?? Required for PiRGBArray for subsequent images
             if self.verbose:
                 print("PIC", im_fn)
             if burst_mode == 's':
@@ -155,6 +166,8 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 break
             if  self.configuration_changed:
                 # end burst so configuration can be changed
+                break
+            if self.CheckExceptions():
                 break
         if burst_ct >= 10:
             burst_time = time.clock() - burst_start_time

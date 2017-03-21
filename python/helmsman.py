@@ -168,6 +168,7 @@ class vehicle(object):
         # vehicle. Maybe it should be in its own thread.
         if speed_goal != self.mot_speed_goal:
             # the goal has changed, need to reset ramping variables
+            print("New Speed Goal", speed_goal)
             self.NewGoal(speed_goal)
             self.mot_this_pulse, self.mot_this_tick = self.ConvertSpeedToPulseParameter(self.mot_speed_ramp)
         else:
@@ -194,7 +195,7 @@ class vehicle(object):
                 else:
                     self.actualPulse = self.mot_offset + self.mot_this_pulse - 1
         else:
-            # we want to coast on this tick
+            # we want to "coast" on this tick -- maintain speed
             self.actualPulse = self.mot_offset
         self.motor.write(self.actualPulse)
         if (self.mot_last_pulse != self.mot_this_pulse) or (self.mot_last_tick != self.mot_this_tick):
