@@ -8,8 +8,7 @@ var proc;
 
 var mqtt = require('mqtt')
 var mqtt_topic_take_pic = 'helmsman/take_pic'
-var mqtt_topic_set_speed = 'helmsman/set_speed'
-var mqtt_topic_steer = 'helmsman/steer'
+var mqtt_topic_drive = 'helmsman/orders'
 
 var config_fn = expandHomeDir('~/vnavs.ini')
 var config = ini.parse(fs.readFileSync(config_fn, 'utf-8'))
@@ -45,9 +44,9 @@ var socket_event_move_forward = 'moveForward'		// from browser, move forward
 var socket_event_move_slow = 'moveSlow'			// from browser, move slow
 var socket_event_move_reverse = 'moveReverse'		// from browser, move backward
 var socket_event_move_stop = 'moveStop'			// from browser, move stop
-var socket_event_steer_straight = 'steerStraight'
-var socket_event_steer_right = 'steerRight'
-var socket_event_steer_left = 'steerLeft'
+var socket_event_drive_straight = 'driveStraight'
+var socket_event_drive_right = 'driveRight'
+var socket_event_drive_left = 'driveLeft'
 
 var app = express();
 var http = require('http').Server(app);
@@ -78,30 +77,30 @@ io.on('connection', function(socket) {
   });
   socket.on(socket_event_move_forward, function() {
     console.log("forward");
-    mqttc.publish(mqtt_topic_set_speed, 'f')
+    mqttc.publish(mqtt_topic_drive, '{"speed": "f"}')
   });
   socket.on(socket_event_move_slow, function() {
     console.log("forward");
-    mqttc.publish(mqtt_topic_set_speed, 'd')
+    mqttc.publish(mqtt_topic_drive, '{"speed": "d"}')
   });
   socket.on(socket_event_move_reverse, function() {
     console.log("reverse");
-    mqttc.publish(mqtt_topic_set_speed, 'r')
+    mqttc.publish(mqtt_topic_drive, '{"speed": "r"}')
   });
   socket.on(socket_event_move_stop, function() {
-    mqttc.publish(mqtt_topic_set_speed, 's')
+    mqttc.publish(mqtt_topic_drive, '{"speed": "s"}')
   });
   socket.on(socket_event_take_pic, function() {
     mqttc.publish(mqtt_topic_take_pic, '{}')
   });
-  socket.on(socket_event_steer_straight, function() {
-    mqttc.publish(mqtt_topic_steer, 's')
+  socket.on(socket_event_drive_straight, function() {
+    mqttc.publish(mqtt_topic_drive, '{"drive": "s"}')
   });
-  socket.on(socket_event_steer_left, function() {
-    mqttc.publish(mqtt_topic_steer, '+l')
+  socket.on(socket_event_drive_left, function() {
+    mqttc.publish(mqtt_topic_drive, '{"drive": "+l"}')
   });
-  socket.on(socket_event_steer_right, function() {
-    mqttc.publish(mqtt_topic_steer, '+r')
+  socket.on(socket_event_drive_right, function() {
+    mqttc.publish(mqtt_topic_drive, '{"drive": "+r"}')
   });
 });
 

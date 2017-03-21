@@ -1,8 +1,9 @@
 from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
-from tkinter import *		# python 3
+from Tkinter import *		# python 2.7
 from tkinter import ttk	# python 3
+from tkinter import Canvas
 import tkFileDialog
 #from Tkinter import *		# python 2.7
 #import ttk			# python 2.7
@@ -166,37 +167,6 @@ class TkWidgetDef(object):
             ix = self.tkw.curselection()
             return self.tkw.get(ix)
          
-    def UpdateImage(self, fn=None, opencv=None, opencvfn=None, text=None):
-        img_pil = None
-        img_tk = None
-        if text is not None:
-            # This is intended to replace an image with an error message.
-            # should also do something about thumbnail but ignoring for now.
-            self.tkw.configure(image=None, text=text)
-            return
-        if fn is not None:
-            path = os.path.join(self.defaultDir, fn)
-            try:
-                img_pil = Image.open(path)
-            except IOError:
-                img_pil = None
-            self.opencv_im = None
-        elif opencv is not None:
-            img_pil = Image.fromarray(opencv)
-            self.opencv_im = opencv
-        elif opencvfn is not None:
-            opencv = cv2.imread(opencvfn)
-            self.opencv_im = opencv
-            img_pil = Image.fromarray(opencv)
-        #
-        if img_pil is not None:
-            img_tk = ImageTk.PhotoImage(img_pil)
-        if img_tk is not None:
-            self.tkw.configure(image=img_tk)
-            self.tkd = img_tk
-        if self.thumbnail:
-            self.thumbnail.UpdateImage(opencv=self.MakeThumbnail(self.opencv_im, self.thumbnailwidth))
-
     def MakeThumbnail(self, im, width):
         if im is None:
             return None
@@ -229,19 +199,55 @@ class TkWidgetDef(object):
             col = self.col_ct + 1
         return (row, col)
 
-    def RememberPosition(self, entry, row, col, col_ct):
-        entry.row = row
-        entry.col = col
-        entry.col_ct = col_ct
-        entry.right_col = col + col_ct - 1
+    def RememberPosition(self, new_TkWidgetDef, row, col, colspan=1, rowspan=1):
+        new_TkWidgetDef.row = row
+        new_TkWidgetDef.col = col
+        new_TkWidgetDef.col_ct = colspan
+        new_TkWidgetDef.row_ct = rowspan
+        new_TkWidgetDef.right_col = col + colspan - 1
         self.last_row = row
         self.last_col = col
         if row > self.row_ct:
             self.row_ct = row
-        if entry.right_col > self.col_ct:
-            self.col_ct = entry.right_col
+        if new_TkWidgetDef.right_col > self.col_ct:
+            self.col_ct = new_TkWidgetDef.right_col
 
-    def AddImage(self, fn=None, opencv=None, opencvfn=None, 
+    def AddCanvas(self, fn=None, opencv=None, opencvfn=None, 
+				thumbnailof=None, thumbnailwidth=100,
+				row=-2, col=-2, colspan=1, rowspan=1):
+        row, col = self.Position(row=row, col=col)
+        canvas = Canvas(self.tkw)
+        frame = TkWidgetDef('', canvas)
+
+        # The scrollbars are TK properties of the same frame as as the canvas.
+        # We save the widget definitions with the canvas.
+        frame.scrollableImage = None
+        frame.canvasWidth = 400
+        frame.canvasHeight = 200
+        frame.hbar=ttk.Scrollbar(self.tkw, orient=HORIZONTAL)
+        frame.hbar.grid(row=row+1, column=col, sticky=E+W)
+        frame.vbar=ttk.Scrollbar(self.tkw, orient=VERTICAL)
+        frame.vbar.grid(row=row, column=col+1, sticky=N+S)
+        frame.tkw.config(width=frame.canvasWidth, height=frame.canvasHeight)
+        frame.tkw.config(xscrollcommand=frame.hbar.set, yscrollcommand=frame.vbar.set)
+        frame.hbar.config(command=frame.tkw.xview)
+        frame.vbar.config(command=frame.tkw.yview)
+
+        if thumbnailof is None:
+            frame.UpdateImage(fn=fn, opencv=opencv, opencvfn=opencvfn)
+        else:
+            # after this, the thumbnail will be automatically updated whenever the base image is updated
+            frame.UpdateImage(opencv=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
+            thumbnailof.thumbnail = frame
+            thumbnailof.thumbnailwidth = thumbnailwidth
+      
+        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=W)
+        # colspan and rowspan need to be expanded to allow for scrollbars ???
+        self.RememberPosition(frame, row, col, colspan=colspan+1, rowspan=rowspan+1)
+        self.children.append(frame)
+        return frame
+
+    def AddLabelImage(self, fn=None, opencv=None, opencvfn=None, 
 				thumbnailof=None, thumbnailwidth=100,
 				row=-2, col=-2, colspan=1):
         row, col = self.Position(row=row, col=col)
@@ -259,13 +265,57 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
+    def UpdateImage(self, fn=None, opencv=None, opencvfn=None):
+        # Replaces image in Canvas and Label widgets
+        img_pil = None
+        img_tk = None
+        if fn is not None:
+            path = os.path.join(self.defaultDir, fn)
+            try:
+                img_pil = Image.open(path)
+            except IOError:
+                img_pil = None
+            self.opencv_im = None
+        elif opencv is not None:
+            img_pil = Image.fromarray(opencv)
+            self.opencv_im = opencv
+        elif opencvfn is not None:
+            opencv = cv2.imread(opencvfn)
+            self.opencv_im = opencv
+            img_pil = Image.fromarray(opencv)
+        #
+        if img_pil is not None:
+            img_tk = ImageTk.PhotoImage(img_pil)
+        self.tkd = img_tk
+        if img_tk is not None:
+            if isinstance(self.tkw, ttk.Label):
+                self.tkw.configure(image=img_tk)
+            elif isinstance(self.tkw, Canvas):
+                if self.scrollableImage is None:
+                    self.scrollableImage = self.tkw.create_image(0, 0, image=img_tk, anchor='nw')
+                else:
+                    self.tkw.itemconfig(self.scrollableImage, image=img_tk)
+                width, height = img_pil.size
+                self.tkw.config(scrollregion=(0, 0, width, height))
+                pctWidth = self.canvasWidth / width
+                if pctWidth > 1.0:
+                    pctWidth = 1.0
+                self.hbar.set(0.0, pctWidth)
+                pctHeight = self.canvasHeight / height
+                if pctHeight > 1.0:
+                    pctHeight = 1.0
+                self.vbar.set(0.0, pctHeight)
+            else:
+                raise TypeError("Unsupported image widget: " + self.tkw.__class__.__name__)
+        if self.thumbnail:
+            self.thumbnail.UpdateImage(opencv=self.MakeThumbnail(self.opencv_im, self.thumbnailwidth))
+
     def AddLabelFrame(self, caption, row=-2, col=-2, colspan=1):
         row, col = self.Position(row=row, col=col)
         refname = caption.lower().replace(' ', '_')
         frame = TkWidgetDef(refname, ttk.Labelframe(self.tkw, text=caption))
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=W)
         self.RememberPosition(frame, row, col, colspan)
-        #frame.tkw.pack(expand="yes")
         self.children.append(frame)
         return frame
 
@@ -356,10 +406,12 @@ class ProcessStep(object):
     annotation_base = None
     def __init__(self, cv_filter, **kwargs):
         self.ix = len(self.steps)
+        self.im = None
         self.steps.append(self)
         self.cv_filter = ''			# this gets set by NewFilter()
         self.parm_values = kwargs
-        self.tab = self.app.notebook.AddTab("Step %d" % self.ix)
+        self.tabTitle = "Step %d" % (self.ix)
+        self.tab = self.app.notebook.AddTab(self.tabTitle)
         self.input_panel = self.tab.AddLabelFrame('Input')
         self.output_panel = self.tab.AddLabelFrame('Output')
         #
@@ -370,12 +422,16 @@ class ProcessStep(object):
         self.parmEntries.append(self.input_panel.AddEntryField('Parm3')) 
         self.parmEntries.append(self.input_panel.AddEntryField('Parm4'))
         #
-        self.image = self.output_panel.AddImage()
+        self.image = self.output_panel.AddCanvas()
         self.deposition = self.output_panel.AddLabel(col=2)
-        self.thumbnail = self.app.thumbnailFrame.AddImage(thumbnailof=self.image, row=0, col=-3)
+        self.thumbnail = self.app.thumbnailFrame.AddLabelImage(thumbnailof=self.image, row=0, col=-3)
+        self.thumbnail.tkw.bind("<Button-1>", self.SelectTab)
         self.opencv = None			# captured image
         self.colorspace = None
         self.NewFilter()
+
+    def SelectTab(self, event):
+        self.app.notebook.tkw.select(self.tab.tkw)
 
     def UpdateAll(self):
         for this_step in self.steps:
@@ -527,6 +583,9 @@ class ProcessStep(object):
         for this_parm in self.parms_specs:
             self.GetParm(p, this_parm, exec_g)
         trace = None
+        self.im = None
+        self.contours = None
+        self.lines = None
         if code is not None:
             if 'outim' in flags:
                 e = 'xstep.im = '
@@ -537,9 +596,6 @@ class ProcessStep(object):
             else:
                 e = ''
             e += self.cv_specs['Code'].format(**p)
-            self.im = None
-            self.contours = None
-            self.lines = None
             print("EXEC", e, exec_g['w'], exec_g['h'])
             try:
                 exec(e, exec_g)
@@ -553,10 +609,10 @@ class ProcessStep(object):
             print("CONTOURS")
             self.im = ProcessStep.annotation_base.im.copy()
             deposition = "Lines\n"
+            map_lines = []
+            h, w, c = self.im.shape
+            m = int(w/2)
             if self.lines is not None:
-                map_lines = []
-                h, w, c = self.im.shape
-                m = int(w/2)
                 for x in range(0, len(self.lines)):
                     for x1,y1,x2,y2 in self.lines[x]:
                         cv2.line(self.im,(x1,y1),(x2,y2),(0,255,0),2)
@@ -572,20 +628,33 @@ class ProcessStep(object):
                         p1dist = math.sqrt((mx1 ** 2) + (my1 ** 2))
                         p2dist = math.sqrt((mx2 ** 2) + (my2 ** 2))
                         mdist = min(p1dist, p2dist)
-                        map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2)))
+                        map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2)))
             deposition += "** Lines\n"
             map_lines.sort()
+            cum_slope = 0
+            ct_slope = 0
+            print("MAP", h, m, w)
+            for this in map_lines[:5]:
+                cv2.line(self.im,this[5],this[6],(0,0,255),1)
+                print(this)
+                ct_slope += 1
+                cum_slope += this[2]
+            if ct_slope > 0:
+                avg_slope = cum_slope / ct_slope
+            else:
+                avg_slope = "NO :ONES"
+            print("MAP", avg_slope)
             deposition += `map_lines`
             self.deposition.UpdateLabel(deposition)
-        if trace is None:
-            self.image.UpdateImage(opencv=self.im)
-        else:
-            self.image.UpdateImage(text=trace)
+        if trace is not None:
+            deposition = trace + "\n\n" + deposition
+            self.deposition.UpdateLabel(deposition)
+        self.image.UpdateImage(opencv=self.im)
         if 'isbase' in flags:
             ProcessStep.annotation_base = self
         return
         if self.cv_filter == 'Crayola':
-            self.image.UpdateImage(opencv=OpticChiasm.CrayolaFilter2(im))
+            self.image.UpdateUpdateImage(opencv=OpticChiasm.CrayolaFilter2(im))
             return
         if self.cv_filter == 'FL':
             self.image.UpdateImage(opencv=self.app.image.FindLines(image=im))
@@ -628,6 +697,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=-1, col=-3)
 
         ProcessStep.app = self
+        ProcessStep('None')
         ProcessStep('FileImage', opencvfn='python/samples/opencv_4_s.jpg')
         ProcessStep('ColorBalance')
         ProcessStep('Crop')
