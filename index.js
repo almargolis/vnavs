@@ -44,22 +44,32 @@ var socket_event_move_forward = 'moveForward'		// from browser, move forward
 var socket_event_move_slow = 'moveSlow'			// from browser, move slow
 var socket_event_move_reverse = 'moveReverse'		// from browser, move backward
 var socket_event_move_stop = 'moveStop'			// from browser, move stop
-var socket_event_drive_straight = 'driveStraight'
-var socket_event_drive_right = 'driveRight'
-var socket_event_drive_left = 'driveLeft'
+var socket_event_steer_straight = 'steerStraight'
+var socket_event_steer_right = 'steerRight'
+var socket_event_steer_left = 'steerLeft'
 
 var app = express();
 var http = require('http').Server(app);
-var io = require('socket.io')(http);
-app.use('/', express.static(path.join(__dirname, static_subdir)));
+app.set('view engine', 'pug')
+var bodyParser = require('body-parser')
+var urlencodedParser = bodyParser.urlencoded({ extended: false })
+// app.use('/', express.static(path.join(__dirname, static_subdir)));
 app.use(image_subdir, express.static(path.join(__dirname, image_subdir)));
+var formTimeout = 3
 
 app.get('/', function(req, res) {
-  res.sendFile(__dirname + static_subdir + '/index.html');
+  // res.sendFile(__dirname + static_subdir + '/index.html');
+  res.render(__dirname + static_subdir + '/index.pug', {timeout: formTimeout });
+});
+app.post('/parms', urlencodedParser, function (req, res) {
+  if (!req.body) return res.sendStatus(400)
+  formTimeout = req.body.timeout
+  res.render(__dirname + static_subdir + '/index.pug', {timeout: formTimeout });
 });
 
 var sockets = {};
 
+var io = require('socket.io')(http);
 io.on('connection', function(socket) {
   sockets[socket.id] = socket;
   console.log("Total clients connected : ", Object.keys(sockets).length);
@@ -88,19 +98,23 @@ io.on('connection', function(socket) {
     mqttc.publish(mqtt_topic_drive, '{"speed": "r"}')
   });
   socket.on(socket_event_move_stop, function() {
+    console.log("stop");
     mqttc.publish(mqtt_topic_drive, '{"speed": "s"}')
   });
   socket.on(socket_event_take_pic, function() {
     mqttc.publish(mqtt_topic_take_pic, '{}')
   });
-  socket.on(socket_event_drive_straight, function() {
-    mqttc.publish(mqtt_topic_drive, '{"drive": "s"}')
+  socket.on(socket_event_steer_straight, function() {
+    console.log("straight");
+    mqttc.publish(mqtt_topic_drive, '{"heading": "s"}')
   });
-  socket.on(socket_event_drive_left, function() {
-    mqttc.publish(mqtt_topic_drive, '{"drive": "+l"}')
+  socket.on(socket_event_steer_left, function() {
+    console.log("left");
+    mqttc.publish(mqtt_topic_drive, '{"heading": "+l"}')
   });
-  socket.on(socket_event_drive_right, function() {
-    mqttc.publish(mqtt_topic_drive, '{"drive": "+r"}')
+  socket.on(socket_event_steer_right, function() {
+    console.log("right");
+    mqttc.publish(mqtt_topic_drive, '{"heading": "+r"}')
   });
 });
 

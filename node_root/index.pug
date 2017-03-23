@@ -7,20 +7,18 @@
 <title>VNAVS Stream</title>
 <!-- Bootstrap CSS -->
 <link href="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css" rel="stylesheet">
-<style type="text/css">
-#stream {
-height: 99%;
-margin: 0px auto;
-display: block;
-margin-top: 20px;
-}
-</style>
+//
+  <style type="text/css">
+  #stream {
+  height: 99%;
+  margin: 0px auto;
+  display: block;
+  margin-top: 20px;
+  }
+  </style>
 <!-- jQuery -->
-<script src="http://code.jquery.com/jquery.js"></script>
-<!-- Bootstrap JavaScript -->
-<script src="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
-<script src="/socket.io/socket.io.js"></script>
-<script>
+script(src="http://code.jquery.com/jquery.min.js")
+script(type="text/javascript").
   var socket = io();
   socket.on('imageReady', function(url) {
     $('#stream').attr('src', url);
@@ -29,22 +27,19 @@ margin-top: 20px;
     socket.emit('startStream');
     $('.start').hide();
   }
-</script>
-<script //src="jquery.min.js"></script>
-</head>
-<body class="container">
-  <h1 class="text-center">VNAVS Test Robot<small>Powered by PI</small></h1>
-  <hr>
-  <form <form action="/parms" method="post">
-    Timeout: <input type="text" name="timeout">
-    <input type="submit">
-  </form>
-  <div> <! controls area - image underneath ->
-    <div style="display: inline-block;"> <! left column of controls -- speed slider ->
-      <input type="range" id="speedctl" min="0" max="100" step="1" value="50"
-           style="-webkit-appearance: slider-vertical; width: 40px; height: 200px;" />
-    </div>
-    <div style="display: inline-block;"> <! main area of controls ->
+body
+  h1 Visual NAVigation System (VNAVS) Manual Controller 
+  hr
+  form(action="/parms" method="post")
+    label(for='timeout') Timeout:
+    input(type="text", name="date", value=timeout)
+    input type="submit")
+  div //  controls area - image underneath
+    div(style="display: inline-block;") // left column of controls -- speed slider
+      input(type="range" id="speedctl" min="0" max="100" step="1" value="50"
+           style="-webkit-appearance: slider-vertical; width: 40px; height: 200px;")
+    div
+    div(style="display: inline-block;" // main area of controls
       <button type="button" id="" class="btn btn-info start" onclick="startStream()">Start Camera</button>
       <button type="button" id="" class="btn btn-info" onclick="socket.emit('takePic');">Take Pic</button>
       <hr>
@@ -95,5 +90,3 @@ margin-top: 20px;
   <div class="row">
     <img src="" id="stream">
   </div>
-</body>
-</html>

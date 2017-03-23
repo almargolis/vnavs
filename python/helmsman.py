@@ -176,7 +176,9 @@ class vehicle(object):
             if self.mot_ramp != 0:
                 self.RampSpeeed()
                 self.mot_this_pulse, self.mot_this_tick = self.ConvertSpeedToPulseParameter(self.mot_speed_ramp)
-
+        if self.mot_speed_goal == 0:
+            self.motor.write(self.mot_offset)	# Stop motor if on
+            return
         # we know our pulse requirement, tell the hardware
         # self.mot_this_pulse and self.mot_this_tick is how fast we are driving now.
         # self.mot_goal_pulse and self.mot_goal_tick are the speed we are ramping towards.
@@ -237,7 +239,7 @@ class helmsman(vnavs_mqtt.mqtt_node):
             print("TIMER", orders['timer'])
             timer = int(orders['timer'])
         else:
-            timer = 1
+            timer = 3
         #self.deadman_clock = time.clock() + (timer * CLOCK_INCREMENT_PER_SECOND)
         self.deadman_clock = time.clock() + (timer / 6)
         print("ORDERS C:", time.clock(), "D:", self.deadman_clock, orders)
