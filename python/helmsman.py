@@ -20,11 +20,6 @@ import paho.mqtt.client as mqtt
 # system dependent. This normalizes time.clock() for this execution.
 # pi: 3.58e-5  macbook: 6.3e-6
 #
-c_start = time.clock()
-time.sleep(10)
-c_end = time.clock()
-CLOCK_INCREMENT_PER_SECOND = (c_end - c_start) / 10
-print("time.clock() increment per second:", CLOCK_INCREMENT_PER_SECOND)
 
 TICK_PATTERNS = [
 	[],				# 0 tick bits
@@ -67,16 +62,21 @@ class vehicle(object):
         self.mot_last_pulse = 0
         self.mot_last_tick = 0
         self.steering = self.board.get_pin('d:10:s')
-        self.st_straight = 90
         # speed in mm/second - depends on vehicle and battery condition
         # For now speed is just a number.
         # Zero is stopped, 1 is crawl, 2... incrementally faster (negative is reverse)
         self.mot_speed_goal = 0			# we may be ramping toward this
         self.mot_speed_ramp = 0			# current speed, on way to goal
         self.speed_max = 13411			# 30mph / 13.4112 meters/second
+        self.steering_offset = 90
         self.steering_increment	= 10		# degrees of casual steering adjustment
-        self.steering_max = 90			# 60 degrees left or right
-        self.steering_last = 0
+        self.steering_max = 60			# 60 degrees left or right
+        self.steering_last = 0			# last actual steering position
+        self.steering_base = 0			# general goal, 0 for navigation, X for circles
+        self.steering_plan = None		# steering variations from base
+        self.steering_tick = 0			# time increment / step in plan
+        self.steering_tock = 0			# counter toward tick_width
+        self.steering_tick_width = 20 		# number off loops too maintain each plan step
         self.Estop()
 
     def ConvertSpeedToPulseParameter(self, speed):
@@ -98,7 +98,7 @@ class vehicle(object):
         print("Convert", pulse, tick)
         return (pulse, tick)
 
-    def NewGoal(self, speed_goal):
+    def NewSpeedGoal(self, speed_goal):
         self.mot_speed_goal = int(speed_goal)
         if self.mot_speed_goal == 0:
             # We want to stop.
@@ -169,7 +169,7 @@ class vehicle(object):
         if speed_goal != self.mot_speed_goal:
             # the goal has changed, need to reset ramping variables
             print("New Speed Goal", speed_goal)
-            self.NewGoal(speed_goal)
+            self.NewSpeedGoal(speed_goal)
             self.mot_this_pulse, self.mot_this_tick = self.ConvertSpeedToPulseParameter(self.mot_speed_ramp)
         else:
             # No change in goal, keep ramping toward that
@@ -208,10 +208,50 @@ class vehicle(object):
         self.mot_last_pulse = self.mot_this_pulse
         self.mot_last_tick = self.mot_this_tick
 
-    def Steering(self, direction):
+    def NewSteeringGoal(self, steering_goal):
+        if self.steering_plan is not None:
+            print("OLD PLAN", self.steering_plan)
+            # Don't start a new relative motion till previous complete
+            return
+        self.steering_tick = 0			# time increment / step in plan
+        self.steering_tock = 0
+        goal_type = steering_goal[1]
+        goal_degree = int(steering_goal[2:]) * self.steering_increment
+        if goal_type == 'V':
+            # veer
+            self.steering_plan = [goal_degree, goal_degree, 0, 0, -goal_degree, -goal_degree]
+        else:
+            # change heading
+            self.steering_plan = [goal_degree, goal_degree]
+        print("PLAN", self.steering_plan)
+
+    def Steering(self, steering_goal=None):
+        if (steering_goal is None) or (not isinstance(steering_goal, basestring)) or (steering_goal == ''):
+            pass
+        elif steering_goal[0] == 'R':
+            self.NewSteeringGoal(steering_goal)
+        if self.steering_plan is not None:
+            plan_step = self.steering_plan[self.steering_tick]
+            direction = self.steering_base + plan_step
+            self.steering_tock += 1
+            if self.steering_tock >= self.steering_tick_width:
+                # its time to increment to the next step
+                self.steering_tick += 1
+                self.steering_tock = 0
+                if self.steering_tick >= len(self.steering_plan):
+                    # steering plan has been completed
+                    self.steering_plan = None
+        else:
+            direction = self.steering_base
+        if direction >= 0:
+            if direction > self.steering_max:
+                direction = self.steering_max
+        else:
+            if direction < (-self.steering_max):
+                direction = (-self.steering_max)
         if direction != self.steering_last:
             print("Steer:", direction)
-        self.steering.write(90+direction)
+        self.steering.write(self.steering_offset + direction)
         self.steering_last = direction
 
 class helmsman(vnavs_mqtt.mqtt_node):
@@ -240,28 +280,30 @@ class helmsman(vnavs_mqtt.mqtt_node):
             timer = int(orders['timer'])
         else:
             timer = 3
-        #self.deadman_clock = time.clock() + (timer * CLOCK_INCREMENT_PER_SECOND)
         self.deadman_clock = time.clock() + (timer / 6)
         print("ORDERS C:", time.clock(), "D:", self.deadman_clock, orders)
-        self.state = 'x'
+        self.state = 'c'
 
     def Loop(self):
         try:
             while True:
-                if time.clock() > self.deadman_clock:
+                if (self.state != 'c') and (time.clock() > self.deadman_clock):
+                    # continuous mode ignores the deadman clock
                     self.v.Estop()
                     new_state = 'i'
                 else:
                     # Speed and Steering goals are set asynchronously via MQTT messages
                     self.v.Motor(self.speed_goal)
                     self.v.Steering(self.steering_goal)
-                    new_state = 'r'
+                    self.steering_goal = None		# only send steering goal once
+                    new_state = 'c'
                 if new_state != self.state:
                     print("STATE", self.state, new_state, "C:", time.clock(), "D:", self.deadman_clock) 
                     self.state = new_state
                 sleep_secs = 0.1			# This was my first try, slow speeds choppy
                 sleep_secs = 2				# This is very slow, for testing
                 sleep_secs = 0.001
+                sleep_secs = 0.02
                 time.sleep(sleep_secs)
         except:
             traceback.print_exc()
@@ -308,6 +350,8 @@ class helmsman(vnavs_mqtt.mqtt_node):
             self.speed_goal = speed_goal
 
     def GetGoalSteering(self, steering_request):
+        self.steering_goal = steering_request
+        return
         if steering_request == 's':
             steering_goal = 0
         elif steering_request == '+l':
