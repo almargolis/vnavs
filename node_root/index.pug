@@ -1,92 +1,97 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>VNAVS Stream</title>
-<!-- Bootstrap CSS -->
-<link href="http://netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css" rel="stylesheet">
-//
-  <style type="text/css">
-  #stream {
-  height: 99%;
-  margin: 0px auto;
-  display: block;
-  margin-top: 20px;
-  }
-  </style>
-<!-- jQuery -->
-script(src="http://code.jquery.com/jquery.min.js")
-script(type="text/javascript").
-  var socket = io();
-  socket.on('imageReady', function(url) {
-    $('#stream').attr('src', url);
-  });
-  function startStream() {
-    socket.emit('startStream');
-    $('.start').hide();
-  }
-body
-  h1 Visual NAVigation System (VNAVS) Manual Controller 
-  hr
-  form(action="/parms" method="post")
-    label(for='timeout') Timeout:
-    input(type="text", name="date", value=timeout)
-    input type="submit")
-  div //  controls area - image underneath
-    div(style="display: inline-block;") // left column of controls -- speed slider
-      input(type="range" id="speedctl" min="0" max="100" step="1" value="50"
-           style="-webkit-appearance: slider-vertical; width: 40px; height: 200px;")
+doctype html
+html(lang="en")
+  head
+    meta(charset="utf-8")
+    meta(http-equiv="X-UA-Compatible" content="IE=edge")
+    meta(name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no")
+    title VNAVS Stream
+    //
+      <style type="text/css">
+      #stream {
+      height: 99%;
+      margin: 0px auto;
+      display: block;
+      margin-top: 20px;
+      }
+      </style>
+    // jQuery
+    script(src="http://code.jquery.com/jquery.min.js")
+    script(src="/socket.io/socket.io.js")
+    script.
+      var socket = io();
+      socket.on('imageReady', function(url) {
+        $('#stream').attr('src', url);
+      });
+      function startStream() {
+        socket.emit('startStream');
+        $('.start').hide();
+      }
+  body
+    h1 Visual NAVigation System (VNAVS) Manual Controller
+    hr
+    form(action="/parms" method="post")
+      label(for='timeout') Timeout:
+      input(type="text", name="timeout", value=timeout)
+      input(type="submit")
     div
-    div(style="display: inline-block;" // main area of controls
-      <button type="button" id="" class="btn btn-info start" onclick="startStream()">Start Camera</button>
-      <button type="button" id="" class="btn btn-info" onclick="socket.emit('takePic');">Take Pic</button>
-      <hr>
-      <table style="border:1px; padding:30px; text-align:center;">
-        <tr>
-          <td><button type="button" id="" class="btn btn-info no-zoom" onclick="socket.emit('steerLeft');">Left</button></td>
-          <td><button type="button" id="" class="btn btn-info" onclick="socket.emit('steerStraight');">Straight</button></td>
-          <td><button type="button" id="" class="btn btn-info" onclick="socket.emit('steerRight');">Right</button></td>
-          </tr>
-        <tr>
-          <td>&nbsp;</td>
-          <td>&nbsp;</td>
-          <td>&nbsp;</td>
-          </tr>
-        <tr>
-          <td>&nbsp;</td>
-          <td><button type="button" id="" class="btn btn-info" onclick="socket.emit('moveForward');">Forward</button></td>
-          <td><button type="button" id="" class="btn btn-info" onclick="socket.emit('moveSlow');">Slow</button></td>
-          </tr>
-        <tr>
-          <td>&nbsp;</td>
-          <td>&nbsp;</td>
-          <td>&nbsp;</td>
-        <tr>
-          <td>&nbsp;</td>
-          <td><button type="button" id="" class="btn btn-danger" onclick="socket.emit('moveStop');">Stop</button></td>
-          <td>&nbsp;</td>
-          </tr>
-        <tr>
-          <td>&nbsp;</td>
-          <td>&nbsp;</td>
-          <td>&nbsp;</td>
-        <tr>
-          <td>&nbsp;</td>
-          <td><button type="button" id="" class="btn btn-info" onclick="socket.emit('moveReverse');">Reverse</button></td>
-          <td>&nbsp;</td>
-          </tr>
-      </table>
-    </div>		<! end main controls area ->
-    <div style="display: inline-block;" >
-      --------------------------
-    </div>
-    <div style="display: inline-block;" >
-      <input type="range" id="speedctl" min="0" max="100" step="1" value="50" 
-		style="width: 200px;" >
-    </div>
-  </div>		<! end controls area ->
-  <div class="row">
-    <img src="" id="stream">
-  </div>
+      //  controls area - image underneath
+      div(style="display: inline-block;")
+        // left column of controls -- speed slider
+        input(type="range" id="speedctl" min="0" max="100" step="1" value="50"
+           style="-webkit-appearance: slider-vertical; width: 40px; height: 200px;")
+      div
+      div(style="display: inline-block;")
+        // main area of controls
+        button(type="button" id="" onclick="startStream();") Start Camera
+        button(type="button" id="" onclick="socket.emit('takePic');") Take Pic
+        hr
+        table(style="border:1px; padding:30px; text-align:center;")
+          tr
+            td
+              button(type="button" id="" class="btn btn-info no-zoom" onclick="socket.emit('steer', 'RV-2');") Veer Left
+            td &nbsp;
+            td
+              button(type="button" id="" onclick="socket.emit('steer', 'RV2');") Veer Right
+          tr
+            td
+              button(type="button" id="" class="btn btn-info no-zoom" onclick="socket.emit('steer', 'RH-2');") Turn Left
+            td
+              button(type="button" id="" onclick="socket.emit('steer', 'AWS');") Straight
+            td
+              button(type="button" id="" onclick="socket.emit('steer', 'RH2');") Turn Right
+          tr
+            td &nbsp;
+            td &nbsp;
+            td &nbsp;
+          tr
+            td &nbsp;
+            td
+              button(type="button" id="" onclick="socket.emit('moveForward');") Forward
+            td
+              button(type="button" id="" onclick="socket.emit('moveSlow');") Slow
+          tr
+            td &nbsp;
+            td &nbsp;
+            td &nbsp;
+          tr
+            td &nbsp;
+            td
+              button(type="button" id="" class="btn btn-danger" onclick="socket.emit('moveStop');") Stop
+            td &nbsp;
+          tr
+            td &nbsp;
+            td &nbsp;
+            td &nbsp;
+          tr
+            td &nbsp;
+            td
+              button(type="button" id="" onclick="socket.emit('moveReverse');") Reverse
+            td &nbsp;
+          // end of table
+        // end main controls div
+      div(style="display: inline-block;")
+      div(style="display: inline-block;")
+        input(type="range" id="speedctl" min="0" max="100" step="1" value="50" style="width: 200px;")
+    // end controls area
+    div
+      img(src="" id="stream")

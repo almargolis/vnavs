@@ -44,9 +44,7 @@ var socket_event_move_forward = 'moveForward'		// from browser, move forward
 var socket_event_move_slow = 'moveSlow'			// from browser, move slow
 var socket_event_move_reverse = 'moveReverse'		// from browser, move backward
 var socket_event_move_stop = 'moveStop'			// from browser, move stop
-var socket_event_steer_straight = 'steerStraight'
-var socket_event_steer_right = 'steerRight'
-var socket_event_steer_left = 'steerLeft'
+var socket_event_steer = 'steer'
 
 var app = express();
 var http = require('http').Server(app);
@@ -104,17 +102,9 @@ io.on('connection', function(socket) {
   socket.on(socket_event_take_pic, function() {
     mqttc.publish(mqtt_topic_take_pic, '{}')
   });
-  socket.on(socket_event_steer_straight, function() {
-    console.log("straight");
-    mqttc.publish(mqtt_topic_drive, '{"heading": "s"}')
-  });
-  socket.on(socket_event_steer_left, function() {
-    console.log("left");
-    mqttc.publish(mqtt_topic_drive, '{"heading": "+l"}')
-  });
-  socket.on(socket_event_steer_right, function() {
-    console.log("right");
-    mqttc.publish(mqtt_topic_drive, '{"heading": "+r"}')
+  socket.on(socket_event_steer, function(heading) {
+    console.log("left " + heading);
+    mqttc.publish(mqtt_topic_drive, JSON.stringify({"heading": heading}))
   });
 });
 
