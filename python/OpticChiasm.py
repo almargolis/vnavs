@@ -90,6 +90,58 @@ def simplest_cb(img, percentile):
 
     return cv2.merge(out_channels)
 
+class ColorBalance(object):
+    def __init__(self, low_vals=None, high_vals=None):
+        self.low_vals = low_vals
+        self.high_vals = high_vals
+
+    def apply_mask(self, channel, mask, fill_value):
+        masked = np.ma.array(channel, mask=mask, fill_value=fill_value)
+        return masked.filled()
+
+    def apply_threshold(self, channel, low_value, high_value):
+        low_mask = channel < low_value
+        channel = self.apply_mask(channel, low_mask, low_value)
+        high_mask = channel > high_value
+        channel = self.apply_mask(channel, high_mask, high_value)
+        return channel
+
+    def analyze(self, img, percentile):
+        assert percentile > 0 and percentile < 100
+        half_percentile = percentile / 200.0
+        channels = cv2.split(img)
+        self.low_vals = []
+        self.high_vals = []
+        for channel in channels:
+            # channels should be BGR
+            assert len(channel.shape) == 2
+            # find the low and high precentile values (based on the input percentileile)
+            height, width = channel.shape
+            vec_size = width * height
+            flat = channel.reshape(vec_size)
+            assert len(flat.shape) == 1
+            flat = np.sort(flat)		# sort this channel (R, G or B) by intensity
+            n_cols = flat.shape[0]
+            # I added the int(). Floor retuns a float. Flat doesn't want a float. This probably was written
+            # for python 3 which does some of these conversions differently.
+            self.low_vals.append(flat[int(math.floor(n_cols * half_percentile))])
+            self.high_vals.append(flat[int(math.ceil( n_cols * (1.0 - half_percentile)))])
+        return self.balance(channels=channels)
+
+    def balance(self, img=None, channels=None):
+        if channels is None:
+            channels = cv2.split(img)
+        out_channels = []
+        for ix, channel in enumerate(channels):
+            low_val = self.low_vals[ix]
+            high_val = self.high_vals[ix]   
+            # saturate below the low percentileile and above the high percentileile
+            thresholded = self.apply_threshold(channel, low_val, high_val)
+            # scale the channel
+            normalized = cv2.normalize(thresholded, thresholded.copy(), 0, 255, cv2.NORM_MINMAX)
+            out_channels.append(normalized)
+        return cv2.merge(out_channels)
+
 def ColorKey(img):
     channels = cv2.split(img)
     print("CK channels:", len(channels))
