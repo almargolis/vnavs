@@ -79,8 +79,8 @@ def simplest_cb(img, percentile):
         low_val  = flat[int(math.floor(n_cols * half_percentile))]
         high_val = flat[int(math.ceil( n_cols * (1.0 - half_percentile)))]
 
-        print "Lowval: ", low_val
-        print "Highval: ", high_val
+        #print "Lowval: ", low_val
+        #print "Highval: ", high_val
 
         # saturate below the low percentileile and above the high percentileile
         thresholded = apply_threshold(channel, low_val, high_val)
@@ -419,6 +419,69 @@ def mean(numbers):
         return 0
     return sum(numbers) / len(numbers)
 
+class Race(object):
+    def __init__(self, im):
+        self.original = im
+        self.annotated = None
+        image = simplest_cb(self.original, 20)
+        #image = self.original
+        bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        bw_image = cv2.blur(bw_image.copy(), (3,3))
+        canny_image = auto_canny(bw_image, 0.33)
+        #(imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        self.h_lines = cv2.HoughLinesP(canny_image, 1, np.pi/180, 15, minLineLength=50, maxLineGap=20)
+        self.map_lines = []
+        self.avg_slope = 0
+
+    def ProcessLines(self):
+        h_color = (0, 0, 255)				# blue
+        a_color = (0, 255, 0)				# green
+        h_width = 1
+        a_width = 2
+        self.map_lines = []
+        self.avg_slope = 0
+        self.annotated = self.original.copy()
+        h, w, c = self.annotated.shape
+        m = int(w/2)
+        if self.h_lines is not None:
+            for x in range(0, len(self.h_lines)):
+                for x1,y1,x2,y2 in self.h_lines[x]:
+                    cv2.line(self.annotated,(x1,y1),(x2,y2), h_color, h_width)
+                    #deposition += "%d. (%d,%d) (%d,%d)\n" % (x, x1, y1, x2, y2)
+                    mx1 = x1 - m
+                    mx2 = x2 - m
+                    my1 = h - y1
+                    my2 = h - y2
+                    mrise = my2 - my1
+                    mrun = mx2 - mx1
+                    if abs(mrun) < 0.01:
+                        mslope = 9999
+                    else:
+                        mslope = mrise / mrun
+                    mlen = math.sqrt((mrise ** 2) + (mrun ** 2))
+                    p1dist = math.sqrt((mx1 ** 2) + (my1 ** 2))
+                    p2dist = math.sqrt((mx2 ** 2) + (my2 ** 2))
+                    mdist = min(p1dist, p2dist)
+                    if mdist < 100:
+                        self.map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2)))
+            self.map_lines.sort()
+            cum_slope = 0
+            ct_slope = 0
+            #print("MAP", h, m, w)
+            for this in self.map_lines[:5]:
+                cv2.line(self.annotated,this[5],this[6], a_color, a_width)
+                #print(this)
+                ct_slope += 1
+                cum_slope += this[2]
+            if ct_slope > 0:
+                avg_slope = cum_slope / ct_slope
+            else:
+                avg_slope = "NO :ONES"
+            print("MAP", avg_slope)
+            self.avg_slope = avg_slope
+        cv2.imwrite('temp/ann.jpeg', self.annotated)
+
+
 class ImageAnalyzer(object):
     def __init__(self, fpath=None, Crop=None, CroppedHeight=None,
 				CannyMethod=1, ContourFill='b', ContourOutline=True,
@@ -709,6 +772,13 @@ def DrawGrid(img):
     cv2.line(img,(0,y),(width,y),(255,0,0), 1)
 
 if __name__ == '__main__':
+  fn = 'R20170325021241_1_0001.jpeg'
+  fn = "R20170325021241_2_0001.jpeg"
+  im = cv2.imread('temp/' + fn)
+  p = Race(im)
+  p.ProcessLines()
+  sys,exit(0)
+
   start_time = time.clock()
   brain = ImageAnalyzer()
   brain.img_fpath = 'opencv_3'; brain.img_crop=(350,150)		# distance calibration

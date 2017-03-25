@@ -222,7 +222,7 @@ class vehicle(object):
             self.steering_plan = [goal_degree, goal_degree, 0, 0, -goal_degree, -goal_degree]
         else:
             # change heading
-            self.steering_plan = [goal_degree, goal_degree]
+            self.steering_plan = [goal_degree, goal_degree, goal_degree]
         print("PLAN", self.steering_plan)
 
     def Steering(self, steering_goal=None):
@@ -309,13 +309,8 @@ class helmsman(vnavs_mqtt.mqtt_node):
             traceback.print_exc()
         self.v.Estop()
 
-    def GetGoalSpeed(self, speed_request):
-        # from Loop(). It is possible that Loop() has not seen or acted upon
-        # the previous goal. This means care must be exercised when processing
-        # incremental requests. A subsequent +1 could be sent due to impatience
-        # rather than an actual intent to increment speed in additiion to any
-        # pending increments. There shouldn't be much latency, but for big
-        # fast bots, some caution is in order.
+    def SpeedRequestStr(self, speed_request):
+        speed_goal = None
         if speed_request in '+=':
             speed_goal = self.speed_goal + 1
         elif speed_request == '-':
@@ -335,7 +330,19 @@ class helmsman(vnavs_mqtt.mqtt_node):
                   speed_goal = 0
         elif speed_request == 's':			# stop moving
           speed_goal = 0
-        else:
+        return speed_goal
+
+    def GetGoalSpeed(self, speed_request):
+        # from Loop(). It is possible that Loop() has not seen or acted upon
+        # the previous goal. This means care must be exercised when processing
+        # incremental requests. A subsequent +1 could be sent due to impatience
+        # rather than an actual intent to increment speed in additiion to any
+        # pending increments. There shouldn't be much latency, but for big
+        # fast bots, some caution is in order.
+        speed_goal = None
+        if isinstance(speed_request, basestring):
+            speed_goal = self.SpeedRequestStr(speed_request)
+        if speed_goal is None:
           try:
             speed_goal = int(speed_request)
           except:

@@ -21,6 +21,7 @@ import picamera.array
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
+import OpticChiasm
 
 import signal
 print("CONFIGURING SIGNAL")
@@ -37,27 +38,52 @@ signal.signal(signal.SIGINT, signal_handler)
 
 class cameraman(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=['camerman/orders'], Blocking=False, Streamer=True, Verbose=Verbose)
+        super().__init__(Subscriptions=['cameraman/orders', 'cameraman/ask_last'], Blocking=False, Streamer=False, Verbose=Verbose)
         self.mode = 'p'			# s=single, r=run, p=paused
         self.burst_fps = 0		# capture speed of last burst
         self.camera_last_fn = None
         self.camera_iso = 800
         self.camera_shutter_speed = 10000
+        self.camera_resolution = (720, 480)
         self.camera = picamera.PiCamera()
+        self.capture = 'n'		# n=none, s=single, r=run
         self.configuration_changed = True
-        self.run = ''
+        self.format = 'j'		# j=jpeg, b=BGR
+        self.run = ''			# identifier to add to file names
         self.publish = 's'		# f=file system, m=mqtt, s=streamer
         self.image_ct = 0		# ct of images captured since __init__
         time.sleep(2)			# camera setling time, needed?
         self.timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+        self.last_fn = ''
+        self.last_format = ''
 
-    def rmsg_camerman_orders(self, msg):
+    def rmsg_cameraman_ask_last(self, msg):
+        payload = {}
+        payload['filename'] = self.last_fn
+        payload['format'] = self.last_format
+        (res, mid) = self.mqttc.publish('cameraman/last', json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
+
+    def rmsg_cameraman_orders(self, msg):
+        print("RMSG", msg)
         # should we verify mode and report if a problem?
         try:
             parms = json.loads(msg)
         except ValueError:
             parms = {}
             print("Invalid JSON", `msg`)
+        if 'capture' in parms:
+            capture = parms['capture']
+            if capture in 'nrs':
+                # does not cause burst restart
+                self.capture = capture
+        if 'format' in parms:
+            format = parms['format']
+            if format in 'bj':
+                if format != self.format:
+                    configuration_changed = True
+                    self.format = format
         if 'iso' in parms:
             iso = int(parms['iso'])
             if iso != self.camera_iso:
@@ -98,11 +124,42 @@ class cameraman(vnavs_mqtt.mqtt_node):
             # a propper queue or semaphore.
             self.configuration_changed = False
             self.camera_iso = self.camera_iso
+            self.camera_resolution = self.camera_resolution
             self.camera_shutter_speed = self.camera_shutter_speed		# microseconds, 1000 = 1ms
             self.camera.vflip = True
             self.camera.hflip = True
+            self.camera.zoom = (0.0, 0.5, 1.0, 0.5)	# % x, y, w, h
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
         self.ImageBurst()
+
+    def Race(self, burst_dest, im_fn):
+        d = OpticChiasm.Race(burst_dest.array.copy())
+        d.ProcessLines()
+        fpx = im_fn[:-4]
+        cv2.imwrite('temp/' + fpx + '-A.jpeg', d.original)
+        annotated_fn = 'temp/' + fpx + '-B.jpeg'
+        cv2.imwrite(annotated_fn , d.annotated)
+        directions = {}
+        directions['timeout'] = 3
+        directions['speed'] = 2
+        if abs(d.avg_slope) > 5:
+            directions['heading'] = 'AWS'
+        elif d.avg_slope < 0:
+            directions['heading'] = 'RH-4'
+        else:
+            directions['heading'] = 'RH4'
+        (res, mid) = self.mqttc.publish('helmsman/orders', json.dumps(directions))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
+        #
+        self.last_fn = annotated_fn
+        self.last_format = 'jpeg'
+        payload = {}
+        payload['filename'] = self.last_fn
+        payload['format'] = self.last_format
+        (res, mid) = self.mqttc.publish('cameraman/last', json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
 
     def ImageBurst(self):
         # establish paramters for this burst. Since MQTT is running in a separate thread
@@ -118,48 +175,70 @@ class cameraman(vnavs_mqtt.mqtt_node):
         burst_mode = self.mode
         burst_publish = self.publish
         burst_run = self.run
-        #
-        # Capture some pictures. This might be a single image or a long run of them.
-        #
-        if burst_publish in 'ms':
-            im_format = 'bgr'
-            #im_dest = io.BytesIO()
-            im_dest = picamera.array.PiRGBArray(self.camera)
+        if self.format == 'b':
+            burst_format = 'bgr'
         else:
-            im_format = 'jpeg'
-            im_dest = 'temp/' + fn
+            burst_format = 'jpeg'
         fn = 'R' + self.timestamp
         if self.run != '':
             fn += '_' + self.run
-        fn += '_%d_{counter:04d}.%s' % (self.image_ct, im_format)
-        burst_start_time = time.clock()
+        fn += '_%d_{counter:04d}.%s' % (self.image_ct, burst_format)
+        if burst_publish in 'ms':
+            burst_dest = picamera.array.PiRGBArray(self.camera, self.camera_resolution)
+        else:
+            burst_dest = 'temp/' + fn
+        #
+        # Capture some pictures. This might be a single image or a long run of them.
+        #
+        burst_start_time = time.time()
         burst_ct = 0
-        for im_fn in self.camera.capture_continuous(im_dest, format=im_format, use_video_port=True):
+        print("READY", burst_format, burst_publish, burst_dest)
+        for im_fn in self.camera.capture_continuous(burst_dest, format=burst_format, use_video_port=True):
             self.image_ct += 1
             burst_ct += 1
+            if self.capture in 'rs':
+                if burst_publish == 'f':
+                    self.last_fn = im_fn
+                    self.last_format = burst_format
+                    payload = {}
+                    payload['filename'] = im_fn
+                    payload['format'] = burst_format
+                    payload['publish'] = burst_publish
+                    (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
+                    if res != mqtt.MQTT_ERR_SUCCESS:
+                        print("MQTT Publish Error")
+                if burst_publish in 'ms':
+                    im_fn = fn.format(counter=self.image_ct)
+                if burst_publish == 'm':
+                    self.Race(burst_dest, im_fn)
+                    #buffer = pickle.dumps(burst_dest.array)
+                    payload = {}
+                    payload['filename'] = im_fn
+                    payload['format'] = burst_format
+                    payload['publish'] = burst_publish
+                    #payload['buflen'] = len(buffer)
+                    #payload['imageBGRpk'] = buffer
+                    #(res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
+                    #if res != mqtt.MQTT_ERR_SUCCESS:
+                    #    print("MQTT Publish Error")
+                if burst_publish == 's':
+                    #buffer = burst_dest.getvalue()
+                    buffer = burst_dest.array
+                    #buffer = pickle.dumps(burst_dest.array)
+                    payload = {}
+                    payload['filename'] = im_fn
+                    payload['format'] = burst_format
+                    payload['publish'] = burst_publish
+                    payload['buflen'] = len(buffer)
+                    self.streamer.write(json.dumps(payload) + chr(26) + buffer)
+                if self.verbose:
+                    print("PIC", im_fn)
             if burst_publish in 'ms':
-                im_fn = fn.format(counter=burst_ct)
-            if burst_publish == 'm':
-                buffer = pickle.dumps(im_dest.array)
-                payload = {}
-                payload['filename'] = im_fn
-                payload['buflen'] = len(buffer)
-                payload['imageBGRpk'] = buffer
-                (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
-                if res != mqtt.MQTT_ERR_SUCCESS:
-                    print("MQTT Publish Error")
-            if burst_publish == 's':
-                buffer = im_dest.getvalue()
-                payload = {}
-                payload['filename'] = im_fn
-                payload['buflen'] = len(buffer)
-                self.streamer.write(json.dumps(payload) + chr(26) + buffer)
-            if burst_publish in 'ms':
-                # prepare for next image
-                im_dest.truncate()
-                im_dest.seek(0)   # ?? needed for io.Bytes?? Required for PiRGBArray for subsequent images
-            if self.verbose:
-                print("PIC", im_fn)
+                # prepare for next image. This is needed even when not published
+                burst_dest.truncate()
+                burst_dest.seek(0)   # ?? needed for io.Bytes?? Required for PiRGBArray for subsequent images
+            if self.capture == 's':
+                self.capture = 'n'
             if burst_mode == 's':
                 # enter paused mode if we have taken our single picture
                 self.mode = 'p'
@@ -167,14 +246,12 @@ class cameraman(vnavs_mqtt.mqtt_node):
             if  self.configuration_changed:
                 # end burst so configuration can be changed
                 break
-            if self.CheckExceptions():
-                break
         if burst_ct >= 10:
-            burst_time = time.clock() - burst_start_time
+            burst_time = time.time() - burst_start_time
             self.burst_fps = burst_ct / burst_time
 
     def PublishStatus(self):
-              stop_time = time.clock()
+              stop_time = time.time()
               print("%d images %f %5.2d fps" % (image_ct, stop_time - start_time, image_ct / (stop_time - start_time)))
               helmsman.camera_last_fn = picfn
               #if prev_mode == 's':
