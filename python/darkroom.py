@@ -586,6 +586,7 @@ class ProcessStep(object):
         self.im = None
         self.contours = None
         self.lines = None
+        deposition = ''
         if code is not None:
             if 'outim' in flags:
                 e = 'xstep.im = '
@@ -603,12 +604,15 @@ class ProcessStep(object):
                 trace = traceback.format_exc()
         if 'outcont' in flags:
             print("SAVE CONTOURS")
-            self.im = ProcessStep.annotation_base.im.copy()
-            cv2.drawContours(self.im, self.contours, -1, (0, 0, 255), 1)
+            if ProcessStep.annotation_base.im is None:
+                self.im = None
+            else:
+                self.im = ProcessStep.annotation_base.im.copy()
+                cv2.drawContours(self.im, self.contours, -1, (0, 0, 255), 1)
         if 'outlines' in flags:
             print("CONTOURS")
             self.im = ProcessStep.annotation_base.im.copy()
-            deposition = "Lines\n"
+            deposition += "Lines\n"
             map_lines = []
             h, w, c = self.im.shape
             m = int(w/2)
@@ -670,7 +674,7 @@ class ProcessStep(object):
         
 class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=['cameraman/pic_ready'], Blocking=True, BlockingTimeoutSecs=0.1)
+        super().__init__(Subscriptions=['archiver/pic_ready', 'cameraman/last', 'cameraman/pic_ready'], Blocking=True, BlockingTimeoutSecs=0.1)
         self.tk_is_initialized = False
         self.lastfn = ""
         self.Connect()			# This starts the mqtt client in another thread
@@ -697,7 +701,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=-1, col=-3)
 
         ProcessStep.app = self
-        ProcessStep('None')
+        #ProcessStep('None')
         ProcessStep('FileImage', opencvfn='python/samples/opencv_4_s.jpg')
         ProcessStep('ColorBalance')
         ProcessStep('Crop')
@@ -727,12 +731,53 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             settings['shutter_speed'] = int(self.camera_shutter_speed.CurrentValue())
         except TypeError:
             pass
+        settings['capture'] = 's'
         settings['mode'] = 's'
         settings['publish'] = 'm'
+        settings['publish'] = 's'
+        settings['publish'] = 'f'
         settings['format'] = 'b'
+        settings['format'] = 'j'
         settings_j = json.dumps(settings)
         print("SNAP", settings_j)
-        self.mqttc.publish('camerman/take_pic', settings_j)
+        self.mqttc.publish('cameraman/orders', settings_j)
+        time.sleep(1)
+        self.mqttc.publish('cameraman/ask_last', '')
+
+    def rmsg_archiver_pic_ready(self, msg):
+        if not self.tk_is_initialized:
+            return
+        if not self.camera_snap:
+            return
+        payload = json.loads(msg)
+        fn = payload['filename']
+        fnp = os.path.join('temp', fn)
+        ifile = open(fnp, "rb")
+        buflen = int(payload['buflen'])
+        buffer = ifile.read()
+        bgr = pickle.loads(buffer)
+        opencv = bgr[...,::-1]
+        print("IMAGE", fn, buflen, len(buffer), opencv.shape)
+        cv2.imwrite('bgr.jpeg', opencv)
+        print("IMWRITE")
+        ProcessStep.steps[0].filter = 'CapturedImage'
+        ProcessStep.steps[0].colorspace = 'BGR'
+        ProcessStep.steps[0].opencv = opencv
+        ProcessStep.steps[0].UpdateAll()
+
+    def rmsg_cameraman_last(self, msg):
+        print("LAST", msg)
+        if not self.tk_is_initialized:
+            return
+        if not self.camera_snap:
+            return
+        payload = json.loads(msg)
+        fn = payload['filename']
+        fn = os.path.join(bot_path, fn)
+        ProcessStep.steps[0].parm_values['opencvfn'] = fn
+        ProcessStep.steps[0].filter = 'FileImage'
+        ProcessStep.steps[0].UpdateAll()
+        print("LAST", ProcessStep.steps[0].parm_values)
 
     def rmsg_cameraman_pic_ready(self, msg):
         if not self.tk_is_initialized:
