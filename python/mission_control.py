@@ -100,16 +100,24 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         # row 4
         fn = "bgr.jpeg"
         #path = os.path.join(bot_path, fn)
+        self.f1_img1 = ttk.Label(mainframe)
         path = fn
         self.img1_pil = self.ImagePillow(path)
-        self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
-        self.f1_img1 = ttk.Label(mainframe, image = self.img1_tk)
+        if self.img1_pil is None:
+            self.img1_tk = None
+        else:
+            self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
+            self.f1_img1.configure(image = self.img1_tk)
         self.f1_img1.grid(column=0, columnspan=2, row=4, sticky=W)
 
         # row 5
+        self.f1_img2 = ttk.Label(mainframe)
         self.img2_pil = self.ImageCv2(path)
-        self.img2_tk = ImageTk.PhotoImage(self.img2_pil)
-        self.f1_img2 = ttk.Label(mainframe, image = self.img2_tk)
+        if self.img2_pil is None:
+            self.img2_tk = None
+        else:
+            self.img2_tk = ImageTk.PhotoImage(self.img2_pil)
+            self.f1_img2.configure(image = self.img2_tk)
         self.f1_img2.grid(column=3, columnspan=1, row=4, sticky=W)
         #for child in mainframe.winfo_children():
         #    child.grid_configure(padx=5, pady=5)
@@ -118,6 +126,8 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
     def ImageCv2(self, path):
         im = cv2.imread(path)
+        if im is None:
+            return None
         h, w, c = im.shape
         mapped_width = w
         mapped_height = h
@@ -193,11 +203,16 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         path = os.path.join(bot_path, self.pic_fn)
         self.img1_pil = self.ImagePillow(path)
         #self.img2_pil = self.ImageCv2(path)
-        if self.img1_pil is not None:
+        if self.img1_pil is None:
+            self.img1_tk = None
+        else:
             self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
-        self.img2_tk = ImageTk.PhotoImage(self.img2_pil)
-        self.f1_img1.configure(image = self.img1_tk)
-        self.f1_img2.configure(image = self.img2_tk)
+            self.f1_img1.configure(image = self.img1_tk)
+        if self.img2_pil is None:
+            self.img2_tk = None
+        else:
+            self.img2_tk = ImageTk.PhotoImage(self.img2_pil)
+            self.f1_img2.configure(image = self.img2_tk)
         self.pic_processed = True
         self.pic_requested = False
 

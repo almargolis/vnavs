@@ -26,7 +26,10 @@ import numpy as np
 import OpticChiasm
 import vnavs_mqtt
 
-bot_path = "/Volumes/pi/projects/vnavs"
+bot_path = "/Volumes/Home Directory/projects/vnavs"
+sample_path = 'python/samples/opencv_4_s.jpg'
+sample_file = "R20170325104118_0_0091-A.jpeg"
+sample_path = os.path.join(bot_path, 'temp', sample_file)
 
 BOT_1_MAP_TRANSPOSE = [
 
@@ -46,6 +49,8 @@ class TkWidgetDef(object):
         self.tkw = tkw			# tk widget
         self.tkw_label = tkw_label	# tk widget of associated label
         self.tkd = Data			# the tk data (usually StringVar) for this widget
+        self.hbar = None
+        self.vbar = None
         self.opencv_im = None
         self.row = None			# row where positioned
         self.col = None			# col where positioned (left side)
@@ -229,9 +234,7 @@ class TkWidgetDef(object):
         frame.vbar=ttk.Scrollbar(self.tkw, orient=VERTICAL)
         frame.vbar.grid(row=row, column=col+1, sticky=N+S)
         frame.tkw.config(width=frame.canvasWidth, height=frame.canvasHeight)
-        frame.tkw.config(xscrollcommand=frame.hbar.set, yscrollcommand=frame.vbar.set)
-        frame.hbar.config(command=frame.tkw.xview)
-        frame.vbar.config(command=frame.tkw.yview)
+        self.AttachScrollbars()
 
         if thumbnailof is None:
             frame.UpdateImage(fn=fn, opencv=opencv, opencvfn=opencvfn)
@@ -246,6 +249,14 @@ class TkWidgetDef(object):
         self.RememberPosition(frame, row, col, colspan=colspan+1, rowspan=rowspan+1)
         self.children.append(frame)
         return frame
+
+    def AttachScrollbars(self):
+        if self.hbar is not None:
+            self.hbar.config(command=self.tkw.xview)
+            self.tkw.config(xscrollcommand=self.hbar.set)
+        if self.vbar is not None:
+            self.vbar.config(command=self.tkw.yview)
+            self.tkw.config(yscrollcommand=self.vbar.set)
 
     def AddLabelImage(self, fn=None, opencv=None, opencvfn=None, 
 				thumbnailof=None, thumbnailwidth=100,
@@ -307,6 +318,7 @@ class TkWidgetDef(object):
                 self.vbar.set(0.0, pctHeight)
             else:
                 raise TypeError("Unsupported image widget: " + self.tkw.__class__.__name__)
+        self.AttachScrollbars()
         if self.thumbnail:
             self.thumbnail.UpdateImage(opencv=self.MakeThumbnail(self.opencv_im, self.thumbnailwidth))
 
@@ -601,6 +613,7 @@ class ProcessStep(object):
             try:
                 exec(e, exec_g)
             except:
+                print(trace)
                 trace = traceback.format_exc()
         if 'outcont' in flags:
             print("SAVE CONTOURS")
@@ -687,7 +700,6 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.image.img_fpath = 'opencv_6'
         self.image.img_source_dir = '/volumes/pi/projects/vnavs/temp'
         self.image.img_fname_suffix = ''
-        self.image.do_save_snaps = False
 
         self.tk = TkWidgetDef('root', Tk())
         self.tk.tkw.title("VNAVS OpenCV Visualizer")
@@ -697,12 +709,14 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.camera_iso = self.statusFrame.AddEntryField('ISO', Value=800) 
         self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', Value=10000, row=-1, col=-3) 
         self.camera_snap = False
+        self.camera_last_filename = ''
+        self.camera_last_processed = True
         self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=-1, col=-3)
         self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=-1, col=-3)
 
         ProcessStep.app = self
         #ProcessStep('None')
-        ProcessStep('FileImage', opencvfn='python/samples/opencv_4_s.jpg')
+        ProcessStep('FileImage', opencvfn=sample_path)
         ProcessStep('ColorBalance')
         ProcessStep('Crop')
         ProcessStep('BW')
@@ -728,16 +742,15 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         except TypeError:
             pass
         try:
-            settings['shutter_speed'] = int(self.camera_shutter_speed.CurrentValue())
+            settings['shutterSpeed'] = int(self.camera_shutter_speed.CurrentValue())
         except TypeError:
             pass
-        settings['capture'] = 's'
-        settings['mode'] = 's'
-        settings['publish'] = 'm'
-        settings['publish'] = 's'
-        settings['publish'] = 'f'
-        settings['format'] = 'b'
-        settings['format'] = 'j'
+        settings['loopMode'] = 'run'
+        settings['loopFormat'] = 'bgr'
+        settings['loopPublish'] = 'stream'
+        settings['captureMode'] = 'single'
+        settings['captureFormat'] = 'jpeg'
+        settings['capturePublish'] = 'file'
         settings_j = json.dumps(settings)
         print("SNAP", settings_j)
         self.mqttc.publish('cameraman/orders', settings_j)
@@ -745,6 +758,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.mqttc.publish('cameraman/ask_last', '')
 
     def rmsg_archiver_pic_ready(self, msg):
+        return # -- there are too many of these to process
         if not self.tk_is_initialized:
             return
         if not self.camera_snap:
@@ -766,34 +780,50 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         ProcessStep.steps[0].UpdateAll()
 
     def rmsg_cameraman_last(self, msg):
+        # Do as little as possible here in mqtt thread.
+        # Process image in tk thread.
         print("LAST", msg)
         if not self.tk_is_initialized:
             return
         if not self.camera_snap:
             return
         payload = json.loads(msg)
-        fn = payload['filename']
-        fn = os.path.join(bot_path, fn)
-        ProcessStep.steps[0].parm_values['opencvfn'] = fn
-        ProcessStep.steps[0].filter = 'FileImage'
-        ProcessStep.steps[0].UpdateAll()
+        self.camera_last_filename  = payload['filename']
+        self.camera_last_processed = False
         print("LAST", ProcessStep.steps[0].parm_values)
 
     def rmsg_cameraman_pic_ready(self, msg):
+        return # -- there are too many of these to process
         if not self.tk_is_initialized:
             return
         if not self.camera_snap:
             return
         payload = json.loads(msg)
         fn = payload['filename']
-        buflen = int(payload['buflen'])
+        format = payload['format']
+        buffer = None
+        buffer_len = 0
+        bgr = None
+        opencv = None
+        opencv_shape = None
+        if 'buflen' in payload:
+            buflen = int(payload['buflen'])
+        else:
+            buflen = 0
         #im = base64.b64decode(payload['imageBGR64'])
         #im = payload['imageBGR64']
-        buffer = payload['imageBGRpk']
-        bgr = pickle.loads(buffer)
-        opencv = bgr[...,::-1]
-        print("IMAGE", fn, buflen, len(buffer), opencv.shape)
-        #fn = os.path.join(bot_path, msg)
+        if 'imageBGRpk' in payload:
+            buffer = payload['imageBGRpk']
+            buffer_len = len(buffer)
+            bgr = pickle.loads(buffer)
+            opencv = bgr[...,::-1]
+        publish = payload['publish']
+        if publish == 'f':
+            fn = os.path.join(bot_path, fn)
+            opencv = cv2.imread(fn)
+        if opencv is not None:
+            opencv_shape = opencv.shape
+        print("IMAGE", fn, buflen, buffer_len, opencv_shape)
         #print("PIC", msg, fn)
         #ProcessStep.steps[0].parms['opencvfn'] = fn
         #opencv =  np.fromstring(im, dtype=np.uint8)
@@ -809,6 +839,16 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         while True:
           # rmsg_helmsman_pic_ready is called asyncronously via mqtt
           self.CheckMqtt()						# this has a short timeout
+          if not self.camera_last_processed:
+              # There is a potential race condition with self.camera_last_processed being
+              # assinged from both mqtt and tk threads. That could be confusing or make the
+              # program fee unresponsive but shouldn't cause real harm.
+              # THIS ASSUMES capture to step zero, we should seatch for actual step.
+              fpath = os.path.join(bot_path, self.camera_last_filename)
+              ProcessStep.steps[0].parm_values['opencvfn'] = fpath
+              ProcessStep.steps[0].filter = 'FileImage'
+              ProcessStep.steps[0].UpdateAll()
+              self.camera_last_processed = True
           self.tk.tkw.update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
