@@ -8,6 +8,7 @@ import datetime
 import io
 import json
 import numpy
+import os
 import pickle
 import sys
 import threading
@@ -37,22 +38,36 @@ signal.signal(signal.SIGINT, signal_handler)
 # Streamer() is the socket_xfer writer function which runs in its own process.
 
 class cameraman(vnavs_mqtt.mqtt_node):
+    orders_parms = [
+			{'key': 'loopMode', 'values': ['pause', 'run', 'single'] },
+			{'key': 'loopFormat', 'values': ['bgr', 'jpeg', 'yuv'] },
+			{'key': 'loopPublish', 'values': ['file', 'stream'] },
+			{'key': 'captureMode', 'values': ['none', 'run', 'single'] },
+			{'key': 'captureFormat', 'values': ['bgr', 'jpeg'] },
+			{'key': 'capturePublish', 'values': ['file', 'mqtt', 'stream'] },
+			{'key': 'run', 'type': 's' },
+			{'key': 'iso', 'type': 'i', 'min': 0, 'max': 800 },
+			{'key': 'shutterSpeed', 'type': 'i' }
+    ]
+
     def __init__(self, Verbose=True):
         super().__init__(Subscriptions=['cameraman/orders', 'cameraman/ask_last'], Blocking=False, Streamer=False, Verbose=Verbose)
-        self.mode = 'p'			# s=single, r=run, p=paused
-        self.burst_fps = 0		# capture speed of last burst
+        self.burst_fps = 0			# capture speed of last burst
         self.camera_last_fn = None
-        self.camera_iso = 800
-        self.camera_shutter_speed = 10000
+        self.iso = 100
+        self.shutterSpeed = 0
         self.camera_resolution = (720, 480)
         self.camera = picamera.PiCamera()
-        self.capture = 'n'		# n=none, s=single, r=run
+        self.loopMode = 'pause'			# single, run, pause
+        self.loopFormat = 'jpeg'		# jpeg, bgr
+        self.loopPublish = 'file'
+        self.captureMode = 'none'		# n=none, s=single, r=run
+        self.captureFormat = 'jpeg'		# jpeg, bgr
+        self.capturePublish = 'file'		# f=file system, m=mqtt, s=streamer
         self.configuration_changed = True
-        self.format = 'j'		# j=jpeg, b=BGR
-        self.run = ''			# identifier to add to file names
-        self.publish = 's'		# f=file system, m=mqtt, s=streamer
-        self.image_ct = 0		# ct of images captured since __init__
-        time.sleep(2)			# camera setling time, needed?
+        self.run = ''				# identifier to add to file names
+        self.image_ct = 0			# ct of images captured since __init__
+        time.sleep(2)				# camera setling time, needed?
         self.timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
         self.last_fn = ''
         self.last_format = ''
@@ -60,58 +75,49 @@ class cameraman(vnavs_mqtt.mqtt_node):
     def rmsg_cameraman_ask_last(self, msg):
         payload = {}
         payload['filename'] = self.last_fn
-        payload['format'] = self.last_format
+        payload['CaptureFormat'] = self.last_format
         (res, mid) = self.mqttc.publish('cameraman/last', json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
 
-    def rmsg_cameraman_orders(self, msg):
+
+    def ValidateMessage(self, specs, msg):
         print("RMSG", msg)
-        # should we verify mode and report if a problem?
         try:
-            parms = json.loads(msg)
+            payload = json.loads(msg)
         except ValueError:
-            parms = {}
+            payload = {}
             print("Invalid JSON", `msg`)
-        if 'capture' in parms:
-            capture = parms['capture']
-            if capture in 'nrs':
-                # does not cause burst restart
-                self.capture = capture
-        if 'format' in parms:
-            format = parms['format']
-            if format in 'bj':
-                if format != self.format:
-                    configuration_changed = True
-                    self.format = format
-        if 'iso' in parms:
-            iso = int(parms['iso'])
-            if iso != self.camera_iso:
-                if (iso >= 0) and (iso <= 800):
-                    configuration_changed = True
-                    self.camera_iso = iso
-        if 'mode' in parms:
-            mode = parms['mode']
-            if mode in 'psr':
-                if mode != self.mode:
-                    configuration_changed = True
-                    self.mode = mode
-        if 'publish' in parms:
-            publish = parms['publish']
-            if publish in 'fms':
-                if publish != self.publish:
-                    configuration_changed = True
-                    self.publish = publish
-        if 'run' in parms:
-            run = parms['run']
-            if run != self.run:
-                configuration_changed = True
-                self.run = run
-        if 'shutter_speed' in parms:
-            shutter_speed = int(parms['shutter_speed'])
-            if shutter_speed != self.camera_shutter_speed:
-                configuration_changed = True
-                self.camera_shutter_speed = shutter_speed
+        for this_spec in specs:
+            fld_error = False
+            key = this_spec['key']
+            if key in payload:
+                value = payload[key]
+                if 'type' in this_spec:
+                    p_type = this_spec['type']
+                    if p_type == 'i':
+                        value = int(value)
+                    elif p_type == 's':
+                        value = str(value)
+                if 'min' in this_spec:
+                    p_min = this_spec['min']
+                    if value < p_min:
+                        fld_error = True
+                        print("Payload Error @ %s, '%s' < '%s'." % (key, value, p_min))
+                if 'max' in this_spec:
+                    p_max = this_spec['max']
+                    if value > p_max:
+                        fld_error = True
+                        print("Payload Error @ %s, '%s' > '%s'." % (key, value, p_max))
+                if 'values' in this_spec:
+                    if value not in this_spec['values']:
+                        fld_error = True
+                        print("Payload Error @ %s, invalid value '%s'." % (key, value))
+                if not fld_error:
+                    setattr(self, key, value)
+
+    def rmsg_cameraman_orders(self, msg):
+        self.ValidateMessage(self.orders_parms, msg)
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
@@ -123,12 +129,12 @@ class cameraman(vnavs_mqtt.mqtt_node):
             # infrequent enough and quick enough to recover that its not worth managing
             # a propper queue or semaphore.
             self.configuration_changed = False
-            self.camera_iso = self.camera_iso
+            self.camera_iso = self.iso
             self.camera_resolution = self.camera_resolution
-            self.camera_shutter_speed = self.camera_shutter_speed		# microseconds, 1000 = 1ms
+            self.camera_shutter_speed = self.shutterSpeed		# microseconds, 1000 = 1ms
             self.camera.vflip = True
             self.camera.hflip = True
-            self.camera.zoom = (0.0, 0.5, 1.0, 0.5)	# % x, y, w, h
+            # self.camera.zoom = (0.5, 0.5, 0.5, 0.5)	# % x, y, w, h
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
         self.ImageBurst()
 
@@ -142,9 +148,10 @@ class cameraman(vnavs_mqtt.mqtt_node):
         directions = {}
         directions['timeout'] = 3
         directions['speed'] = 2
-        if abs(d.avg_slope) > 5:
+        avg_slope = int(d.avg_slope)
+        if abs(avg_slope) > 8:
             directions['heading'] = 'AWS'
-        elif d.avg_slope < 0:
+        elif avg_slope < 0:
             directions['heading'] = 'RH-4'
         else:
             directions['heading'] = 'RH4'
@@ -170,45 +177,69 @@ class cameraman(vnavs_mqtt.mqtt_node):
         # Discussion of how to get images captured and processed quickly
         # http://picamera.readthedocs.io/en/release-1.12/recipes2.html
         #
-        if self.mode == 'p':
+        if self.loopMode == 'pause':
             return
-        burst_mode = self.mode
-        burst_publish = self.publish
+        burst_loopMode = self.loopMode
+        burst_loopFormat = self.loopFormat
+        burst_loopPublish = self.loopPublish
         burst_run = self.run
-        if self.format == 'b':
-            burst_format = 'bgr'
-        else:
-            burst_format = 'jpeg'
-        fn = 'R' + self.timestamp
+        fn = 'temp/R' + self.timestamp
         if self.run != '':
             fn += '_' + self.run
-        fn += '_%d_{counter:04d}.%s' % (self.image_ct, burst_format)
-        if burst_publish in 'ms':
-            burst_dest = picamera.array.PiRGBArray(self.camera, self.camera_resolution)
+        fn += '_%d_{counter:04d}.%s' % (self.image_ct, burst_loopFormat)
+        if burst_loopPublish == 'stream':
+            if burst_loopFormat == 'yuv':
+                burst_dest = picamera.array.PiYUVArray(self.camera)
+            elif burst_loopFormat in ['rgb', 'bgr']:
+                burst_dest = picamera.array.PiRGBArray(self.camera)
+            else:				# jpeg
+                burst_dest = io.BytesIO()
         else:
-            burst_dest = 'temp/' + fn
+            assert burst_loopFormat == 'jpeg'
+            burst_dest = fn
         #
         # Capture some pictures. This might be a single image or a long run of them.
         #
         burst_start_time = time.time()
         burst_ct = 0
-        print("READY", burst_format, burst_publish, burst_dest)
-        for im_fn in self.camera.capture_continuous(burst_dest, format=burst_format, use_video_port=True):
+        print("READY", burst_loopMode, burst_loopFormat, burst_loopPublish, burst_dest)
+        for im_fn in self.camera.capture_continuous(burst_dest, format=burst_loopFormat, use_video_port=True):
             self.image_ct += 1
             burst_ct += 1
-            if self.capture in 'rs':
-                if burst_publish == 'f':
+            # mqtt can change values asynchronously. copy so values are consistent during capture
+            captureMode = self.captureMode
+            captureFormat = self.captureFormat
+            capturePublish = self.capturePublish
+            if captureMode != 'none':
+                if burst_loopPublish == 'stream':
+                    # Assign file name same as picamera.capture() to file
+                    im_fn = fn.format(counter=self.image_ct)
+                if capturePublish == 'file':
+                    if burst_loopPublish == 'file':
+                        # the file is already written, make sure its the correct format
+                        assert captureFormat == burst_loopFormat
+                    else:
+                        if captureFormat == 'jpeg':
+                            im_fn = os.path.splitext(im_fn)[0] + '.' + captureFormat
+                            # to keep understandable, keep following if concistent with buffer creation if
+                            if burst_loopFormat == 'yuv': 
+                                cv2.imwrite(im_fn, burst_dest.rgb_array)
+                            elif burst_loopFormat in ['rgb', 'bgr']:
+                                cv2.imwrite(im_fn, burst_dest.array)
+                            else:
+                                f = open(im_fn, 'wb')
+                                f.write(burst_dest.getvalue())
+                                f.close()
                     self.last_fn = im_fn
-                    self.last_format = burst_format
+                    self.last_format = captureFormat
                     payload = {}
                     payload['filename'] = im_fn
-                    payload['format'] = burst_format
-                    payload['publish'] = burst_publish
+                    payload['captureFormat'] = captureFormat
+                    payload['capturePublish'] = capturePublish
                     (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
                     if res != mqtt.MQTT_ERR_SUCCESS:
                         print("MQTT Publish Error")
-                if burst_publish in 'ms':
-                    im_fn = fn.format(counter=self.image_ct)
+                """
                 if burst_publish == 'm':
                     self.Race(burst_dest, im_fn)
                     #buffer = pickle.dumps(burst_dest.array)
@@ -231,17 +262,18 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     payload['publish'] = burst_publish
                     payload['buflen'] = len(buffer)
                     self.streamer.write(json.dumps(payload) + chr(26) + buffer)
+                """
                 if self.verbose:
                     print("PIC", im_fn)
-            if burst_publish in 'ms':
+            if burst_loopPublish == 'stream':
                 # prepare for next image. This is needed even when not published
                 burst_dest.truncate()
                 burst_dest.seek(0)   # ?? needed for io.Bytes?? Required for PiRGBArray for subsequent images
-            if self.capture == 's':
-                self.capture = 'n'
-            if burst_mode == 's':
+            if self.captureMode == 'single':
+                self.captureMode = 'none'
+            if burst_loopMode == 'single':
                 # enter paused mode if we have taken our single picture
-                self.mode = 'p'
+                self.loopMode = 'pause'
                 break
             if  self.configuration_changed:
                 # end burst so configuration can be changed

@@ -426,14 +426,16 @@ class Race(object):
         image = simplest_cb(self.original, 20)
         #image = self.original
         bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        bw_image = cv2.blur(bw_image.copy(), (3,3))
+        #bw_image = cv2.blur(bw_image.copy(), (5,5))
+        bw_image = cv2.GaussianBlur(bw_image.copy(), (7,7), 0)
         canny_image = auto_canny(bw_image, 0.33)
         #(imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        self.h_lines = cv2.HoughLinesP(canny_image, 1, np.pi/180, 15, minLineLength=50, maxLineGap=20)
+        self.h_lines = cv2.HoughLinesP(canny_image, 1, np.pi/180, 15, minLineLength=75, maxLineGap=10)
         self.map_lines = []
         self.avg_slope = 0
 
     def ProcessLines(self):
+        VERTICAL_SLOPE = 9999
         h_color = (0, 0, 255)				# blue
         a_color = (0, 255, 0)				# green
         h_width = 1
@@ -455,14 +457,14 @@ class Race(object):
                     mrise = my2 - my1
                     mrun = mx2 - mx1
                     if abs(mrun) < 0.01:
-                        mslope = 9999
+                        mslope = VERTICAL_SLOPE
                     else:
                         mslope = mrise / mrun
                     mlen = math.sqrt((mrise ** 2) + (mrun ** 2))
                     p1dist = math.sqrt((mx1 ** 2) + (my1 ** 2))
                     p2dist = math.sqrt((mx2 ** 2) + (my2 ** 2))
                     mdist = min(p1dist, p2dist)
-                    if mdist < 100:
+                    if mdist < 300:
                         self.map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2)))
             self.map_lines.sort()
             cum_slope = 0
@@ -476,7 +478,7 @@ class Race(object):
             if ct_slope > 0:
                 avg_slope = cum_slope / ct_slope
             else:
-                avg_slope = "NO :ONES"
+                avg_slope = VERTICAL_SLOPE
             print("MAP", avg_slope)
             self.avg_slope = avg_slope
         cv2.imwrite('temp/ann.jpeg', self.annotated)
