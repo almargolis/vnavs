@@ -26,11 +26,6 @@ import numpy as np
 import OpticChiasm
 import vnavs_mqtt
 
-bot_path = "/Volumes/Home Directory/projects/vnavs"
-sample_path = 'python/samples/opencv_4_s.jpg'
-sample_file = "R20170325104118_0_0091-A.jpeg"
-sample_path = os.path.join(bot_path, 'temp', sample_file)
-
 BOT_1_MAP_TRANSPOSE = [
 
 			[ -1.30565584e-01,  -1.56472861e+00,   4.58333935e+02],
@@ -148,11 +143,11 @@ class TkWidgetDef(object):
             except ValueError:
                 active_index = 0
         tk_entry.selection_set(active_index)
+        tk_entry.see(active_index)
         parms = {'column': 1, 'row': self.last_row, 'sticky': (W, E) }
         if rowspan > 0:
             parms['rowspan'] = rowspan
         tk_entry.grid(**parms)
-        #tk_entry.grid(column=1, row=self.last_row, rowspan=height, sticky=(W, E))
         if self.col_ct < 2:
             self.col_ct = 2
         frame = TkWidgetDef(refname, tk_entry, Data=tk_data)
@@ -364,6 +359,10 @@ FILTERS = [
 						'Code': "im.copy()",
 						'Flags': ['inex', 'outim', 'isbase']
 						},
+		{'Name': 'ColorMask',		'Parms': [],
+						'Code': "OpticChiasm.ColorMask(im, colors=[OpticChiasm.HSV_MASK_WHITE, OpticChiasm.HSV_MASK_RED])",
+						'Flags': ['inprev', 'outim']
+						},
 		{'Name': 'FileImage',		'Parms': [('opencvfn', 's', '')],
 						'Code': "cv2.imread('{opencvfn}')",
 						'Flags': ['outim', 'isbase']
@@ -522,7 +521,10 @@ class ProcessStep(object):
                 s = int(s)
                 if s < 0:
                     s = v1 + s
-            e = v[1].strip()
+            if len(v) > 1:
+                e = v[1].strip()
+            else:
+                e = ''
             if e == '':
                 e = v1
             elif e[0] == 'm':
@@ -541,6 +543,8 @@ class ProcessStep(object):
             return
         if parm_type == 's':
             # this is a string
+            if raw_value is None:
+                raw_value = ''
             v = raw_value.strip()
             if '"' in v:
                 v = ''
@@ -689,6 +693,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
         super().__init__(Subscriptions=['archiver/pic_ready', 'cameraman/last', 'cameraman/pic_ready'], Blocking=True, BlockingTimeoutSecs=0.1)
         self.tk_is_initialized = False
+        self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.lastfn = ""
         self.Connect()			# This starts the mqtt client in another thread
         self.image = OpticChiasm.ImageAnalyzer()
@@ -716,7 +721,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
         ProcessStep.app = self
         #ProcessStep('None')
-        ProcessStep('FileImage', opencvfn=sample_path)
+        ProcessStep('FileImage', opencvfn=None)
         ProcessStep('ColorBalance')
         ProcessStep('Crop')
         ProcessStep('BW')
@@ -819,7 +824,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             opencv = bgr[...,::-1]
         publish = payload['publish']
         if publish == 'f':
-            fn = os.path.join(bot_path, fn)
+            fn = os.path.join(self.imageDir, fn)
             opencv = cv2.imread(fn)
         if opencv is not None:
             opencv_shape = opencv.shape
@@ -844,7 +849,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
               # assinged from both mqtt and tk threads. That could be confusing or make the
               # program fee unresponsive but shouldn't cause real harm.
               # THIS ASSUMES capture to step zero, we should seatch for actual step.
-              fpath = os.path.join(bot_path, self.camera_last_filename)
+              fpath = os.path.join(self.imageDir, self.camera_last_filename)
               ProcessStep.steps[0].parm_values['opencvfn'] = fpath
               ProcessStep.steps[0].filter = 'FileImage'
               ProcessStep.steps[0].UpdateAll()

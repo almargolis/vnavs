@@ -5,6 +5,8 @@ import time
 import sys
 import re
 
+HSV_MASK_WHITE = -1
+HSV_MASK_RED = 170
 
 # automatically set threshold using technique from 
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
@@ -191,6 +193,78 @@ def _thinningIteration(im, iter):
 	weave.inline(expr, ["I", "iter", "M"])
 	return (I & ~M)
 
+def ColorMaskWhite(hsvChannels):
+    minValue = 200
+    minValue = 175
+    maxSaturation = 50
+    maxSaturation = 75
+    ret, saturationMask = cv2.threshold(hsvChannels[1], maxSaturation, 255, cv2.THRESH_BINARY_INV)
+    ret, valueMask = cv2.threshold(hsvChannels[2], minValue, 255, cv2.THRESH_BINARY)
+    filterMask = cv2.bitwise_and(saturationMask, valueMask)
+    return filterMask
+
+def ColorMaskOneColor(hsvChannels, hueValue):
+    # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to 179,
+    # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
+    # Red color, value 0,  is one of the special case where our selection range wraps 0/179. 
+    assert (hueValue >= 0) and (hueValue <= 179)
+    hueRange = 25
+
+    minSaturation = 25
+    minSaturation = 50
+    minSaturation = 75
+    minSaturation = 100
+    minValue = 25
+    minValue = 50
+    minValue = 75
+    minValue = 100
+
+    hueArray = hsvChannels[0]
+
+    # is the color within the lower hue range?
+    hueMask = cv2.inRange(hueArray, hueValue - hueRange, hueValue + hueRange)
+
+    # If the color is near the limits of the 0 to 179 hue value range, check the overflow range.
+    hueWrapMask = None
+    if (hueValue - hueRange) < 0:
+        hueWrapLowerValue = 179 - (hueValue - hueRange)
+        hueWrapMask = cv2.inRange(hueArray, hueWrapLowerValue, 179)
+    elif (hueValue + hueRange) > 179:
+        hueWrapUpperValue = (hueValue + hueRange) - 179
+        hueWrapMask = cv2.inRange(hueArray, 0, hueWrapUpperValue)
+    if hueWrapMask is not None:
+        hueMask = cv2.bitwise_or(hueMask, hueWrapMask)
+
+    # Now we have to filter pixels where saturation and value do not fit the limits:
+    ret, saturationMask = cv2.threshold(hsvChannels[1], minSaturation, 255, cv2.THRESH_BINARY)
+    ret, valueMask = cv2.threshold(hsvChannels[2], minValue, 255, cv2.THRESH_BINARY)
+
+    print("HUE SHAPE", hueMask.shape, hueMask.dtype)
+    print("SAT SHAPE", saturationMask.shape, saturationMask.dtype)
+    print("VAL SHAPE", valueMask.shape, valueMask.dtype)
+    filterMask = cv2.bitwise_and(saturationMask, valueMask)
+    print("FIL SHAPE", filterMask.shape)
+    hueMask = cv2.bitwise_and(hueMask, filterMask)
+    print("FINAL SHAPE", hueMask.shape)
+    return hueMask
+
+def ColorMask(im, colors=[0]):
+    # adapted from http://stackoverflow.com/questions/35866411/opencv-how-to-detect-lines-of-a-specific-colour
+    # convert to HSV color space
+    hsvImage = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+    hsvChannels = cv2.split(hsvImage)
+
+    result = None
+    for this_hue in colors:
+        if this_hue < 0:
+            this_result = ColorMaskWhite(hsvChannels)
+        else:
+            this_result = ColorMaskOneColor(hsvChannels, this_hue)
+        if result is None:
+            result = this_result
+        else:
+            result = cv2.bitwise_or(result, this_result)
+    return result
 
 def thinning(src):
 	dst = src.copy() / 255
@@ -773,7 +847,7 @@ def DrawGrid(img):
   for y in range(grid_incr, height, grid_incr):
     cv2.line(img,(0,y),(width,y),(255,0,0), 1)
 
-if __name__ == '__main__':
+def test_old():
   fn = 'R20170325021241_1_0001.jpeg'
   fn = "R20170325021241_2_0001.jpeg"
   im = cv2.imread('temp/' + fn)
@@ -801,3 +875,17 @@ if __name__ == '__main__':
   stop_time = time.clock()
   print("Elapsed Time:", (stop_time - start_time))
 
+def test_ColorMask():
+    fn = 'test_images/red_strap.jpeg'
+    fn = 'test_images/red_strap_box.jpeg'
+    im = cv2.imread(fn)
+    hsvImage = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+    #bw = ColorMask(im, colors=[0, 60])		# red, yellow
+    bw = ColorMask(im, colors=[HSV_MASK_WHITE, HSV_MASK_RED])		# red, yellow
+
+    cv2.imshow('c', im)
+    cv2.imshow('bw', bw)
+    cv2.waitKey()
+
+if __name__ == '__main__':
+  test_ColorMask()
