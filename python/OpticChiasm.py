@@ -203,21 +203,15 @@ def ColorMaskWhite(hsvChannels):
     filterMask = cv2.bitwise_and(saturationMask, valueMask)
     return filterMask
 
-def ColorMaskOneColor(hsvChannels, hueValue):
+def ColorMaskOneColor(hsvChannels, hueValue, threshold=50):
     # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to 179,
     # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
     # Red color, value 0,  is one of the special case where our selection range wraps 0/179. 
     assert (hueValue >= 0) and (hueValue <= 179)
     hueRange = 25
 
-    minSaturation = 25
-    minSaturation = 50
-    minSaturation = 75
-    minSaturation = 100
-    minValue = 25
-    minValue = 50
-    minValue = 75
-    minValue = 100
+    minSaturation = threshold
+    minValue = threshold
 
     hueArray = hsvChannels[0]
 
@@ -248,7 +242,7 @@ def ColorMaskOneColor(hsvChannels, hueValue):
     print("FINAL SHAPE", hueMask.shape)
     return hueMask
 
-def ColorMask(im, colors=[0]):
+def ColorMask(im, colors=[0], threshold=50):
     # adapted from http://stackoverflow.com/questions/35866411/opencv-how-to-detect-lines-of-a-specific-colour
     # convert to HSV color space
     hsvImage = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
@@ -495,10 +489,12 @@ def mean(numbers):
 
 class Race(object):
     def __init__(self, im):
+        # im is an OpenCV BGR image object
         self.original = im
         self.annotated = None
-        image = simplest_cb(self.original, 20)
-        #image = self.original
+        #image = simplest_cb(self.original, 20)
+        image = self.original
+        bw = ColorMask(image, colors=[HSV_MASK_WHITE, HSV_MASK_RED], threshold=50)		# red, white
         bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         #bw_image = cv2.blur(bw_image.copy(), (5,5))
         bw_image = cv2.GaussianBlur(bw_image.copy(), (7,7), 0)
@@ -879,8 +875,6 @@ def test_ColorMask():
     fn = 'test_images/red_strap.jpeg'
     fn = 'test_images/red_strap_box.jpeg'
     im = cv2.imread(fn)
-    hsvImage = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
-    #bw = ColorMask(im, colors=[0, 60])		# red, yellow
     bw = ColorMask(im, colors=[HSV_MASK_WHITE, HSV_MASK_RED])		# red, yellow
 
     cv2.imshow('c', im)

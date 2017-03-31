@@ -21,6 +21,15 @@ handler_method_prefix = 'rmsg_'
 
 stop_process = False
 
+
+def PiShutdown():
+    command = "/usr/bin/sudo /sbin/shutdown -h now"
+    import subprocess
+    process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
+    output = process.communicate()[0]
+    print(output)
+
+
 #
 # Streamer() is the socket_xfer writer function which runs in its own process.
 # It empties the FIFO system queue as quickly as it can and converts that to a
@@ -240,3 +249,5 @@ def Test_Mqtt_Node():
     n = mqtt_node(Subscriptions=['test'], Blocking=True)
     n.Connect()
 
+if __name__ == "__main__":
+    PiShutdown()
