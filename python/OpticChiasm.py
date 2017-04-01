@@ -494,8 +494,8 @@ class Race(object):
         self.annotated = None
         #image = simplest_cb(self.original, 20)
         image = self.original
-        bw = ColorMask(image, colors=[HSV_MASK_WHITE, HSV_MASK_RED], threshold=50)		# red, white
-        bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        bw_image = ColorMask(image, colors=[HSV_MASK_WHITE, HSV_MASK_RED], threshold=50)		# red, white
+        #bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         #bw_image = cv2.blur(bw_image.copy(), (5,5))
         bw_image = cv2.GaussianBlur(bw_image.copy(), (7,7), 0)
         canny_image = auto_canny(bw_image, 0.33)

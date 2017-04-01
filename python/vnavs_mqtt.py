@@ -157,7 +157,7 @@ class mqtt_node(object):
         else:
             print("Non-Blocking Mode")
 
-    def Connect(self):
+    def Connect(self, timeout=0):
         self.mqttc = mqtt.Client()
         # Assign event callbacks
         self.mqttc.on_message = self.on_message
@@ -165,7 +165,17 @@ class mqtt_node(object):
         self.mqttc.on_publish = self.on_publish
         self.mqttc.on_subscribe = self.on_subscribe
         # Connect
-        self.mqttc.connect(self.broker_host, self.broker_port, self.broker_timeout)
+        connected = False
+        connect_time = time.time()
+        while not connected:
+            try:
+                self.mqttc.connect(self.broker_host, self.broker_port, self.broker_timeout)
+                connected = True
+            except socket.error:
+                print ("vnavs_mqtt: unable to connect to broker")
+                if (timeout > 0) and ((time.time() - connect_time) > timeout):
+                    raise
+                time.sleep(1)
         if self.blocking_mode:
             if self.blocking_timeout <= 0:
                 self.mqttc.loop_forever()

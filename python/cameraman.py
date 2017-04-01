@@ -24,13 +24,6 @@ import paho.mqtt.client as mqtt
 
 import OpticChiasm
 
-if sys.version_info[0] < 3:
-    import ConfigParser
-else:
-    import configparser as ConfigParser
-
-config_file_path = os.path.expanduser("~/vnavs.ini")
-
 import signal
 print("CONFIGURING SIGNAL")
 stop_process = False
@@ -78,8 +71,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
         self.last_fn = ''
         self.last_format = ''
-        self.config = ConfigParser.SafeConfigParser()
-        self.config.readfp(open(config_file_path))
         self.imageDir = self.config.get("Cameraman", "ImageDir")
 
     def rmsg_cameraman_ask_last(self, msg):
