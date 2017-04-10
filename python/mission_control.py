@@ -22,8 +22,6 @@ import OpticChiasm
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
-bot_path = "/Volumes/pi-1/projects/vnavs"
-
 BOT_1_MAP_TRANSPOSE = [
 
 			[ -1.30565584e-01,  -1.56472861e+00,   4.58333935e+02],
@@ -48,6 +46,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.image.img_crop=None
         self.image.img_cropped_height = 100
         self.image.img_fpath = 'opencv_6'
+        self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.image.img_source_dir = '/volumes/pi/projects/vnavs/temp'
         self.image.img_fname_suffix = ''
         self.image.do_save_snaps = False
@@ -99,10 +98,11 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
         # row 4
         fn = "bgr.jpeg"
-        #path = os.path.join(bot_path, fn)
+        #path = os.path.join(self.imageDir, fn)
         self.f1_img1 = ttk.Label(mainframe)
         path = fn
-        self.img1_pil = self.ImagePillow(path)
+        #self.img1_pil = self.ImagePillow(path)
+        self.img1_pil = None
         if self.img1_pil is None:
             self.img1_tk = None
         else:
@@ -153,40 +153,37 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         if not self.tk_is_initialized:
             return
         payload = json.loads(msg)
-        new_fn = payload['filename']
-        if new_fn == self.pic_fn:
-            return
-        #time.sleep(0.5)
-        self.pic_fn = new_fn
+        self.pic_fn = payload['filename']
         self.pic_processed = False
         print("PIC", self.pic_fn)
 
     def SnapPic(self):
         payload = {}
-        payload['mode'] = 's'
-        payload['publish'] = 'f'
-        payload['capture'] = 's'
-        payload['format'] = 'j'
+        payload['loopMode'] = 'run'
+        payload['loopFormat'] = 'bgr'
+        payload['loopPublish'] = 'stream'
+        payload['captureMode'] = 'run'
+        payload['captureFormat'] = 'jpeg'
+        payload['capturePublish'] = 'file'
         (res, mid) = self.mqttc.publish('cameraman/orders', json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
 
     def StartNav(self):
         payload = {}
-        payload['mode'] = 'r'
-        payload['publish'] = 'm'
-        payload['capture'] = 'r'
-        payload['format'] = 'b'
+        payload['loopMode'] = 'run'
+        payload['loopFormat'] = 'jpeg'
+        payload['loopPublish'] = 'stream'
+        payload['captureMode'] = 'run'
+        payload['captureFormat'] = 'jpeg'
+        payload['capturePublish'] = 'race'
         (res, mid) = self.mqttc.publish('cameraman/orders', json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
 
     def StopNav(self):
         payload = {}
-        payload['mode'] = 'p'
-        payload['publish'] = 'm'
-        payload['capture'] = 'n'
-        payload['format'] = 'b'
+        payload['captureMode'] = 'none'
         (res, mid) = self.mqttc.publish('cameraman/orders', json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
@@ -200,7 +197,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
     def ProcessImage(self):
         self.f1_fname.set(self.pic_fn)
-        path = os.path.join(bot_path, self.pic_fn)
+        path = os.path.join(self.imageDir, self.pic_fn)
         self.img1_pil = self.ImagePillow(path)
         #self.img2_pil = self.ImageCv2(path)
         if self.img1_pil is None:
@@ -227,11 +224,11 @@ class MissionControl(vnavs_mqtt.mqtt_node):
               pass
           else:
               self.ProcessImage()
-          if (not self.pic_requested) or ((time.time() - self.pic_request_time) > 1):
-              print("ASK LAST")
-              #self.mqttc.publish('cameraman/ask_last', '')
-              self.pic_requested = True
-              self.pic_request_time = time.time()
+          #if (not self.pic_requested) or ((time.time() - self.pic_request_time) > 1):
+          #    print("ASK LAST")
+          #    #self.mqttc.publish('cameraman/ask_last', '')
+          #    self.pic_requested = True
+          #    self.pic_request_time = time.time()
           self.tk_root.update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

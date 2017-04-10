@@ -44,7 +44,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
 			{'key': 'loopPublish', 'values': ['file', 'stream'] },
 			{'key': 'captureMode', 'values': ['none', 'run', 'single'] },
 			{'key': 'captureFormat', 'values': ['bgr', 'jpeg'] },
-			{'key': 'capturePublish', 'values': ['file', 'mqtt', 'stream'] },
+			{'key': 'capturePublish', 'values': ['file', 'mqtt', 'race', 'sample', 'stream'] },
 			{'key': 'run', 'type': 's' },
 			{'key': 'iso', 'type': 'i', 'min': 0, 'max': 800 },
 			{'key': 'shutterSpeed', 'type': 'i' }
@@ -71,6 +71,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
         self.last_fn = ''
         self.last_format = ''
+        self.imageDir = self.config.get("Cameraman", "ImageDir")
 
     def rmsg_cameraman_ask_last(self, msg):
         payload = {}
@@ -142,9 +143,12 @@ class cameraman(vnavs_mqtt.mqtt_node):
         d = OpticChiasm.Race(burst_dest.array.copy())
         d.ProcessLines()
         fpx = im_fn[:-4]
-        cv2.imwrite('temp/' + fpx + '-A.jpeg', d.original)
-        annotated_fn = 'temp/' + fpx + '-B.jpeg'
-        cv2.imwrite(annotated_fn , d.annotated)
+        im_fn = fpx + '-A.jpeg'
+        im_path = os.path.join(self.imageDir, im_fn)
+        cv2.imwrite(im_path , d.original)
+        annotated_fn = fpx + '-B.jpeg'
+        annotated_path = os.path.join(self.imageDir, annotated_fn)
+        cv2.imwrite(annotated_path , d.annotated)
         directions = {}
         directions['timeout'] = 3
         directions['speed'] = 2
@@ -183,7 +187,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         burst_loopFormat = self.loopFormat
         burst_loopPublish = self.loopPublish
         burst_run = self.run
-        fn = 'temp/R' + self.timestamp
+        fn = 'R' + self.timestamp
         if self.run != '':
             fn += '_' + self.run
         fn += '_%d_{counter:04d}.%s' % (self.image_ct, burst_loopFormat)
@@ -196,7 +200,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 burst_dest = io.BytesIO()
         else:
             assert burst_loopFormat == 'jpeg'
-            burst_dest = fn
+            burst_dest = os.path.join(self.imageDir, fn)
         #
         # Capture some pictures. This might be a single image or a long run of them.
         #
@@ -211,25 +215,39 @@ class cameraman(vnavs_mqtt.mqtt_node):
             captureFormat = self.captureFormat
             capturePublish = self.capturePublish
             if captureMode != 'none':
+                print("MODE", capturePublish)
                 if burst_loopPublish == 'stream':
                     # Assign file name same as picamera.capture() to file
                     im_fn = fn.format(counter=self.image_ct)
-                if capturePublish == 'file':
+                if capturePublish in ['file', 'sample']:
                     if burst_loopPublish == 'file':
                         # the file is already written, make sure its the correct format
                         assert captureFormat == burst_loopFormat
                     else:
+                        if capturePublish == 'sample':
+                            im_publish_fn = 'sample.' + burst_loopFormat
+                            im_publish_path = os.path.join(self.imageDir, im_publish_fn)
+                            im_fn = 'temp.' + im_publish_fn
                         if captureFormat == 'jpeg':
                             im_fn = os.path.splitext(im_fn)[0] + '.' + captureFormat
-                            # to keep understandable, keep following if concistent with buffer creation if
+                            im_path = os.path.join(self.imageDir, im_fn)
+                            # to keep understandable, keep following if consistent with buffer creation if
                             if burst_loopFormat == 'yuv': 
-                                cv2.imwrite(im_fn, burst_dest.rgb_array)
+                                cv2.imwrite(im_path, burst_dest.rgb_array)
                             elif burst_loopFormat in ['rgb', 'bgr']:
-                                cv2.imwrite(im_fn, burst_dest.array)
+                                cv2.imwrite(im_path, burst_dest.array)
                             else:
                                 f = open(im_fn, 'wb')
                                 f.write(burst_dest.getvalue())
                                 f.close()
+                            if capturePublish == 'sample':
+                                # mission_control.py was reading sample.jpeg while this was writing a new one.
+                                # even this fails frequently. maybe round-robin a few file names.
+                                # this would be a nice mode to have in order to observe images without
+                                # running out of disk space. there is a good amount of lag and no good
+                                # locking system with nfs/afp sharing path.
+                                os.rename(im_path, im_publish_path)
+                                im_fn = im_publish_fn
                     self.last_fn = im_fn
                     self.last_format = captureFormat
                     payload = {}
@@ -239,6 +257,10 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
                     if res != mqtt.MQTT_ERR_SUCCESS:
                         print("MQTT Publish Error")
+                if capturePublish == 'race':
+                    assert burst_loopPublish == 'stream'
+                    assert burst_loopFormat == 'bgr'
+                    self.Race(burst_dest, im_fn)
                 """
                 if burst_publish == 'm':
                     self.Race(burst_dest, im_fn)

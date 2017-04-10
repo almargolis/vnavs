@@ -1,6 +1,6 @@
 #/bin/bash
-cd /home/pi/projects/vnavs
+cd ~/projects/vnavs
 export VIRTUALENVWRAPPER_PYTHON=/usr/bin/python
 source /usr/local/bin/virtualenvwrapper.sh
-workon p3
-python python/helmsman.py
+workon p2
+python python/cameraman.py

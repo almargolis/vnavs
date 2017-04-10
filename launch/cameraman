@@ -1,0 +1,2 @@
+#/bin/bash
+screen -d -m -S cameraman /bin/bash ~/projects/vnavs/launch/run_cameraman
