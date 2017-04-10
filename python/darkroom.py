@@ -35,9 +35,12 @@ BOT_1_MAP_TRANSPOSE = [
 
 BOT_1_H = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
+SAME_ROW = -1
+NEXT_ROW = -2
+NEXT_COL = -3
+
 class TkWidgetDef(object):
     root = None
-    defaultDir = '.'
 
     def __init__(self, wname, tkw, Data=None, tkw_label=None, parm_id=None):
         self.wname = wname		# reference name for this widget
@@ -57,6 +60,8 @@ class TkWidgetDef(object):
         self.thumbnail = None		# update this thumbnail if image is changed
         self.thumbnailwidth = 0		# width of thumbnail
         self.children = []
+        self.canvasWidth = 400
+        self.canvasHeight = 200
         self.parm_id = parm_id		# associated application field, not directly used for TK stuff
         if self.root is None:
             self.root = self
@@ -212,18 +217,19 @@ class TkWidgetDef(object):
         if new_TkWidgetDef.right_col > self.col_ct:
             self.col_ct = new_TkWidgetDef.right_col
 
-    def AddCanvas(self, fn=None, opencv=None, opencvfn=None, 
+    def AddCanvas(self, fp=None, opencv=None, opencvfn=None, 
 				thumbnailof=None, thumbnailwidth=100,
+				width=400, height=200,
 				row=-2, col=-2, colspan=1, rowspan=1):
         row, col = self.Position(row=row, col=col)
-        canvas = Canvas(self.tkw)
+        canvas = Canvas(self.tkw, width=width, height=height)
         frame = TkWidgetDef('', canvas)
 
         # The scrollbars are TK properties of the same frame as as the canvas.
         # We save the widget definitions with the canvas.
         frame.scrollableImage = None
-        frame.canvasWidth = 400
-        frame.canvasHeight = 200
+        frame.canvasWidth = width
+        frame.canvasHeight = height
         frame.hbar=ttk.Scrollbar(self.tkw, orient=HORIZONTAL)
         frame.hbar.grid(row=row+1, column=col, sticky=E+W)
         frame.vbar=ttk.Scrollbar(self.tkw, orient=VERTICAL)
@@ -232,7 +238,7 @@ class TkWidgetDef(object):
         self.AttachScrollbars()
 
         if thumbnailof is None:
-            frame.UpdateImage(fn=fn, opencv=opencv, opencvfn=opencvfn)
+            frame.UpdateImage(fp=fp, opencv=opencv, opencvfn=opencvfn)
         else:
             # after this, the thumbnail will be automatically updated whenever the base image is updated
             frame.UpdateImage(opencv=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
@@ -271,14 +277,13 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def UpdateImage(self, fn=None, opencv=None, opencvfn=None):
+    def UpdateImage(self, fp=None, opencv=None, opencvfn=None):
         # Replaces image in Canvas and Label widgets
         img_pil = None
         img_tk = None
-        if fn is not None:
-            path = os.path.join(self.defaultDir, fn)
+        if fp is not None:
             try:
-                img_pil = Image.open(path)
+                img_pil = Image.open(fp)
             except IOError:
                 img_pil = None
             self.opencv_im = None
@@ -291,6 +296,12 @@ class TkWidgetDef(object):
             img_pil = Image.fromarray(opencv)
         #
         if img_pil is not None:
+            imWidth = img_pil.width
+            if self.canvasWidth < imWidth:
+                imHeight = img_pil.height
+                height = int((self.canvasWidth / imWidth) * imHeight)
+                img_pil = img_pil.resize((self.canvasWidth, height))
+                print("RESIZE", self.canvasWidth, height)
             img_tk = ImageTk.PhotoImage(img_pil)
         self.tkd = img_tk
         if img_tk is not None:
@@ -359,8 +370,8 @@ FILTERS = [
 						'Code': "im.copy()",
 						'Flags': ['inex', 'outim', 'isbase']
 						},
-		{'Name': 'ColorMask',		'Parms': [],
-						'Code': "OpticChiasm.ColorMask(im, colors=[OpticChiasm.HSV_MASK_WHITE, OpticChiasm.HSV_MASK_RED])",
+		{'Name': 'ColorMask',		'Parms': [('threshold', 'i', '50'), ('wthreshold', 'i', 50)],
+						'Code': "OpticChiasm.ColorMask(im, colors=[OpticChiasm.HSV_MASK_WHITE, OpticChiasm.HSV_MASK_RED], threshold={threshold})",
 						'Flags': ['inprev', 'outim']
 						},
 		{'Name': 'FileImage',		'Parms': [('opencvfn', 's', '')],
@@ -656,7 +667,7 @@ class ProcessStep(object):
             ct_slope = 0
             print("MAP", h, m, w)
             for this in map_lines[:5]:
-                cv2.line(self.im,this[5],this[6],(0,0,255),1)
+                cv2.line(self.im,this[5],this[6],(0,0,255),3)
                 print(this)
                 ct_slope += 1
                 cum_slope += this[2]
@@ -745,11 +756,11 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         try:
             settings['iso'] = int(self.camera_iso.CurrentValue())
         except TypeError:
-            pass
+            self.camera_iso.set(100)
         try:
             settings['shutterSpeed'] = int(self.camera_shutter_speed.CurrentValue())
         except TypeError:
-            pass
+            self.camera_shutter_speed.set(0)
         settings['loopMode'] = 'run'
         settings['loopFormat'] = 'bgr'
         settings['loopPublish'] = 'stream'
@@ -857,5 +868,6 @@ class Darkroom(vnavs_mqtt.mqtt_node):
           self.tk.tkw.update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
-m = Darkroom()
-m.mainloop()
+if __name__ == '__main__':
+    m = Darkroom()
+    m.mainloop()

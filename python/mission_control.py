@@ -33,7 +33,9 @@ BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=['cameraman/last', 'cameraman/pic_ready', 'helmsman/orders'], Blocking=True, BlockingTimeoutSecs=0.1)
+        super().__init__(Subscriptions=['cameraman/last', 'cameraman/pic_ready', 
+						'engineer_1/status', 'helmsman/orders'], 
+						Blocking=True, BlockingTimeoutSecs=0.1)
         self.tk_is_initialized = False
         self.lastfn = ""
         self.Connect()			# This starts the mqtt client in another thread
@@ -57,46 +59,50 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
         mainframe = self.tk_root
 
-        # row 0
+        #
         this_row = 0
-        self.f1_run_name = StringVar()
-        self.f1_run_name.set('')
-        ttk.Label(mainframe, text='Run Name').grid(column=0, row=this_row, sticky=W)
-        self.f1_run_name_entry = ttk.Entry(mainframe, width=7, textvariable=self.f1_run_name)
-        self.f1_run_name_entry.grid(column=1, row=this_row, sticky=(W, E))
+        self.f1_helmsman_status = StringVar()
+        self.f1_helmsman_status.set('')
+        ttk.Label(mainframe, text='Helmsman').grid(column=0, row=this_row, sticky=W)
+        self.f1_helmsman_entry = ttk.Entry(mainframe, width=75, textvariable=self.f1_helmsman_status)
+        self.f1_helmsman_entry.grid(column=1, row=this_row, sticky=(W, E))
 
-        # row 1
-        this_row = 1
+        #
+        this_row += 1
+        self.f1_engineer_1_status = StringVar()
+        self.f1_engineer_1_status.set('')
+        ttk.Label(mainframe, text='Engineer_1').grid(column=0, row=this_row, sticky=W)
+        self.f1_engineer_1_entry = ttk.Entry(mainframe, width=75, textvariable=self.f1_engineer_1_status)
+        self.f1_engineer_1_entry.grid(column=1, row=this_row, sticky=(W, E))
+
+        #
+        this_row += 1
         f = ttk.Frame(mainframe)
-        f.grid(row=this_row, column=0, columnspan=4)
+        f.grid(row=this_row, column=0, columnspan=2)
         b = ttk.Button(f, text='Start', command=self.StartNav)
-        b.grid(row=this_row, column=0)
+        b.grid(row=0, column=0)
         b = ttk.Button(f, text='Stop', command=self.StopNav)
-        b.grid(row=this_row, column=1)
+        b.grid(row=0, column=1)
         b = ttk.Button(f, text='Snap', command=self.SnapPic)
-        b.grid(row=this_row, column=2)
-        #ttk.Label(mainframe, text='Speed').grid(column=0, row=this_row, sticky=W)
-        #self.f1_speed_control = Scale(mainframe, from_=-100, to=100, orient="horizontal")
-        #self.f1_speed_control.grid(column=1, row=this_row)
-        #self.f1_speed_display = ttk.Label(mainframe, text='0')
-        #self.f1_speed_display.grid(column=2, row=this_row, sticky=W)
+        b.grid(row=0, column=2)
 
-        # row 2
-        this_row = 2
+        #
+        this_row += 1
         ttk.Label(mainframe, text='Steering').grid(column=0, row=this_row, sticky=W)
         self.f1_steering_control = Scale(mainframe, from_=0, to=100, orient="horizontal")
         self.f1_steering_control.grid(column=1, row=this_row)
         self.f1_steering_display = ttk.Label(mainframe, text='0')
         self.f1_steering_display.grid(column=2, row=this_row, sticky=W)
 
-        # row 3
-        this_row = 3
+        #
+        this_row += 1
         self.f1_fname = StringVar()
         self.f1_fname.set('fname')
         self.f1_label1 = ttk.Label(mainframe, textvariable=self.f1_fname)
         self.f1_label1.grid(columnspan=2, row=this_row, sticky=W)
 
-        # row 4
+        #
+        this_row += 1
         fn = "bgr.jpeg"
         #path = os.path.join(self.imageDir, fn)
         self.f1_img1 = ttk.Label(mainframe)
@@ -108,21 +114,9 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         else:
             self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
             self.f1_img1.configure(image = self.img1_tk)
-        self.f1_img1.grid(column=0, columnspan=2, row=4, sticky=W)
+        self.f1_img1.grid(column=0, columnspan=2, row=this_row, sticky=W)
 
-        # row 5
-        self.f1_img2 = ttk.Label(mainframe)
-        self.img2_pil = self.ImageCv2(path)
-        if self.img2_pil is None:
-            self.img2_tk = None
-        else:
-            self.img2_tk = ImageTk.PhotoImage(self.img2_pil)
-            self.f1_img2.configure(image = self.img2_tk)
-        self.f1_img2.grid(column=3, columnspan=1, row=4, sticky=W)
-        #for child in mainframe.winfo_children():
-        #    child.grid_configure(padx=5, pady=5)
-
-        self.f1_run_name_entry.focus()
+        self.f1_helmsman_entry.focus()
 
     def ImageCv2(self, path):
         im = cv2.imread(path)
@@ -144,7 +138,10 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         return im
 
     def rmsg_helmsman_orders(self, msg):
-        self.f1_run_name.set(msg)
+        self.f1_helmsman_status.set(msg)
+
+    def rmsg_engineer_1_status(self, msg):
+        self.f1_engineer_1_status.set(msg)
 
     def rmsg_cameraman_pic_ready(self, msg):
         self.rmsg_cameraman_last(msg)
@@ -172,7 +169,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
     def StartNav(self):
         payload = {}
         payload['loopMode'] = 'run'
-        payload['loopFormat'] = 'jpeg'
+        payload['loopFormat'] = 'bgr'
         payload['loopPublish'] = 'stream'
         payload['captureMode'] = 'run'
         payload['captureFormat'] = 'jpeg'
@@ -199,17 +196,11 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.f1_fname.set(self.pic_fn)
         path = os.path.join(self.imageDir, self.pic_fn)
         self.img1_pil = self.ImagePillow(path)
-        #self.img2_pil = self.ImageCv2(path)
         if self.img1_pil is None:
             self.img1_tk = None
         else:
             self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
             self.f1_img1.configure(image = self.img1_tk)
-        if self.img2_pil is None:
-            self.img2_tk = None
-        else:
-            self.img2_tk = ImageTk.PhotoImage(self.img2_pil)
-            self.f1_img2.configure(image = self.img2_tk)
         self.pic_processed = True
         self.pic_requested = False
 

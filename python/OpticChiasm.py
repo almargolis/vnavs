@@ -193,11 +193,9 @@ def _thinningIteration(im, iter):
 	weave.inline(expr, ["I", "iter", "M"])
 	return (I & ~M)
 
-def ColorMaskWhite(hsvChannels):
-    minValue = 200
-    minValue = 175
-    maxSaturation = 50
-    maxSaturation = 75
+def ColorMaskWhite(hsvChannels, threshold=50):
+    minValue = 255 - threshold
+    maxSaturation = threshold
     ret, saturationMask = cv2.threshold(hsvChannels[1], maxSaturation, 255, cv2.THRESH_BINARY_INV)
     ret, valueMask = cv2.threshold(hsvChannels[2], minValue, 255, cv2.THRESH_BINARY)
     filterMask = cv2.bitwise_and(saturationMask, valueMask)
@@ -242,7 +240,7 @@ def ColorMaskOneColor(hsvChannels, hueValue, threshold=50):
     print("FINAL SHAPE", hueMask.shape)
     return hueMask
 
-def ColorMask(im, colors=[0], threshold=50):
+def ColorMask(im, colors=[0], threshold=50, wthreshold=50):
     # adapted from http://stackoverflow.com/questions/35866411/opencv-how-to-detect-lines-of-a-specific-colour
     # convert to HSV color space
     hsvImage = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
@@ -251,9 +249,9 @@ def ColorMask(im, colors=[0], threshold=50):
     result = None
     for this_hue in colors:
         if this_hue < 0:
-            this_result = ColorMaskWhite(hsvChannels)
+            this_result = ColorMaskWhite(hsvChannels, threshold=wthreshold)
         else:
-            this_result = ColorMaskOneColor(hsvChannels, this_hue)
+            this_result = ColorMaskOneColor(hsvChannels, this_hue, threshold=threshold)
         if result is None:
             result = this_result
         else:
@@ -874,8 +872,9 @@ def test_old():
 def test_ColorMask():
     fn = 'test_images/red_strap.jpeg'
     fn = 'test_images/red_strap_box.jpeg'
+    fn = 'test_images/white_line.jpeg'
     im = cv2.imread(fn)
-    bw = ColorMask(im, colors=[HSV_MASK_WHITE, HSV_MASK_RED])		# red, yellow
+    bw = ColorMask(im, colors=[HSV_MASK_WHITE, HSV_MASK_RED], wthreshold=5)		# red, yellow
 
     cv2.imshow('c', im)
     cv2.imshow('bw', bw)
