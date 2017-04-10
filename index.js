@@ -6,36 +6,10 @@ var path = require('path');
 var spawn = require('child_process').spawn;
 var proc;
 
-var mqtt = require('mqtt')
-var mqtt_topic_take_pic = 'helmsman/take_pic'
-var mqtt_topic_drive = 'helmsman/orders'
-
-var config_fn = expandHomeDir('~/vnavs.ini')
-var config = ini.parse(fs.readFileSync(config_fn, 'utf-8'))
-var mqtt_broker = 'mqtt://' + config.MqttBroker.Host
-var mqttc  = mqtt.connect(mqtt_broker)
-
-
- 
-//mqttc.on('connect', function () {
-//  mqttc.subscribe('presence')
-//  mqttc.publish('presence', 'Hello mqtt')
-//})
- 
-//mqttc.on('message', function (topic, message) {
-  // message is Buffer 
-//  console.log(message.toString())
-//  mqttc.end()
-//})
-
-var image_subdir = '/temp'
-var image_path = image_subdir + '/single.jpg'
-var image_fqn = '/home/pi/projects/vnavs' + image_path
-var static_subdir = '/node_root'
-
 // connect, message and disconnect are built-in socket.io event names
 var socket_event_connect = 'connect'
 var socket_event_disconnect = 'disconnect'
+var socket_event_gps = 'gps'				// to browser, provide gps state
 var socket_event_imageReady = 'imageReady'		// to browser, notify that image available
 var socket_event_status = 'vnavsStatus'			// to browser, provide vnavs state
 var socket_event_startStream = 'startStream'		// from browser, request to start getting notifications
@@ -45,6 +19,32 @@ var socket_event_move_slow = 'moveSlow'			// from browser, move slow
 var socket_event_move_reverse = 'moveReverse'		// from browser, move backward
 var socket_event_move_stop = 'moveStop'			// from browser, move stop
 var socket_event_steer = 'steer'
+var mqtt = require('mqtt')
+var mqtt_topic_take_pic = 'helmsman/take_pic'
+var mqtt_topic_drive = 'helmsman/orders'
+
+var config_fn = expandHomeDir('~/vnavs.ini')
+var config = ini.parse(fs.readFileSync(config_fn, 'utf-8'))
+var mqtt_broker = 'mqtt://' + config.MqttBroker.Host
+var mqttc  = mqtt.connect(mqtt_broker)
+
+mqttc.on('connect', function () {
+  mqttc.subscribe('engineer_1/status')
+//  mqttc.publish('presence', 'Hello mqtt')
+})
+ 
+mqttc.on('message', function (topic, message) {
+  if (topic === 'engineer_1/status') {
+    io.sockets.emit(socket_event_gps, message.toString());
+    //  mqttc.end()
+  }
+})
+
+var image_subdir = '/temp'
+var image_path = image_subdir + '/single.jpg'
+var image_fqn = '/home/pi/projects/vnavs' + image_path
+var static_subdir = '/node_root'
+
 
 var app = express();
 var http = require('http').Server(app);

@@ -216,7 +216,7 @@ class vehicle(object):
         self.steering_tick = 0			# time increment / step in plan
         self.steering_tock = 0
         goal_type = steering_goal[1]
-        goal_degree = int(steering_goal[2:]) * self.steering_increment
+        goal_degree = (int(steering_goal[2:]) * self.steering_increment)
         if goal_type == 'V':
             # veer
             self.steering_plan = [goal_degree, goal_degree, 0, 0, -goal_degree, -goal_degree]

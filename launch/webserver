@@ -1,2 +1,2 @@
 #/bin/bash
-screen -S web -d -m /home/pi/projects/vnavs/launch/run_webserver
+screen -S webserver -d -m /bin/bash ~/projects/vnavs/launch/run_webserver

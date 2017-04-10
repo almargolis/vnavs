@@ -7,6 +7,16 @@ import re
 
 HSV_MASK_WHITE = -1
 HSV_MASK_RED = 170
+HSV_MASK_YELLOW = 30
+
+RACE_BLUR = False
+RACE_CANNY = False
+RACE_CANNY = True
+RACE_CROP_X = None
+RACE_CROP_Y = 200
+RACE_WTHRESHOLD = 20
+RACE_THRESHOLD = 130
+RACE_THRESHOLD = 50
 
 # automatically set threshold using technique from 
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
@@ -486,19 +496,34 @@ def mean(numbers):
     return sum(numbers) / len(numbers)
 
 class Race(object):
-    def __init__(self, im):
+    def __init__(self, image):
         # im is an OpenCV BGR image object
-        self.original = im
-        self.annotated = None
+        self.original = image
+        if (RACE_CROP_X is not None) or (RACE_CROP_Y is not None):
+            height, width, channels = image.shape
+            if RACE_CROP_X is None:
+                c_x = 0
+                c_w = width
+            else:
+                c_x = self.img_crop[0]
+                c_w = self.img_crop[1]
+            if RACE_CROP_Y is None:
+                c_y = 0
+            else:
+                c_y = height - RACE_CROP_Y
+            print("Crop: (%d, %d) start (%d, %d) width %d" % (width, height, c_x, c_y, c_w))
+            image = image[c_y:height, c_x:c_x+c_w]
+        self.annotated = image.copy()
         #image = simplest_cb(self.original, 20)
-        image = self.original
-        bw_image = ColorMask(image, colors=[HSV_MASK_WHITE, HSV_MASK_RED], threshold=50)		# red, white
+        image = ColorMask(image, colors=[HSV_MASK_WHITE, HSV_MASK_RED, HSV_MASK_YELLOW], threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
         #bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         #bw_image = cv2.blur(bw_image.copy(), (5,5))
-        bw_image = cv2.GaussianBlur(bw_image.copy(), (7,7), 0)
-        canny_image = auto_canny(bw_image, 0.33)
+        if RACE_BLUR:
+            image = cv2.GaussianBlur(image.copy(), (5,5), 0)
+        if RACE_CANNY:
+            image = auto_canny(image, 0.33)
         #(imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        self.h_lines = cv2.HoughLinesP(canny_image, 1, np.pi/180, 15, minLineLength=75, maxLineGap=10)
+        self.h_lines = cv2.HoughLinesP(image, 1, np.pi/180, 15, minLineLength=50, maxLineGap=10)
         self.map_lines = []
         self.avg_slope = 0
 
@@ -510,7 +535,7 @@ class Race(object):
         a_width = 2
         self.map_lines = []
         self.avg_slope = 0
-        self.annotated = self.original.copy()
+        self.slope_ct = 0
         h, w, c = self.annotated.shape
         m = int(w/2)
         if self.h_lines is not None:
@@ -538,17 +563,23 @@ class Race(object):
             cum_slope = 0
             ct_slope = 0
             #print("MAP", h, m, w)
-            for this in self.map_lines[:5]:
+            for this in self.map_lines[:1]:
                 cv2.line(self.annotated,this[5],this[6], a_color, a_width)
                 #print(this)
+                mlen = this[1]
+                mslope = this[2]
+                if (mslope < 0.5) and (mlen < 20):
+                    # this might be the front edge of a dash, go straight
+                    mslope = 999
                 ct_slope += 1
-                cum_slope += this[2]
+                cum_slope += mslope
             if ct_slope > 0:
                 avg_slope = cum_slope / ct_slope
             else:
                 avg_slope = VERTICAL_SLOPE
             print("MAP", avg_slope)
             self.avg_slope = avg_slope
+            self.slope_ct = ct_slope
         cv2.imwrite('temp/ann.jpeg', self.annotated)
 
 
