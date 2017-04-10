@@ -34,6 +34,9 @@ def signal_handler(signal, frame):
         vnavs_mqtt.stop_process = True
 signal.signal(signal.SIGINT, signal_handler)
 
+RACE_SPEED = 2
+RACE_STEERING_2 = 0.1
+
 #
 # Streamer() is the socket_xfer writer function which runs in its own process.
 
@@ -151,14 +154,21 @@ class cameraman(vnavs_mqtt.mqtt_node):
         cv2.imwrite(annotated_path , d.annotated)
         directions = {}
         directions['timeout'] = 3
-        directions['speed'] = 2
+        directions['speed'] = RACE_SPEED
         avg_slope = int(d.avg_slope)
-        if abs(avg_slope) > 8:
+        if (abs(avg_slope) > 4) or (d.slope_ct < 1):
             directions['heading'] = 'AWS'
-        elif avg_slope < 0:
-            directions['heading'] = 'RH-4'
         else:
-            directions['heading'] = 'RH4'
+            if abs(avg_slope) > 2:
+                steering_angle = "1"
+            elif abs(avg_slope) > RACE_STEERING_2:
+                steering_angle = "2"
+            else:
+                steering_angle = "3"
+            if avg_slope > 0:
+                directions['heading'] = 'RR-' + steering_angle
+            else:
+                directions['heading'] = 'RL+' + steering_angle
         (res, mid) = self.mqttc.publish('helmsman/orders', json.dumps(directions))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
