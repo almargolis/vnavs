@@ -22,6 +22,9 @@ html(lang="en")
       socket.on('imageReady', function(url) {
         $('#stream').attr('src', url);
       });
+      socket.on('gps', function(info) {
+        $('#gps_info').text(info);
+      });
       function startStream() {
         socket.emit('startStream');
         $('.start').hide();
@@ -29,6 +32,8 @@ html(lang="en")
   body
     h1 Visual NAVigation System (VNAVS) Manual Controller
     hr
+    div(id="gps_info")
+      -- GPS --
     form(action="/parms" method="post")
       label(for='timeout') Timeout:
       input(type="text", name="timeout", value=timeout)
