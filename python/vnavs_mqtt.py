@@ -5,9 +5,11 @@ from builtins import (bytes, str, open, super, range,
 import multiprocessing
 import os
 import Queue
+import select
 import socket
 import SocketServer
 import sys
+import threading
 import time
 
 import paho.mqtt.client as mqtt
@@ -135,63 +137,237 @@ class socket_xfer(object):
             self.timer_skip_ct = 0
             self.timer_start = timer_stop
 
+class SelectServer(object):
+    def __init__(self, IniSection=None, IsServer=True):
+        self.config = ConfigParser.SafeConfigParser()
+        self.config.readfp(open(config_file_path))
+        self.broker_host = None
+        self.broker_port = None
+        if IniSection is not None:
+            self.broker_host = self.config.get(IniSection, "Host")
+            self.broker_port = int(self.config.get(IniSection, "Port"))	# 1883
 
+        # This can be a server or client. Either way self.server is the primary socket
+        self.isServer = IsServer
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.setblocking(0)
+        self.mqttPayloads = {}
+        self.inputSockets = [ self.server ]
+        self.outputSockets = [ ]
+        self.outputQueues = {}
+        self.fragments = {}
 
-class PsuedoMqttHandler(SocketServer.BaseRequestHandler):
-    def handle(self):
-        # self.rfile is a file-like object created by the handler;
-        # we can now use e.g. readline() instead of raw recv() calls
-        action = self.rfile.readline().strip()
-        topic = self.rfile.readline().strip()
-        if action == 'publish':
-            message = self.rfile.readline().strip()
-            self.server.mqtt_messages[topic] = message
-        elif action == 'read':
-            if topic in self.server.mqtt_messages:
-                self.wfile.write(self.server.mqtt_messages[topic])
-
-def PsuedoMqttServer():
-    config = ConfigParser.SafeConfigParser()
-    config.readfp(open(config_file_path))
-    broker_host = config.get("MqttBroker", "Host")
-    broker_port = int(config.get("MqttBroker", "Port"))	# 1883
-
-    # Create the server, binding to localhost on port 9999
-    server = SocketServer.TCPServer((broker_host, broker_port), PsuedoMqttHandler)
-    server.mqtt_messages = {}
-
-    # Activate the server; this will keep running until you
-    # interrupt the program with Ctrl-C
-    server.serve_forever()
-
-class PsuedoMqttClient(object):
-    def __init__(self):
-        # Create a socket (SOCK_STREAM means a TCP socket)
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    def connect(self, host=None, port=None, keepalive=60, bind_address="", timeout=None):
+        if host is not None:
+            self.broker_host = host
+        if port is not None:
+            self.broker_port = port
+        if self.isServer:
+            self.server.bind((self.broker_host, self.broker_port))
+            self.server.listen(5)
+        else:
+            self.server.connect((self.broker_host, self.broker_port))
 
     def disconnect(self):
         self.sock.close()
 
-    def connect(self, host, port, timeout):
-        self.sock.connect((host, port))
+    def CloseConnection(self, s):
+        if s in self.outputSockets:
+            self.outputSockets.remove(s)
+        if s in self.inputSockets:
+            self.inputSockets.remove(s)
+        if s in self.outputQueues:
+            del self.outputQueues[s]
+        if s in self.fragments:
+            del self.fragments[s]
+        s.close()
+
+    def ProcessData(self, s, data):
+        if s in self.fragments:
+            data = self.fragments[s] + data
+            del self.fragments[s]
+        messages = data.split('\x01')
+        if data[-1] != '\x01':
+            # the last message isn't complete, save the fragment
+            fragment = messages.pop()
+            self.fragments[s] = fragment
+        for this_message in messages:
+            parts = this_message.split('\x00')
+            self.ProcessMessage(s, parts)
+            print("recieve", parts)
+
+    def loop_forever(self):
+        while True:
+            self.loop(timeout=None)
+
+    def loop(self, timeout=1.0):
+        # timeout=None blocks indefinately, timeout=0.0 polls and return immediately, potentially with three empty lists
+        print('waiting for the next event')
+        readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
+        for s in readable:
+            if self.isServer and (s is self.server):
+                # A "readable" server socket is ready to accept a connection
+                connection, client_address = s.accept()
+                print('new connection from', client_address)
+                connection.setblocking(0)
+                self.inputSockets.append(connection)
+            else:
+                data = s.recv(1024)
+                if data:
+                    self.ProcessData(s, data)
+                else:
+                    # Interpret empty result as closed connection
+                    self.CloseConnection(s)
+        for s in writable:
+            try:
+                next_msg = self.outputQueues[s].get_nowait()
+            except Queue.Empty:
+                # No messages waiting so stop checking for writability.
+                self.outputSockets.remove(s)
+            else:
+                try:
+                    s.send(next_msg)
+                except socket.error:
+                    # socket.error: [Errno 104] Connection reset by peer (I ctrl-C client)
+                    self.CloseConnection(s)
+        for s in exceptional:
+            self.CloseConnection(s)
+
+#
+# FastMqttServer is a simplified broker that is much faster thean mosquitto.
+# It supports publish/subscribe with less chance of blockage due to increased
+# speed. Use that when you need to see every message.
+# It also supports a read mode, which allows you to get the latst message
+# for a topic without, ignoring any previous messages. This is essentially
+# a LIFO. Use this for topics which generate large volumes of messages
+# that you can't process.
+#
+# There is only one queue per client, so be careful about subscribing to high
+# volume topics for time sensitive processes.
+#
+class FastMqttServer(SelectServer):
+    def __init__(self):
+        super().__init__(IniSection="MqttFast")
+        self.mqttPayloads = {}
+        self.subscriptions = {}
+
+    def ProcessMessage(self, s, message):
+        if message[0] == '':
+            return
+        action = message[0]
+        if action == 'publish':
+            topic = message[1]
+            payload = message[2]
+            self.mqttPayloads[topic] = payload
+            if topic in self.subscriptions:
+                newSubscriptionList = []
+                for sendSocket in self.subscriptions[topic]:
+                    if sendSocket in self.inputSockets:
+                        # we get here for subscription by still-connected sockets
+                        newSubscriptionList.append(sendSocket)
+                        self.SendMessage(sendSocket, topic)
+                self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
+        elif action == 'subscribe':
+            topic = message[1]
+            if topic in self.subscriptions:
+                if s not in self.subscriptions[topic]:
+                    self.subscriptions[topic].append(s)
+            else:
+                self.subscriptions[topic] = [s]
+        elif action == 'read':
+            topic = message[1]
+            self.SendMessage(s, topic)
+
+    def SendMessage(self, s, topic):
+        if not s in self.outputQueues:
+            self.outputQueues[s] = Queue.Queue()
+        if topic in self.mqttPayloads:
+            payload = self.mqttPayloads[topic]
+        else:
+            payload = ''
+        message = "message\x00%s\x00%s\x01" % (topic, payload)
+        self.outputQueues[s].put(message)
+        if s not in self.outputSockets:
+            self.outputSockets.append(s)
+
+class FastMqttClient(SelectServer):
+    def __init__(self):
+        super().__init__(IniSection="MqttBroker", IsServer=False)
+        self.thread = None
+        self.on_message = None
+        self.on_connect = None
+
+    def connect(self, **kwargs):
+        super().connect(**kwargs)
+        if self.on_connect is not None:
+            client = None			# not implemented
+            userdata = None			# not implemented
+            flags = None			# not implemented
+            rc = 0				# not implemented
+            self.on_connect(client, userdata, flags, rc)
 
     def publish(self, topic, msg, qos=0):
-        self.sock.sendall("publish\n%s\n%s\n" % (topic, msg))
+        msg_sent = False
+        retry_ct = 0
+        while (not msg_sent) and (retry_ct < 10):
+            try:
+                self.server.sendall("publish\x00%s\x00%s\x01" % (topic, msg))
+                msg_sent = True
+            except socket.error:
+                # socket.error: [Errno 11] Resource temporarily unavailable
+                # need to check Errno - kep running even when server died
+                retry_ct += 1
+        return msg_sent
 
     def read(self, topic, qos=0):
-        self.sock.sendall("read\n%s\n" % (topic))
+        self.server.sendall("read\n%s\n" % (topic))
         received = self.sock.recv(1024)
 
+    def subscribe(self, topic, qos):
+        self.server.sendall("subscribe\x00%s\x01" % (topic))
+
+    def loop_start(self):
+        self.thread = threading.Thread(target=self.loop)
+        self.thread.start()
+
+    def loop_stop(self):
+        if self.thread is not None:
+            self.thread.stop()
+            self.thread = None
+
+    def ProcessMessage(self, s, message):
+        if message[0] == '':
+            return
+        if message[0] == 'message':
+            topic = message[1]
+            payload = message[2]
+            if self.on_message is not None:
+                mqtt_message = FastMqttMessage(topic, payload)
+                client = None			# not implemented
+                userdata = None			# not implemented
+                self.on_message(client, userdata, mqtt_message)
+
+class FastMqttMessage(object):
+    def __init__(self, topic, payload, qos=0):
+        self.topic = topic
+        self.payload = payload
+        self.qos = 0
+
 class mqtt_node(object):
-    def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, Streamer=False, Verbose=True):
+    def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.blocking_mode = Blocking
         self.blocking_timeout = BlockingTimeoutSecs
         self.subscriptions = Subscriptions
         self.handlers = {}
-        self.broker_host = self.config.get("MqttBroker", "Host")
-        self.broker_port = int(self.config.get("MqttBroker", "Port"))	# 1883
+        self.broker_type = BrokerType
+        if self.broker_type == 'M':
+            iniSection = 'MqttBroker'		# Mosquitto
+        else:
+            iniSection = 'MqttFast'
+        self.broker_host = self.config.get(iniSection, "Host")
+        self.broker_port = int(self.config.get(iniSection, "Port"))	# 1883
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
@@ -206,18 +382,19 @@ class mqtt_node(object):
             print("Non-Blocking Mode")
 
     def Connect(self, timeout=0):
-        self.mqttc = mqtt.Client()
+        if self.broker_type == "M":
+            self.mqttc = mqtt.Client()
+        else:
+            self.mqttc = FastMqttClient()
         # Assign event callbacks
         self.mqttc.on_message = self.on_message
         self.mqttc.on_connect = self.on_connect
-        self.mqttc.on_publish = self.on_publish
-        self.mqttc.on_subscribe = self.on_subscribe
         # Connect
         connected = False
         connect_time = time.time()
         while not connected:
             try:
-                self.mqttc.connect(self.broker_host, self.broker_port, self.broker_timeout)
+                self.mqttc.connect(host=self.broker_host, port=self.broker_port, timeout=self.broker_timeout)
                 connected = True
             except socket.error:
                 print ("vnavs_mqtt: unable to connect to broker")
@@ -294,13 +471,6 @@ class mqtt_node(object):
         handler_method = self.handlers[message.topic]
         handler_method(message.payload.decode("utf-8"))
 
-    def on_publish(self, client, userdata, mid):
-        if self.verbose:
-            print("on_publish() mid: " + str(mid))
-
-    def on_subscribe(self, client, userdata, mid, granted_qos):
-        print("Subscribed: " + str(mid) + " " + str(granted_qos))
-
     def on_log(self, client, userdata, level, buf):
         print(buf)
 
@@ -316,7 +486,7 @@ class mqtt_node(object):
 
 class TestSender(mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[], Blocking=False, Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=[], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.msgCt = 0
         self.startTime = time.time()
 
@@ -329,7 +499,7 @@ class TestSender(mqtt_node):
 
 class TestReceiver(mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['test'], Blocking=True, BlockingTimeoutSecs=0, Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=['test'], Blocking=True, BlockingTimeoutSecs=0, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.msgCt = 0
         self.startTime = time.time()
 
@@ -349,4 +519,6 @@ if __name__ == "__main__":
         n = TestReceiver()
         n.Connect()
     elif sys.argv[1] == 'm':
-        PsuedoMqttServer()
+        s = FastMqttServer()
+        s.connect()
+        s.loop_forever()
