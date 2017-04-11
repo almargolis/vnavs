@@ -137,15 +137,20 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 self.latitude = gps_parsed.latitude
                 self.timestamp = gps_parsed.datetime
                 self.gps_status = gps_parsed.data[2]	# A=valid, V=invalid
-                self.speed = float(gps_parsed.data[6].strip()) * METERS_PER_SECOND_PER_KNOT
-                heading_raw = gps_parsed.data[7]
+                speedRaw = gps_parsed.data[6].strip()
+                try:
+                    speedKnots = float(speedRaw)
+                    self.speed = speedKnots * METERS_PER_SECOND_PER_KNOT
+                except ValueError:
+                    print("Invalid RMC speed", `speedRaw`)
+                heading_raw = gps_parsed.data[7].strip()
                 if heading_raw == '':
                     pass				# None? only saw it at startup now
                 else:
                     try:
-                        self.heading = float(gps_parsed.data[7].strip())	# degrees clockwise from North
+                        self.heading = float(heading_raw)	# degrees clockwise from North
                     except ValueError:
-                        print("Invalid RMC heading", `gps_parsed.data[7]`)
+                        print("Invalid RMC heading", `heading_raw`)
                 self.gps_mode = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
                 self.newData = True
                 if self.goal_run:
@@ -156,6 +161,8 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             payload['quality'] = self.gps_quality
             payload['speed'] = self.speed
             payload['heading'] = self.heading
+            payload['longitude'] = self.longitude
+            payload['latitude'] = self.latitude
             #payload['gps_time'] = `self.timestamp`
             self.mqttc.publish('engineer_1/status', json.dumps(payload))
             self.newData = False

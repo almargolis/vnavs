@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import Queue
 import socket
+import SocketServer
 import sys
 import time
 
@@ -134,6 +135,53 @@ class socket_xfer(object):
             self.timer_skip_ct = 0
             self.timer_start = timer_stop
 
+
+
+class PsuedoMqttHandler(SocketServer.BaseRequestHandler):
+    def handle(self):
+        # self.rfile is a file-like object created by the handler;
+        # we can now use e.g. readline() instead of raw recv() calls
+        action = self.rfile.readline().strip()
+        topic = self.rfile.readline().strip()
+        if action == 'publish':
+            message = self.rfile.readline().strip()
+            self.server.mqtt_messages[topic] = message
+        elif action == 'read':
+            if topic in self.server.mqtt_messages:
+                self.wfile.write(self.server.mqtt_messages[topic])
+
+def PsuedoMqttServer():
+    config = ConfigParser.SafeConfigParser()
+    config.readfp(open(config_file_path))
+    broker_host = config.get("MqttBroker", "Host")
+    broker_port = int(config.get("MqttBroker", "Port"))	# 1883
+
+    # Create the server, binding to localhost on port 9999
+    server = SocketServer.TCPServer((broker_host, broker_port), PsuedoMqttHandler)
+    server.mqtt_messages = {}
+
+    # Activate the server; this will keep running until you
+    # interrupt the program with Ctrl-C
+    server.serve_forever()
+
+class PsuedoMqttClient(object):
+    def __init__(self):
+        # Create a socket (SOCK_STREAM means a TCP socket)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    def disconnect(self):
+        self.sock.close()
+
+    def connect(self, host, port, timeout):
+        self.sock.connect((host, port))
+
+    def publish(self, topic, msg, qos=0):
+        self.sock.sendall("publish\n%s\n%s\n" % (topic, msg))
+
+    def read(self, topic, qos=0):
+        self.sock.sendall("read\n%s\n" % (topic))
+        received = self.sock.recv(1024)
+
 class mqtt_node(object):
     def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, Streamer=False, Verbose=True):
         self.config = ConfigParser.SafeConfigParser()
@@ -241,7 +289,8 @@ class mqtt_node(object):
         self.RegisterMessageHandlers()
 
     def on_message(self, client, userdata, message):
-        print("on_message()", message.topic + " " + str(message.qos) + " " + self.MessageStr(message.payload))
+        if self.verbose:
+            print("on_message()", message.topic + " " + str(message.qos) + " " + self.MessageStr(message.payload))
         handler_method = self.handlers[message.topic]
         handler_method(message.payload.decode("utf-8"))
 
@@ -255,9 +304,49 @@ class mqtt_node(object):
     def on_log(self, client, userdata, level, buf):
         print(buf)
 
-def Test_Mqtt_Node():
-    n = mqtt_node(Subscriptions=['test'], Blocking=True)
-    n.Connect()
+#
+# With TestSender and TestReceiver on the same RPI3 and the mosquitto broker
+# on a second RPI3 connected via ethernet cable, the sender published
+# about 1430 messages / second but the receiver only got about 315 / second.
+# -- the reciver got all messages in order so it was constantly falling behind
+# -- when the sender terminated, undelivered messages were discarded,
+#	so the reciever never got the last messages. This may be fixable
+#	by configuration, but doesn't matter because the readding is so slow.
+#
+
+class TestSender(mqtt_node):
+    def __init__(self, Verbose=False):
+        super().__init__(Subscriptions=[], Blocking=False, Streamer=False, Verbose=Verbose)
+        self.msgCt = 0
+        self.startTime = time.time()
+
+    def DoLoop(self):
+        self.msgCt += 1
+        self.mqttc.publish('test', self.msgCt)
+        if (self.msgCt % 10) == 0:
+            rate = self.msgCt / (time.time() - self.startTime)
+            print("Published", self.msgCt, rate)
+
+class TestReceiver(mqtt_node):
+    def __init__(self, Verbose=False):
+        super().__init__(Subscriptions=['test'], Blocking=True, BlockingTimeoutSecs=0, Streamer=False, Verbose=Verbose)
+        self.msgCt = 0
+        self.startTime = time.time()
+
+    def rmsg_test(self, msg):
+        self.msgCt += 1
+        if (self.msgCt % 10) == 0:
+            rate = self.msgCt / (time.time() - self.startTime)
+            print("Received", self.msgCt, msg, rate)
 
 if __name__ == "__main__":
-    PiShutdown()
+    #PiShutdown()
+    if sys.argv[1] == 's':
+        n = TestSender()
+        n.Connect()
+        n.Loop()
+    elif sys.argv[1] == 'r':
+        n = TestReceiver()
+        n.Connect()
+    elif sys.argv[1] == 'm':
+        PsuedoMqttServer()
