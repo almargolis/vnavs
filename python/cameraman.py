@@ -54,7 +54,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
     ]
 
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=['cameraman/orders', 'cameraman/ask_last'], Blocking=False, Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=['cameraman/orders', 'cameraman/ask_last'], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.burst_fps = 0			# capture speed of last burst
         self.camera_last_fn = None
         self.iso = 100
