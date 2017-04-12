@@ -15,7 +15,7 @@ import paho.mqtt.client as mqtt
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint', 'engineer_1/status'], Blocking=False, Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint', 'engineer_1/status'], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.waypoints = []
         self.waypointIx = 0

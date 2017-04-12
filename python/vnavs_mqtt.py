@@ -157,7 +157,7 @@ class SelectServer(object):
         self.outputQueues = {}
         self.fragments = {}
 
-    def connect(self, host=None, port=None, keepalive=60, bind_address="", timeout=None):
+    def connect(self, host=None, port=None, keepalive=60, bind_address=""):
         if host is not None:
             self.broker_host = host
         if port is not None:
@@ -165,6 +165,12 @@ class SelectServer(object):
         if self.isServer:
             self.server.bind((self.broker_host, self.broker_port))
             self.server.listen(5)
+            if self.broker_host == '':
+                displayHost = 'INADDR_ANY'
+            else:
+                displayHost = self.broker_host
+            print("Server listening on host %s, port %s." % (displayHost, self.broker_port))
+            print("Server listening on port %s." % (`self.server.getsockname()`))
         else:
             try:
                 self.server.connect((self.broker_host, self.broker_port))
@@ -205,14 +211,25 @@ class SelectServer(object):
             self.ProcessMessage(s, parts)
             print("recieve", parts)
 
+    def loop_start(self):
+        self.thread = threading.Thread(target=self.loop_forever)
+        self.thread.start()
+
+    def loop_stop(self, force=False):
+        # unused force parameter exists for mosquitto compatibility
+        if self.thread is not None:
+            self.thread.stop()
+            self.thread = None
+
     def loop_forever(self):
         while True:
             self.loop(timeout=None)
 
     def loop(self, timeout=1.0):
         # timeout=None blocks indefinately, timeout=0.0 polls and return immediately, potentially with three empty lists
-        print('waiting for the next event')
+        print('LOOP waiting for the next event', self.inputSockets, timeout)
         readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
+        print("LOOP", readable, writable, exceptional)
         for s in readable:
             if self.isServer and (s is self.server):
                 # A "readable" server socket is ready to accept a connection
@@ -221,7 +238,14 @@ class SelectServer(object):
                 connection.setblocking(0)
                 self.inputSockets.append(connection)
             else:
-                data = s.recv(1024)
+                try:
+                    data = s.recv(1024)
+                except socket.error as e:
+                    if e.errno == 104:
+                        # socket.error: [Errno 104] Connection reset by peer
+                        data = None
+                    else:
+                        raise
                 if data:
                     self.ProcessData(s, data)
                 else:
@@ -256,7 +280,7 @@ class SelectServer(object):
 #
 class FastMqttServer(SelectServer):
     def __init__(self):
-        super().__init__(IniSection="MqttFast")
+        super().__init__(IniSection="MqttFastServer")
         self.mqttPayloads = {}
         self.subscriptions = {}
 
@@ -268,12 +292,14 @@ class FastMqttServer(SelectServer):
             topic = message[1]
             payload = message[2]
             self.mqttPayloads[topic] = payload
+            print("PUBLISH", topic, self.subscriptions)
             if topic in self.subscriptions:
                 newSubscriptionList = []
                 for sendSocket in self.subscriptions[topic]:
                     if sendSocket in self.inputSockets:
                         # we get here for subscription by still-connected sockets
                         newSubscriptionList.append(sendSocket)
+                        print("SENDING", sendSocket.getsockname())
                         self.SendMessage(sendSocket, topic)
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
         elif action == 'subscribe':
@@ -326,7 +352,12 @@ class FastMqttClient(SelectServer):
                 # socket.error: [Errno 11] Resource temporarily unavailable
                 # need to check Errno - kep running even when server died
                 retry_ct += 1
-        return msg_sent
+        if msg_sent:
+            mid = 0				# not implemented -- message id
+            return (mqtt.MQTT_ERR_SUCCESS, mid)
+        else:
+            mid = 0				# not sue if this matches Paho MQTT behavior
+            return (mqtt.MQTT_ERR_NO_CONN, mid)
 
     def read(self, topic, qos=0):
         self.server.sendall("read\n%s\n" % (topic))
@@ -334,15 +365,6 @@ class FastMqttClient(SelectServer):
 
     def subscribe(self, topic, qos):
         self.server.sendall("subscribe\x00%s\x01" % (topic))
-
-    def loop_start(self):
-        self.thread = threading.Thread(target=self.loop)
-        self.thread.start()
-
-    def loop_stop(self):
-        if self.thread is not None:
-            self.thread.stop()
-            self.thread = None
 
     def ProcessMessage(self, s, message):
         if message[0] == '':
@@ -403,7 +425,7 @@ class mqtt_node(object):
         connect_time = time.time()
         while not connected:
             try:
-                self.mqttc.connect(host=self.broker_host, port=self.broker_port, timeout=self.broker_timeout)
+                self.mqttc.connect(host=self.broker_host, port=self.broker_port)
                 connected = True
             except socket.error:
                 print ("vnavs_mqtt: unable to connect to broker @ %s:%s" % (self.broker_host, self.broker_port))
@@ -411,7 +433,7 @@ class mqtt_node(object):
                     raise
                 time.sleep(1)
         if self.blocking_mode:
-            if self.blocking_timeout <= 0:
+            if self.blocking_timeout < 0:
                 self.mqttc.loop_forever()
             # else, periodically call CheckMqtt()
         else:
