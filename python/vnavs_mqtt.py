@@ -165,6 +165,12 @@ class SelectServer(object):
         if self.isServer:
             self.server.bind((self.broker_host, self.broker_port))
             self.server.listen(5)
+            if self.broker_host == '':
+                displayHost = 'INADDR_ANY'
+            else:
+                displayHost = self.broker_host
+            print("Server listening on host %s, port %s." % (displayHost, self.broker_port))
+            print("Server listening on port %s." % (`self.server.getsockname()`))
         else:
             self.server.connect((self.broker_host, self.broker_port))
 
@@ -212,7 +218,14 @@ class SelectServer(object):
                 connection.setblocking(0)
                 self.inputSockets.append(connection)
             else:
-                data = s.recv(1024)
+                try:
+                    data = s.recv(1024)
+                except socket.error as e:
+                    if e.errno == 104:
+                        # socket.error: [Errno 104] Connection reset by peer
+                        data = None
+                    else:
+                        raise
                 if data:
                     self.ProcessData(s, data)
                 else:
@@ -247,7 +260,7 @@ class SelectServer(object):
 #
 class FastMqttServer(SelectServer):
     def __init__(self):
-        super().__init__(IniSection="MqttFast")
+        super().__init__(IniSection="MqttFastServer")
         self.mqttPayloads = {}
         self.subscriptions = {}
 
@@ -259,12 +272,14 @@ class FastMqttServer(SelectServer):
             topic = message[1]
             payload = message[2]
             self.mqttPayloads[topic] = payload
+            print("PUBLISH", topic, self.subscriptions)
             if topic in self.subscriptions:
                 newSubscriptionList = []
                 for sendSocket in self.subscriptions[topic]:
                     if sendSocket in self.inputSockets:
                         # we get here for subscription by still-connected sockets
                         newSubscriptionList.append(sendSocket)
+                        print("SENDING", sendSocket.getsockname())
                         self.SendMessage(sendSocket, topic)
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
         elif action == 'subscribe':
