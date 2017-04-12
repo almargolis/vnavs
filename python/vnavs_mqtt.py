@@ -166,7 +166,16 @@ class SelectServer(object):
             self.server.bind((self.broker_host, self.broker_port))
             self.server.listen(5)
         else:
-            self.server.connect((self.broker_host, self.broker_port))
+            try:
+                self.server.connect((self.broker_host, self.broker_port))
+            except socket.error as e:
+                print("E", e.errno)
+                if e.errno in [36, 56]:
+                    # socket.error: [Errno 36] Operation now in progress
+                    # is not really an error
+                    pass
+                else:
+                    raise
 
     def disconnect(self):
         self.sock.close()
@@ -397,7 +406,7 @@ class mqtt_node(object):
                 self.mqttc.connect(host=self.broker_host, port=self.broker_port, timeout=self.broker_timeout)
                 connected = True
             except socket.error:
-                print ("vnavs_mqtt: unable to connect to broker")
+                print ("vnavs_mqtt: unable to connect to broker @ %s:%s" % (self.broker_host, self.broker_port))
                 if (timeout > 0) and ((time.time() - connect_time) > timeout):
                     raise
                 time.sleep(1)

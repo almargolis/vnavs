@@ -702,7 +702,7 @@ class ProcessStep(object):
         
 class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=['archiver/pic_ready', 'cameraman/last', 'cameraman/pic_ready'], Blocking=True, BlockingTimeoutSecs=0.1)
+        super().__init__(Subscriptions=['archiver/pic_ready', 'cameraman/last', 'cameraman/pic_ready'], Blocking=True, BrokerType='F', BlockingTimeoutSecs=0.1)
         self.tk_is_initialized = False
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.lastfn = ""

@@ -35,7 +35,8 @@ class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self):
         super().__init__(Subscriptions=['cameraman/last', 'cameraman/pic_ready', 
 						'engineer_1/status', 'helmsman/orders'], 
-						Blocking=True, BlockingTimeoutSecs=0.1)
+						Blocking=True, BlockingTimeoutSecs=0.1,
+						BrokerType='F')
         self.tk_is_initialized = False
         self.lastfn = ""
         self.Connect()			# This starts the mqtt client in another thread
