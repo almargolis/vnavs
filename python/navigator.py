@@ -89,12 +89,14 @@ class navigator(vnavs_mqtt.mqtt_node):
             else:
                 turnRadius = "2"
             if deltaH < 0:
-                steering = "RR-" + turnRadius
-            else:
                 steering = "RR" + turnRadius
+            else:
+                steering = "RR-" + turnRadius
             payload = {}
             payload['heading'] = steering
             self.mqttc.publish('helmsman/orders', json.dumps(payload))
+            payload['ix'] = self.waypointIx
+            self.mqttc.publish('engineer_1/status', json.dumps(payload))
         print("Path %4s dX %+03.4f dY %+03.4f dH %+03.4f H %+03.4f %2d" % (steering, deltaX, deltaY, deltaH, self.heading, self.waypointIx))
         return hypotenuse
 
@@ -110,8 +112,9 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.pausedMode = self.mode
                 self.mode = mode
         elif mode in 'MCG':
-            if mode == "G":
-                self.map.InitMap()
+            if (mode == "G") and (self.mode != "G"):
+                pass
+                #self.map.InitMap()
             if (mode == "M") and (self.mode == "G"):
                 self.WriteMap()
             self.mode = mode
@@ -154,6 +157,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.waypointIx += 1
                 if self.waypointIx >= len(self.waypoints):
                     self.waypointIx = 0
+            time.sleep(1)
 
 class Map(object):
     def __init__(self, waypoints=None):

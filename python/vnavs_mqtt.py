@@ -307,7 +307,7 @@ class FastMqttServer(SelectServer):
             self.message_in_ct += 1
             topic = message[1]
             payload = message[2]
-            self.mqttPayloads[topic] = payload
+            self.mqttPayloads[topic] = (self.message_in_ct, payload)
             print("PUBLISH", topic, self.subscriptions)
             if topic in self.subscriptions:
                 newSubscriptionList = []
@@ -318,6 +318,17 @@ class FastMqttServer(SelectServer):
                         print("SENDING", sendSocket.getsockname())
                         self.SendMessage(sendSocket, topic)
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
+        elif action == 'read':
+            topic = message[1]
+            if topic in self.mqttPayloads:
+                status = 'OK'
+                mid, payload = self.mqttPayloads[topic]
+            else:
+                status = 'NOK'
+                mid = 0
+                payload
+            message = "%s\x00%s\x00%d\x00%s\x01" % (status, topic, mid, payload)
+            s.send(message)
         elif action == 'subscribe':
             topic = message[1]
             if topic in self.subscriptions:
@@ -325,18 +336,16 @@ class FastMqttServer(SelectServer):
                     self.subscriptions[topic].append(s)
             else:
                 self.subscriptions[topic] = [s]
-        elif action == 'read':
-            topic = message[1]
-            self.SendMessage(s, topic)
 
     def SendMessage(self, s, topic):
         if not s in self.outputQueues:
             self.outputQueues[s] = Queue.Queue()
         if topic in self.mqttPayloads:
-            payload = self.mqttPayloads[topic]
+            mid, payload = self.mqttPayloads[topic]
         else:
+            mid = 0
             payload = ''
-        message = "message\x00%s\x00%s\x01" % (topic, payload)
+        message = "message\x00%s\x00%d\x00%s\x01" % (topic, mid, payload)
         self.outputQueues[s].put(message)
         self.message_out_ct += 1
         if s not in self.outputSockets:
@@ -379,6 +388,8 @@ class FastMqttClient(SelectServer):
     def read(self, topic, qos=0):
         self.server.sendall("read\n%s\n" % (topic))
         received = self.sock.recv(1024)
+        message = received.split('\x00')
+        return message
 
     def subscribe(self, topic, qos):
         self.server.sendall("subscribe\x00%s\x01" % (topic))
@@ -388,7 +399,8 @@ class FastMqttClient(SelectServer):
             return
         if message[0] == 'message':
             topic = message[1]
-            payload = message[2]
+            mid = message[2]
+            payload = message[3]
             if self.on_message is not None:
                 mqtt_message = FastMqttMessage(topic, payload)
                 client = None			# not implemented
