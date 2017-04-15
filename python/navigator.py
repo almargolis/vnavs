@@ -16,7 +16,7 @@ import paho.mqtt.client as mqtt
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint', 'engineer_1/status'], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint'], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.waypoints = []
         self.waypointIx = 0
@@ -151,13 +151,14 @@ class navigator(vnavs_mqtt.mqtt_node):
         # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
         #
         #print("LOOP")
+        m = self.mqttc.read('engineer_1/status')
+        print(m)
         if (self.mode == 'G') and (len(self.waypoints) > 0):
             distance = self.HeadingToWaypoint(self.waypointIx)
             if distance < 1:
                 self.waypointIx += 1
                 if self.waypointIx >= len(self.waypoints):
                     self.waypointIx = 0
-            time.sleep(1)
 
 class Map(object):
     def __init__(self, waypoints=None):
@@ -222,7 +223,12 @@ class Map(object):
         if deltaMetersX > deltaMetersY:
             self.mapScalePixelsPerMeter = (self.mapSizePixels - (2 * self.mapMarginPixels)) / deltaMetersX
         else:
-            self.mapScalePixelsPerMeter = (self.mapSizePixels - (2 * self.mapMarginPixels)) / deltaMetersY
+            try:
+                self.mapScalePixelsPerMeter = (self.mapSizePixels - (2 * self.mapMarginPixels)) / deltaMetersY
+            except ZeroDivisionError:
+                # this likely means we only have multiple identical waypoints
+                self.mapScalePixelsPermeter = 0
+                return
         self.mapMetersPerLongitudeX = deltaMetersX / extentWidth
         self.mapMetersPerLatitudeY = deltaMetersY / extentHeight
         # The following needs to consider crossing equator, poles, prime meridian, dateline.

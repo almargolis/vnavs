@@ -320,15 +320,7 @@ class FastMqttServer(SelectServer):
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
         elif action == 'read':
             topic = message[1]
-            if topic in self.mqttPayloads:
-                status = 'OK'
-                mid, payload = self.mqttPayloads[topic]
-            else:
-                status = 'NOK'
-                mid = 0
-                payload
-            message = "%s\x00%s\x00%d\x00%s\x01" % (status, topic, mid, payload)
-            s.send(message)
+            self.SendMessage(s, topic)
         elif action == 'subscribe':
             topic = message[1]
             if topic in self.subscriptions:
@@ -386,10 +378,8 @@ class FastMqttClient(SelectServer):
             return (mqtt.MQTT_ERR_NO_CONN, mid)
 
     def read(self, topic, qos=0):
+        # This is a non-repeating request to get the latest message
         self.server.sendall("read\n%s\n" % (topic))
-        received = self.sock.recv(1024)
-        message = received.split('\x00')
-        return message
 
     def subscribe(self, topic, qos):
         self.server.sendall("subscribe\x00%s\x01" % (topic))
@@ -402,16 +392,17 @@ class FastMqttClient(SelectServer):
             mid = message[2]
             payload = message[3]
             if self.on_message is not None:
-                mqtt_message = FastMqttMessage(topic, payload)
+                mqtt_message = FastMqttMessage(topic, payload, mid=mid)
                 client = None			# not implemented
                 userdata = None			# not implemented
                 self.on_message(client, userdata, mqtt_message)
 
 class FastMqttMessage(object):
-    def __init__(self, topic, payload, qos=0):
+    def __init__(self, topic, payload, qos=0, mid=0):
         self.topic = topic
         self.payload = payload
-        self.qos = 0
+        self.qos = qos
+        self.mid = mid				# this is a fast mqtt extension
 
 class mqtt_node(object):
     def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
