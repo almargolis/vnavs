@@ -148,8 +148,21 @@ class SelectServer(object):
             self.broker_port = int(self.config.get(IniSection, "Port"))	# 1883
 
         # This can be a server or client. Either way self.server is the primary socket
+        #
+        # Socket communications between OSX and RPI can be painfully slow, as in minutes.
+        # TCP_NODELAY solved the problem. As a test, I commented it out and it remained
+        # fast, so the setting may be stickly to some degree. The slowness problem had
+        # persisted over many days and several reboots of both RPI and OSX, so
+        # slowness was a real problem, not transient. Google finds lots if discussion
+        # with try this / try that suggestions. This one made the most sense to me.
+        # I could imaging Apple not caring much about custom socket protocols but
+        # but  being concerned about hogging hte network with lots of small packets
+        # whihc might slow other applications. This problem was never exhibited on
+        # the RPI side of the communications (RPI <-> RPI) only (RPI <-> OSX).
+        #
         self.isServer = IsServer
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.server.setblocking(0)
         self.mqttPayloads = {}
         self.inputSockets = [ self.server ]
@@ -547,6 +560,10 @@ class TestReceiver(mqtt_node):
             rate = self.msgCt / (time.time() - self.startTime)
             print("Received", self.msgCt, msg, rate)
 
+class FastMqttUtil(mqtt_node):
+    def __init__(self, Verbose=False):
+        super().__init__(Subscriptions=[], Blocking=True, BlockingTimeoutSecs=0, BrokerType='F', Streamer=False, Verbose=Verbose)
+
 if __name__ == "__main__":
     #PiShutdown()
     if sys.argv[1] == 's':
@@ -560,3 +577,10 @@ if __name__ == "__main__":
         s = FastMqttServer()
         s.connect()
         s.loop_forever()
+    elif sys.argv[1] == 'fpub':
+        s = FastMqttUtil()
+        s.Connect()
+        time.sleep(1)
+        s.mqttc.publish(sys.argv[2], sys.argv[3])
+        time.sleep(1)
+

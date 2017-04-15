@@ -135,7 +135,11 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             elif gps_parsed.sentence_type == 'RMC':
                 self.longitude = gps_parsed.longitude
                 self.latitude = gps_parsed.latitude
-                self.timestamp = gps_parsed.datetime
+                try:
+                    self.timestamp = gps_parsed.datetime
+                except:
+                    # this sometimes fails. Maybe just indoors.
+                    self.timestamp = None
                 self.gps_status = gps_parsed.data[2]	# A=valid, V=invalid
                 speedRaw = gps_parsed.data[6].strip()
                 try:

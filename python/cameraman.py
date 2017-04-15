@@ -233,6 +233,8 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     if burst_loopPublish == 'file':
                         # the file is already written, make sure its the correct format
                         assert captureFormat == burst_loopFormat
+                        im_path = im_fn
+                        im_fn = os.path.split(im_path)[1]
                     else:
                         if capturePublish == 'sample':
                             im_publish_fn = 'sample.' + burst_loopFormat

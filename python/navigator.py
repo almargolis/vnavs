@@ -6,6 +6,7 @@ import json
 import math
 import os
 from geopy.distance import great_circle
+from PIL import Image, ImageDraw
 import sys
 import time
 
@@ -25,15 +26,35 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.latitude = 0
         self.mode = 'M'			# M=manual, P=paused, C=Cones, G=GPS, (R=resume)
         self.pausedMode = None
+        self.map = Map()
+        self.mapCt = 0
+
+    def WriteMap(self):
+        self.mapCt += 1
+        im_fn = 'Map_%d.jpeg' % self.mapCt
+        im_fp = os.path.join(self.imageDir, im_fn)
+        self.map.map.save(im_fp)
+        payload = {}
+        payload['filename'] = im_fn
+        payload['captureFormat'] = 'jpeg'
+        (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
 
     def HeadingToWaypoint(self, ix):
         # should be reworked using GeographicLib ??
         # Longitude are lines drawn between poles. +/- 180 degrees from Prime Meridian (Greenwich England)
         # delta Longitude is deltaX.
-        # Latotude are lines drawn ~ perpendicular to longitude. Equator is 0 degrees, poles are +/- 90 degrees.
+        # Latitude are lines drawn ~ perpendicular to longitude. Equator is 0 degrees, poles are +/- 90 degrees.
         # delta Latitude is deltaY.
         # geopy coordinates are (latitude, longitude) or (y, x)
+        if self.heading is None:
+            # we aren't receiving GPS info. Can't navigate.
+            print("NO HEADING - can't navigate.")
+            return None
         w = self.waypoints[ix]
+        self.map.DrawPointLatLong((self.latitude, self.longitude), "green")
+        self.WriteMap()
         waypointLatitude = w[0]
         waypointLongitude = w[1]
         deltaY = great_circle((self.latitude, self.longitude), (w[0], self.longitude)).meters
@@ -89,6 +110,10 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.pausedMode = self.mode
                 self.mode = mode
         elif mode in 'MCG':
+            if mode == "G":
+                self.map.InitMap()
+            if (mode == "M") and (self.mode == "G"):
+                self.WriteMap()
             self.mode = mode
             self.pausedMode = None
             self.waypointIx = 0
@@ -99,9 +124,13 @@ class navigator(vnavs_mqtt.mqtt_node):
         if request == 'C':
             self.waypoints = []
             self.waypointIx = 0
+            self.map.InitMap()
         elif request == 'M':
             # check if not None and not same
             self.waypoints.append((self.latitude, self.longitude))
+            if len(self.waypoints) >= 2:
+                self.map.FindExtentsLatLong(waypoints=self.waypoints)
+                self.WriteMap()
         print(self.waypoints)
 
     def rmsg_engineer_1_status(self, msg):
@@ -125,6 +154,131 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.waypointIx += 1
                 if self.waypointIx >= len(self.waypoints):
                     self.waypointIx = 0
+
+class Map(object):
+    def __init__(self, waypoints=None):
+        self.waypoints = waypoints
+        self.InitMap()
+        self.FindExtentsLatLong()
+        self.mapOriginLongitudeX = 0
+        self.mapOriginLatitudeY = 0
+
+    def FindExtentsLatLong(self, waypoints=None):
+        # waypoints are (latitude, longitude) or (y, x)
+        if waypoints is not None:
+            self.waypoints = waypoints
+        print("FORMAT MAP", self.waypoints)
+        if self.waypoints is None:
+            return
+        if len(self.waypoints) < 2:
+            return
+        minLongitudeZ = None
+        maxLongitudeZ = None
+        minLatitudeZ = None
+        maxLatitudeZ = None
+        for point in self.waypoints:
+            # Offset to 0... so comparison doesn't have to worry about negative values
+            x = point[1] + 180.0			# convert to range(0, 360)
+            y = point[0] + 90.0				# convert to range(0, 180)
+            if minLongitudeZ is None:
+                minLatitudeZ = y
+                maxLatitudeZ = y
+                minLongitudeZ = x
+                maxLongitudeZ = x
+            else:
+                if x < minLongitudeZ:
+                    minLongitudeZ = x
+                elif x > maxLongitudeZ:
+                    maxLongitude = x
+                if y < minLatitudeZ:
+                    minLatitudeZ = y
+                elif y > maxLatitudeZ:
+                    maxLatitudeZ = y
+        extentWidth = maxLongitudeZ - minLongitudeZ
+        if extentWidth <= 0.0:
+            extentWidth = 0.0001
+        extentHeight = maxLatitudeZ - minLatitudeZ
+        if extentHeight <= 0.0:
+            extentHeight = 0.0001
+        #
+        # restore to actual latitude and longitude - True values from Zero
+        #
+        minLongitudeT = minLongitudeZ - 180.0
+        maxLongitudeT = maxLongitudeZ - 180.0
+        minLatitudeT = minLatitudeZ - 90.0
+        maxLatitudeT = maxLatitudeZ - 90.0
+        #
+        # Scale dimensions in meters so longest extent fits within margin.
+        # Margin allows later feature beyond original extensts to be visible.
+        # For original useage, this is to follow a robot which wanders a bit
+        # beyond the original waypoints.
+        #
+        deltaMetersX = great_circle((minLatitudeT, minLongitudeT), (minLatitudeT, maxLongitudeT)).meters
+        deltaMetersY = great_circle((minLatitudeT, minLongitudeT), (maxLatitudeT, minLongitudeT)).meters
+        if deltaMetersX > deltaMetersY:
+            self.mapScalePixelsPerMeter = (self.mapSizePixels - (2 * self.mapMarginPixels)) / deltaMetersX
+        else:
+            self.mapScalePixelsPerMeter = (self.mapSizePixels - (2 * self.mapMarginPixels)) / deltaMetersY
+        self.mapMetersPerLongitudeX = deltaMetersX / extentWidth
+        self.mapMetersPerLatitudeY = deltaMetersY / extentHeight
+        # The following needs to consider crossing equator, poles, prime meridian, dateline.
+        # Right now I don't want to think about it.
+        marginMeters = self.mapMarginPixels / self.mapScalePixelsPerMeter
+        try:
+            marginAdjustmentX = marginMeters / self.mapMetersPerLongitudeX
+        except ZeroDivisionError:
+            marginAdjustmentX = 0
+        self.mapOriginLongitudeX = minLongitudeT - marginAdjustmentX
+        try:
+            marginAdjustmentY = marginMeters / self.mapMetersPerLatitudeY
+        except ZeroDivisionError:
+            marginAdjustmentY = 0
+        self.mapOriginLatitudeY = minLatitudeT - marginAdjustmentY
+        for w in self.waypoints:
+            self.DrawPointLatLong(w, "red")
+
+    def InitMap(self):
+        self.mapSizePixels = 200
+        self.mapMaxPixelsX = self.mapSizePixels - 1
+        self.mapMaxPixelsY = self.mapSizePixels - 1
+        self.mapMarginPixels = 20
+        self.mapScalePixelsPerMeter = 0.0
+        self.originOffsetMetersX = 0.0
+        self.originOffsetMetersY = 0.0
+        self.map = Image.new('RGB', (self.mapSizePixels, self.mapSizePixels), color="white")
+        self.mapDraw = ImageDraw.Draw(self.map)
+
+    def DrawPointLatLong(self, point, color, size=1):
+        # point is (latitude, longitude), (y, x) map coordinates
+        # The following needs to consider crossing equator, poles, prime meridian, dateline.
+        # Right now I don't want to think about it. This should work for North America.
+        if (point[1] < self.mapOriginLongitudeX) or (point[0] < self.mapOriginLatitudeY):
+            print("Invalid DrawPointLatLong()", point)
+            return
+        x = (point[1] - self.mapOriginLongitudeX) * self.mapMetersPerLongitudeX
+        y =  (point[0] - self.mapOriginLatitudeY) * self.mapMetersPerLatitudeY
+        self.DrawPointMeters((x, y), color, size)
+
+    def DrawPointMeters(self, point, color, size=1):
+        # point is (x, y) in meters from some origin.
+        # Origin may be off visible map.
+        # Origin (0,0) is lower right with increasing values up and right.
+        x = int(round((point[0] - self.originOffsetMetersX) * self.mapScalePixelsPerMeter))
+        y = self.mapMaxPixelsY - int(round((point[1] - self.originOffsetMetersY) * self.mapScalePixelsPerMeter))
+        if (x < 0) or (x > self.mapMaxPixelsX) or (y < 0) or (y > self.mapMaxPixelsY):
+            print("Invalid DrawPointMeters() (%d,%d) (%d,%d)." % (point[0], point[1], x, y))
+            return
+        print("DrawPointMeters() (%d,%d) (%d,%d)." % (point[0], point[1], x, y))
+        #self.mapDraw.point((x, y), fill=color)
+        self.mapDraw.ellipse((x-size, y-size, x+size, y+size), fill=color)
+
+def TestMap():
+    waypoints = [
+			(37.6272, -122.4541),
+			(38.6276, -123.4522)
+		]
+    m = Map(waypoints)
+    m.Save()
             
 def TestNav():
     h = navigator()
@@ -178,4 +332,5 @@ def Run():
 
 if __name__ == '__main__':
     #TestNav2()
+    #TestMap()
     Run()
