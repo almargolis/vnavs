@@ -20,7 +20,7 @@ var socket_event_move_reverse = 'moveReverse'		// from browser, move backward
 var socket_event_move_stop = 'moveStop'			// from browser, move stop
 var socket_event_steer = 'steer'
 var mqtt = require('mqtt')
-var mqtt_topic_take_pic = 'helmsman/take_pic'
+var mqtt_topic_take_pic = 'cameraman/orders'
 var mqtt_topic_drive = 'helmsman/orders'
 
 var config_fn = expandHomeDir('~/vnavs.ini')
@@ -30,17 +30,23 @@ var mqttc  = mqtt.connect(mqtt_broker)
 
 mqttc.on('connect', function () {
   mqttc.subscribe('engineer_1/status')
-//  mqttc.publish('presence', 'Hello mqtt')
+  mqttc.subscribe('cameraman/pic_ready')
 })
  
 mqttc.on('message', function (topic, message) {
-  if (topic === 'engineer_1/status') {
-    io.sockets.emit(socket_event_gps, message.toString());
-    //  mqttc.end()
-  }
+    if (topic === 'engineer_1/status') {
+        io.sockets.emit(socket_event_gps, message.toString());
+        //  mqttc.end()
+    }
+    if (topic === 'cameraman/pic_ready') {
+        payload = JSON.parse(message);
+        fn = payload['filename'];
+        console.log("image ready", fn);
+        io.sockets.emit(socket_event_imageReady, path.join(image_subdir, fn));
+    }
 })
 
-var image_subdir = '/temp'
+var image_subdir = '/images'
 var image_path = image_subdir + '/single.jpg'
 var image_fqn = '/home/pi/projects/vnavs' + image_path
 var static_subdir = '/node_root'
@@ -51,8 +57,7 @@ var http = require('http').Server(app);
 app.set('view engine', 'pug')
 var bodyParser = require('body-parser')
 var urlencodedParser = bodyParser.urlencoded({ extended: false })
-// app.use('/', express.static(path.join(__dirname, static_subdir)));
-app.use(image_subdir, express.static(path.join(__dirname, image_subdir)));
+app.use(image_subdir, express.static(path.join('/bot1', image_subdir)));
 var formTimeout = 3
 
 app.get('/', function(req, res) {
@@ -83,6 +88,10 @@ io.on('connection', function(socket) {
   socket.on(socket_event_startStream, function() {
     startStreaming(io);
   });
+  socket.on(socket_event_take_pic, function() {
+    console.log("take pic");
+    mqttc.publish(mqtt_topic_take_pic, '{"loopMode": "single", "loopFormat": "jpeg", "loopPublish": "file", "captureMode": "single", "captureFormat": "jpeg", "capturePublish": "file"}')
+  });
   socket.on(socket_event_move_forward, function() {
     console.log("forward");
     mqttc.publish(mqtt_topic_drive, '{"speed": "f"}')
@@ -99,12 +108,21 @@ io.on('connection', function(socket) {
     console.log("stop");
     mqttc.publish(mqtt_topic_drive, '{"speed": "s"}')
   });
-  socket.on(socket_event_take_pic, function() {
-    mqttc.publish(mqtt_topic_take_pic, '{}')
-  });
   socket.on(socket_event_steer, function(heading) {
     console.log("left " + heading);
     mqttc.publish(mqtt_topic_drive, JSON.stringify({"heading": heading}))
+  });
+  socket.on('waypC', function() {
+    mqttc.publish('navigator/waypoint', '{"request": "C"}')
+  });
+  socket.on('waypM', function() {
+    mqttc.publish('navigator/waypoint', '{"request": "M"}')
+  });
+  socket.on('modeM', function() {
+    mqttc.publish('navigator/mode', '{"mode": "M"}')
+  });
+  socket.on('modeG', function() {
+    mqttc.publish('navigator/mode', '{"mode": "G"}')
   });
 });
 

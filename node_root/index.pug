@@ -95,6 +95,10 @@ html(lang="en")
           // end of table
         // end main controls div
       div(style="display: inline-block;")
+          button(type="button" id="" onclick="socket.emit('waypC');") Clear Waypoints
+          button(type="button" id="" onclick="socket.emit('waypM');") Mark Waypoint
+          button(type="button" id="" onclick="socket.emit('modeG');") GPS Navigation
+          button(type="button" id="" onclick="socket.emit('modeM');") Manual
       div(style="display: inline-block;")
         input(type="range" id="speedctl" min="0" max="100" step="1" value="50" style="width: 200px;")
     // end controls area

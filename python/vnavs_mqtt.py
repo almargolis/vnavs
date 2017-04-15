@@ -283,12 +283,15 @@ class FastMqttServer(SelectServer):
         super().__init__(IniSection="MqttFastServer")
         self.mqttPayloads = {}
         self.subscriptions = {}
+        self.message_in_ct = 0
+        self.message_out_ct = 0
 
     def ProcessMessage(self, s, message):
         if message[0] == '':
             return
         action = message[0]
         if action == 'publish':
+            self.message_in_ct += 1
             topic = message[1]
             payload = message[2]
             self.mqttPayloads[topic] = payload
@@ -322,6 +325,7 @@ class FastMqttServer(SelectServer):
             payload = ''
         message = "message\x00%s\x00%s\x01" % (topic, payload)
         self.outputQueues[s].put(message)
+        self.message_out_ct += 1
         if s not in self.outputSockets:
             self.outputSockets.append(s)
 
@@ -500,7 +504,10 @@ class mqtt_node(object):
         if self.verbose:
             print("on_message()", message.topic + " " + str(message.qos) + " " + self.MessageStr(message.payload))
         handler_method = self.handlers[message.topic]
-        handler_method(message.payload.decode("utf-8"))
+        if handler_method is None:
+            print("on_message() no handler for ", message.topic)
+        else:
+            handler_method(message.payload.decode("utf-8"))
 
     def on_log(self, client, userdata, level, buf):
         print(buf)

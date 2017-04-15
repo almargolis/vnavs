@@ -1,0 +1,2 @@
+#/bin/bash
+screen -d -m -S translator /bin/bash ~/projects/vnavs/launch/run_translator
