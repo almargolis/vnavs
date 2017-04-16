@@ -54,14 +54,11 @@ class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
         #
-        #print("LOOP")
-        self.CheckMqtt()		# checks for fast messages
         self.mosquitto.CheckMqtt()	# checks for mosquitto messages
         time.sleep(0.1)			# leave cpu for automation, this is human speed
 
 if __name__ == '__main__':
     h = translate_fast_to_mosquitto()
-    h.Connect()
     h.Loop()
     h.Disconnect()
 

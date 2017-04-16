@@ -37,9 +37,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						'engineer_1/status', 'helmsman/orders'], 
 						Blocking=True, BlockingTimeoutSecs=0.1,
 						BrokerType='F')
-        self.tk_is_initialized = False
         self.lastfn = ""
-        self.Connect()			# This starts the mqtt client in another thread
         self.tk_root = Tk()
         self.tk_root.title("VNAVS Mission Control")
         self.image = OpticChiasm.ImageAnalyzer()
@@ -148,8 +146,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.rmsg_cameraman_last(msg)
 
     def rmsg_cameraman_last(self, msg):
-        if not self.tk_is_initialized:
-            return
         payload = json.loads(msg)
         self.pic_fn = payload['filename']
         self.pic_processed = False
@@ -205,24 +201,20 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.pic_processed = True
         self.pic_requested = False
 
-    def mainloop(self):
-        self.tk_is_initialized = True
-        while True:
-          # rmsg_helmsman_pic_ready is called asyncronously via mqtt
-          self.CheckMqtt()						# this has a short timeout
-          #speed = int(self.f1_speed_control.get())
-          #self.f1_speed_display.configure(text=str(speed))
-          if (self.pic_fn is None) or (self.pic_fn == '') or self.pic_processed:
-              pass
-          else:
-              self.ProcessImage()
-          #if (not self.pic_requested) or ((time.time() - self.pic_request_time) > 1):
-          #    print("ASK LAST")
-          #    #self.mqttc.publish('cameraman/ask_last', '')
-          #    self.pic_requested = True
-          #    self.pic_request_time = time.time()
-          self.tk_root.update()
+    def DoLoop(self):
+        #speed = int(self.f1_speed_control.get())
+        #self.f1_speed_display.configure(text=str(speed))
+        if (self.pic_fn is None) or (self.pic_fn == '') or self.pic_processed:
+            pass
+        else:
+            self.ProcessImage()
+        #if (not self.pic_requested) or ((time.time() - self.pic_request_time) > 1):
+        #    print("ASK LAST")
+        #    #self.mqttc.publish('cameraman/ask_last', '')
+        #    self.pic_requested = True
+        #    self.pic_request_time = time.time()
+        self.tk_root.update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
 m = MissionControl()
-m.mainloop()
+m.Loop()

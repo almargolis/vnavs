@@ -703,10 +703,8 @@ class ProcessStep(object):
 class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
         super().__init__(Subscriptions=['archiver/pic_ready', 'cameraman/last', 'cameraman/pic_ready'], Blocking=True, BrokerType='F', BlockingTimeoutSecs=0.1)
-        self.tk_is_initialized = False
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.lastfn = ""
-        self.Connect()			# This starts the mqtt client in another thread
         self.image = OpticChiasm.ImageAnalyzer()
         self.image.img_crop=(300,200)
         self.image.img_crop=(250,450)
@@ -775,8 +773,6 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
     def rmsg_archiver_pic_ready(self, msg):
         return # -- there are too many of these to process
-        if not self.tk_is_initialized:
-            return
         if not self.camera_snap:
             return
         payload = json.loads(msg)
@@ -799,8 +795,6 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
         print("LAST", msg)
-        if not self.tk_is_initialized:
-            return
         if not self.camera_snap:
             return
         payload = json.loads(msg)
@@ -810,8 +804,6 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
     def rmsg_cameraman_pic_ready(self, msg):
         return # -- there are too many of these to process
-        if not self.tk_is_initialized:
-            return
         if not self.camera_snap:
             return
         payload = json.loads(msg)
@@ -850,24 +842,20 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         ProcessStep.steps[0].opencv = opencv
         ProcessStep.steps[0].UpdateAll()
 
-    def mainloop(self):
-        self.tk_is_initialized = True
-        while True:
-          # rmsg_helmsman_pic_ready is called asyncronously via mqtt
-          self.CheckMqtt()						# this has a short timeout
-          if not self.camera_last_processed:
-              # There is a potential race condition with self.camera_last_processed being
-              # assinged from both mqtt and tk threads. That could be confusing or make the
-              # program fee unresponsive but shouldn't cause real harm.
-              # THIS ASSUMES capture to step zero, we should seatch for actual step.
-              fpath = os.path.join(self.imageDir, self.camera_last_filename)
-              ProcessStep.steps[0].parm_values['opencvfn'] = fpath
-              ProcessStep.steps[0].filter = 'FileImage'
-              ProcessStep.steps[0].UpdateAll()
-              self.camera_last_processed = True
-          self.tk.tkw.update()
+    def DoLoop(self):
+        if not self.camera_last_processed:
+            # There is a potential race condition with self.camera_last_processed being
+            # assigned from both mqtt and tk threads. That could be confusing or make the
+            # program fee unresponsive but shouldn't cause real harm.
+            # THIS ASSUMES capture to step zero, we should seatch for actual step.
+            fpath = os.path.join(self.imageDir, self.camera_last_filename)
+            ProcessStep.steps[0].parm_values['opencvfn'] = fpath
+            ProcessStep.steps[0].filter = 'FileImage'
+            ProcessStep.steps[0].UpdateAll()
+            self.camera_last_processed = True
+        self.tk.tkw.update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
 if __name__ == '__main__':
     m = Darkroom()
-    m.mainloop()
+    m.Loop()
