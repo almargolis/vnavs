@@ -222,7 +222,7 @@ class SelectServer(object):
         for this_message in messages:
             parts = this_message.split('\x00')
             self.ProcessMessage(s, parts)
-            print("recieve", parts)
+            #print("recieve", parts)
 
     def loop_start(self):
         self.thread = threading.Thread(target=self.loop_forever)
@@ -240,14 +240,14 @@ class SelectServer(object):
 
     def loop(self, timeout=1.0):
         # timeout=None blocks indefinately, timeout=0.0 polls and return immediately, potentially with three empty lists
-        print('LOOP waiting for the next event', self.inputSockets, timeout)
+        #print('LOOP waiting for the next event', self.inputSockets, timeout)
         readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
-        print("LOOP", readable, writable, exceptional)
+        #print("LOOP", readable, writable, exceptional)
         for s in readable:
             if self.isServer and (s is self.server):
                 # A "readable" server socket is ready to accept a connection
                 connection, client_address = s.accept()
-                print('new connection from', client_address)
+                #print('new connection from', client_address)
                 connection.setblocking(0)
                 self.inputSockets.append(connection)
             else:
@@ -308,19 +308,20 @@ class FastMqttServer(SelectServer):
             topic = message[1]
             payload = message[2]
             self.mqttPayloads[topic] = (self.message_in_ct, payload)
-            print("PUBLISH", topic, self.subscriptions)
+            #print("PUBLISH", topic, self.subscriptions)
             if topic in self.subscriptions:
                 newSubscriptionList = []
                 for sendSocket in self.subscriptions[topic]:
                     if sendSocket in self.inputSockets:
                         # we get here for subscription by still-connected sockets
                         newSubscriptionList.append(sendSocket)
-                        print("SENDING", sendSocket.getsockname())
+                        #print("SENDING", sendSocket.getsockname())
                         self.SendMessage(sendSocket, topic)
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
         elif action == 'read':
             topic = message[1]
             self.SendMessage(s, topic)
+            print("READ", topic)
         elif action == 'subscribe':
             topic = message[1]
             if topic in self.subscriptions:
