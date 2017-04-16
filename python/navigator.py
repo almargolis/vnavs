@@ -2,8 +2,10 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import cv2
 import json
 import math
+import numpy as np
 import os
 from geopy.distance import great_circle
 from PIL import Image, ImageDraw
@@ -16,24 +18,36 @@ import paho.mqtt.client as mqtt
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint'], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint'],
+					Readers=['engineer_1/status'],
+					Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
-        self.waypoints = []
-        self.waypointIx = 0
         self.longitude = 0
         self.speed = None
         self.heading = None
         self.latitude = 0
-        self.mode = 'M'			# M=manual, P=paused, C=Cones, G=GPS, (R=resume)
         self.pausedMode = None
         self.map = Map()
         self.mapCt = 0
+        self.gpsAction = ''
+        self.gpsNew = False
+        self.gpsRequested = False
+        self.Init()
+
+    def Init(self):
+        self.waypoints = []
+        self.waypointIx = 0
+        self.navpoints = []
+        self.map.InitMap()
+        self.mode = "M"
+        if self.mqttc is not None:
+            self.WriteMap()
 
     def WriteMap(self):
         self.mapCt += 1
         im_fn = 'Map_%d.jpeg' % self.mapCt
         im_fp = os.path.join(self.imageDir, im_fn)
-        self.map.map.save(im_fp)
+        self.map.SaveMap(im_fp)
         payload = {}
         payload['filename'] = im_fn
         payload['captureFormat'] = 'jpeg'
@@ -53,8 +67,6 @@ class navigator(vnavs_mqtt.mqtt_node):
             print("NO HEADING - can't navigate.")
             return None
         w = self.waypoints[ix]
-        self.map.DrawPointLatLong((self.latitude, self.longitude), "green")
-        self.WriteMap()
         waypointLatitude = w[0]
         waypointLongitude = w[1]
         deltaY = great_circle((self.latitude, self.longitude), (w[0], self.longitude)).meters
@@ -92,17 +104,19 @@ class navigator(vnavs_mqtt.mqtt_node):
                 steering = "RR" + turnRadius
             else:
                 steering = "RR-" + turnRadius
-            payload = {}
-            payload['heading'] = steering
-            self.mqttc.publish('helmsman/orders', json.dumps(payload))
-            payload['ix'] = self.waypointIx
-            self.mqttc.publish('engineer_1/status', json.dumps(payload))
+        payload = {}
+        payload['heading'] = steering
+        self.mqttc.publish('helmsman/orders', json.dumps(payload))
+        payload['ix'] = self.waypointIx
+        self.mqttc.publish('navigator/status', json.dumps(payload))
+        self.navpoints.append(((self.latitude, self.longitude), steering))
         print("Path %4s dX %+03.4f dY %+03.4f dH %+03.4f H %+03.4f %2d" % (steering, deltaX, deltaY, deltaH, self.heading, self.waypointIx))
         return hypotenuse
 
     def rmsg_navigator_mode(self, msg):
         payload = json.loads(msg)
         mode = payload['mode']
+        print("MODE", mode)
         if mode == 'R':
             if self.pausedMode is not None:
                 self.mode = self.pausedMode
@@ -113,10 +127,20 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.mode = mode
         elif mode in 'MCG':
             if (mode == "G") and (self.mode != "G"):
-                pass
-                #self.map.InitMap()
+                self.waypointIx = 0
             if (mode == "M") and (self.mode == "G"):
+                # end of gps naviagion
+                for this in self.navpoints:
+                    p = this[0]
+                    d = this[1]
+                    self.map.DrawPointLatLong(p, self.map.navpointColor)
                 self.WriteMap()
+                f = open("nav.txt", "w")
+                for p in self.waypoints:
+                    f.write(`p` + u'/n')
+                for p in self.navpoints:
+                    f.write(`p` + u'/n')
+                f.close()
             self.mode = mode
             self.pausedMode = None
             self.waypointIx = 0
@@ -124,17 +148,11 @@ class navigator(vnavs_mqtt.mqtt_node):
     def rmsg_navigator_waypoint(self, msg):
         payload = json.loads(msg)
         request = payload['request']
+        print("WAY", request)
         if request == 'C':
-            self.waypoints = []
-            self.waypointIx = 0
-            self.map.InitMap()
+            self.Init()
         elif request == 'M':
-            # check if not None and not same
-            self.waypoints.append((self.latitude, self.longitude))
-            if len(self.waypoints) >= 2:
-                self.map.FindExtentsLatLong(waypoints=self.waypoints)
-                self.WriteMap()
-        print(self.waypoints)
+            self.gpsAction = 'M'
 
     def rmsg_engineer_1_status(self, msg):
         try:
@@ -142,23 +160,42 @@ class navigator(vnavs_mqtt.mqtt_node):
         except ValueError:
             payload = {}
             print("JSON Error")
+            self.gpsRequested = False
+            return
         self.longitude = payload['longitude']
         self.latitude = payload['latitude']
         self.speed = payload['speed']
         self.heading = payload['heading']
+        self.gpsRequested = False
+        self.gpsNew = True
+        print("NEW GPS INFO")
 
     def DoLoop(self):
-        # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
+        # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         #
-        #print("LOOP")
-        m = self.mqttc.read('engineer_1/status')
-        print(m)
-        if (self.mode == 'G') and (len(self.waypoints) > 0):
-            distance = self.HeadingToWaypoint(self.waypointIx)
-            if distance < 1:
-                self.waypointIx += 1
-                if self.waypointIx >= len(self.waypoints):
-                    self.waypointIx = 0
+        if self.gpsNew:
+            if self.gpsAction == 'M':
+                # check if repeat ??
+                self.waypoints.append((self.latitude, self.longitude))
+                #self.waypoints = [(37.627450333333336, -122.453955), (37.627469166666664, -122.45389233333333), (37.627477666666664, -122.45387333333333)]
+                if len(self.waypoints) >= 2:
+                    self.map.FindExtentsLatLong(waypoints=self.waypoints)
+                    self.WriteMap()
+                self.gpsAction = ''
+                print(self.waypoints)
+            if (self.mode == 'G') and (len(self.waypoints) > 0):
+                distance = self.HeadingToWaypoint(self.waypointIx)
+                if distance < 1:
+                    self.waypointIx += 1
+                    if self.waypointIx >= len(self.waypoints):
+                        self.waypointIx = 0
+            self.gpsNew = False
+        if (self.gpsAction == 'M') \
+            or ((self.mode == 'G') and (len(self.waypoints) > 0)):
+            if not self.gpsRequested:
+                self.gpsRequested = True
+                self.mqttc.read('engineer_1/status')
+                print("REQESTING GPS")
 
 class Map(object):
     def __init__(self, waypoints=None):
@@ -167,6 +204,10 @@ class Map(object):
         self.FindExtentsLatLong()
         self.mapOriginLongitudeX = 0
         self.mapOriginLatitudeY = 0
+        self.waypointColor = "red"
+        self.waypointColor = (0, 0, 255)		# red BGR
+        self.navpointColor = "green"
+        self.navpointColor = (0, 255, 0)
 
     def FindExtentsLatLong(self, waypoints=None):
         # waypoints are (latitude, longitude) or (y, x)
@@ -194,7 +235,7 @@ class Map(object):
                 if x < minLongitudeZ:
                     minLongitudeZ = x
                 elif x > maxLongitudeZ:
-                    maxLongitude = x
+                    maxLongitudeZ = x
                 if y < minLatitudeZ:
                     minLatitudeZ = y
                 elif y > maxLatitudeZ:
@@ -231,6 +272,7 @@ class Map(object):
                 return
         self.mapMetersPerLongitudeX = deltaMetersX / extentWidth
         self.mapMetersPerLatitudeY = deltaMetersY / extentHeight
+        print("EXTENT", extentWidth, deltaMetersX, extentHeight, deltaMetersY)
         # The following needs to consider crossing equator, poles, prime meridian, dateline.
         # Right now I don't want to think about it.
         marginMeters = self.mapMarginPixels / self.mapScalePixelsPerMeter
@@ -244,8 +286,9 @@ class Map(object):
         except ZeroDivisionError:
             marginAdjustmentY = 0
         self.mapOriginLatitudeY = minLatitudeT - marginAdjustmentY
+        print("SCALE", self.mapScalePixelsPerMeter, self.mapMetersPerLongitudeX, self.mapMetersPerLatitudeY)
         for w in self.waypoints:
-            self.DrawPointLatLong(w, "red")
+            self.DrawPointLatLong(w, self.waypointColor)
 
     def InitMap(self):
         self.mapSizePixels = 200
@@ -255,8 +298,14 @@ class Map(object):
         self.mapScalePixelsPerMeter = 0.0
         self.originOffsetMetersX = 0.0
         self.originOffsetMetersY = 0.0
-        self.map = Image.new('RGB', (self.mapSizePixels, self.mapSizePixels), color="white")
-        self.mapDraw = ImageDraw.Draw(self.map)
+        #self.map = Image.new('RGB', (self.mapSizePixels, self.mapSizePixels), color="white")
+        #self.mapDraw = ImageDraw.Draw(self.map)
+        self.map = np.zeros((self.mapSizePixels, self.mapSizePixels, 3), np.uint8)
+        self.map[:] = (255, 255, 255)
+
+    def SaveMap(self, fp):
+        #self.map.save(im_fp)
+        cv2.imwrite(fp, self.map)
 
     def DrawPointLatLong(self, point, color, size=1):
         # point is (latitude, longitude), (y, x) map coordinates
@@ -267,6 +316,7 @@ class Map(object):
             return
         x = (point[1] - self.mapOriginLongitudeX) * self.mapMetersPerLongitudeX
         y =  (point[0] - self.mapOriginLatitudeY) * self.mapMetersPerLatitudeY
+        print("DrawPointLatLong() %s -> (%s, %s)" %(point, x, y))
         self.DrawPointMeters((x, y), color, size)
 
     def DrawPointMeters(self, point, color, size=1):
@@ -280,7 +330,8 @@ class Map(object):
             return
         print("DrawPointMeters() (%d,%d) (%d,%d)." % (point[0], point[1], x, y))
         #self.mapDraw.point((x, y), fill=color)
-        self.mapDraw.ellipse((x-size, y-size, x+size, y+size), fill=color)
+        #self.mapDraw.ellipse((x-size, y-size, x+size, y+size), fill=color)
+        cv2.circle(self.map, (x, y), size, color, -1)
 
 def TestMap():
     waypoints = [

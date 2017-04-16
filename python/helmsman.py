@@ -256,7 +256,7 @@ class vehicle(object):
 
 class helmsman(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=('helmsman/orders',), Blocking=False, BrokerType='F')
+        super().__init__(Subscriptions=['helmsman/orders'], Blocking=False, BrokerType='F')
         self.v = vehicle()
         self.speed_goal = 0		# (int) mm/sec
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
