@@ -359,16 +359,16 @@ class FastMqttClient(SelectServer):
             rc = 0				# not implemented
             self.on_connect(client, userdata, flags, rc)
 
-    def publish(self, topic, msg, qos=0):
+    def send_socket(self, msg):
         msg_sent = False
         retry_ct = 0
         while (not msg_sent) and (retry_ct < 10):
             try:
-                self.server.sendall("publish\x00%s\x00%s\x01" % (topic, msg))
+                self.server.sendall(msg)
                 msg_sent = True
             except socket.error:
                 # socket.error: [Errno 11] Resource temporarily unavailable
-                # need to check Errno - kep running even when server died
+                # need to check Errno - kept running even when server died
                 retry_ct += 1
         if msg_sent:
             mid = 0				# not implemented -- message id
@@ -377,9 +377,14 @@ class FastMqttClient(SelectServer):
             mid = 0				# not sue if this matches Paho MQTT behavior
             return (mqtt.MQTT_ERR_NO_CONN, mid)
 
+    def publish(self, topic, msg, qos=0):
+        message = "publish\x00%s\x00%s\x01" % (topic, msg)
+        return self.send_socket(message)
+
     def read(self, topic, qos=0):
         # This is a non-repeating request to get the latest message
-        self.server.sendall("read\n%s\n" % (topic))
+        message = "read\x00%s\x01" % (topic)
+        return self.send_socket(message)
 
     def subscribe(self, topic, qos):
         self.server.sendall("subscribe\x00%s\x01" % (topic))
@@ -405,11 +410,12 @@ class FastMqttMessage(object):
         self.mid = mid				# this is a fast mqtt extension
 
 class mqtt_node(object):
-    def __init__(self, Subscriptions=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+    def __init__(self, Subscriptions=[], Readers=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.blocking_mode = Blocking
         self.blocking_timeout = BlockingTimeoutSecs
+        self.readers = Readers
         self.subscriptions = Subscriptions
         self.handlers = {}
         self.broker_type = BrokerType
@@ -504,13 +510,15 @@ class mqtt_node(object):
 
     def RegisterMessageHandlers(self):
         self.handlers = {}
-        for this_topic in self.subscriptions:
+        topics = self.subscriptions + self.readers
+        for this_topic in topics:
             handler_name = handler_method_prefix + this_topic.replace('/', '_')
             handler_method = getattr(self, handler_name, None)
             if handler_method is None:
                 print("No message handler for topic '%s'" % (this_topic))
             self.handlers[this_topic] = handler_method
-            self.mqttc.subscribe(this_topic, 0)
+            if this_topic in self.subscriptions:
+                self.mqttc.subscribe(this_topic, 0)
 
     def on_connect(self, client, userdata, flags, rc):
         print("on_connect() rc: " + str(rc))
