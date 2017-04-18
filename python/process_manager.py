@@ -10,32 +10,36 @@ import vnavs_mqtt
 
 SYSTEMCTL = '/bin/systemctl'
 
-def CheckProcessState(process_name):
-    p = [SYSTEMCTL, 'is-active', process_name]
-    with psutil.Popen(p, stdout=subprocess.PIPE) as proc:
-        r = proc.stdout.read()
-        if r == 'active\n':
-            return True
-        else:
-            return False
-
-def StartProcess(process_name):
-    cmd = ['sudo', SYSTEMCTL, 'start', process_name]
+def RunCommand(cmd):
     start_time = time.time()
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     while True:
-        p.poll()
+        proc.poll()
         if p.returncode is None:
             print("Process is still running")
             time.sleep(10)
         else:
-            # we might want to log stdout result r
-            print("result code:", p.returncode)
-            r = p.stdout.read()
-            print("***********")
-            print(r)
-            print("***********")
-            return CheckProcessState(process_name)
+            return proc
+
+def CheckSystemctlState(service_name):
+    cmd = [SYSTEMCTL, 'is-active', service_name]
+    proc = RunCommand(cmd)
+    r = proc.stdout.read()
+    if r == 'active\n':
+        return True
+    else:
+        return False
+
+def StartSystemctl(service_name):
+    cmd = ['sudo', SYSTEMCTL, 'start', service_name]
+    proc = RunCommand(cmd)
+    # we might want to log stdout result r
+    print("result code:", p.returncode)
+    r = proc.stdout.read()
+    print("***********")
+    print(r)
+    print("***********")
+    return CheckSystemctlState(service_name)
 
 def PiShutdown():
     command = "/usr/bin/sudo /sbin/shutdown -h now"
@@ -52,6 +56,15 @@ class process(vnavs_mqtt.mqtt_node):
         self.process_specs = self.config.items("ProcessMonitor")
         self.startTime = time.time()
 
+    def DoLoop(self):
+        for pname, pspec in self.process_specs:
+            parts = pspec.split(':')
+            if parts[0] == 's':
+                service = parts[1]
+                if not CheckSystemctlState(service):
+                    StartSystemctl(service)
+        time.sleep(60)
+
 if StartProcess('nfs-kernel-server'):
     print("TRUE")
 else:
@@ -59,9 +72,9 @@ else:
 
 def Run():
     p = process()
-    p.Connect()
     p.Loop()
     p.Disconnect()
 
 if __name__ == '__main__':
-    Run()
+    if sys.argv[1] == 'run':
+        Run()

@@ -179,8 +179,7 @@ class SelectServer(object):
             try:
                 self.server.connect((self.broker_host, self.broker_port))
             except socket.error as e:
-                print("E", e.errno)
-                if e.errno in [36, 56]:
+                if e.errno in [36, 56, 115]:
                     # socket.error: [Errno 36] Operation now in progress
                     # is not really an error
                     pass

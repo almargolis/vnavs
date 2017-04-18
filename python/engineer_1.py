@@ -3,13 +3,17 @@ from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
 import json
-import numpy
 import os
 from geopy.distance import great_circle
 import pynmea2
 import serial
 import sys
 import time
+
+from sense_hat import SenseHat
+#import sense_hat.sense_hat
+#import SenseHat
+
 
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
@@ -40,6 +44,8 @@ class engineer_1(vnavs_mqtt.mqtt_node):
 					bytesize = serial.EIGHTBITS,
 					timeout=1
 					)
+        self.sense = SenseHat()
+        self.sense.set_imu_config(False, True, False)
 
     def GetGpsData(self, gps_parsed, key):
         for ix, this_field in enumerate(gps_parsed.fields):
@@ -159,21 +165,26 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 self.newData = True
                 if self.goal_run:
                     self.PathToGoal(gps_parsed)
+        self.orientation = self.sense.get_orientation_degrees()
         if self.newData:
             #print(self.speed, self.longitude, self.latitude)
             payload = {}
+            payload['pitch'] = self.orientation['pitch']
+            payload['roll'] = self.orientation['roll']
+            payload['yaw'] = self.orientation['yaw']
+            """
             payload['quality'] = self.gps_quality
             payload['speed'] = self.speed
             payload['heading'] = self.heading
             payload['longitude'] = self.longitude
             payload['latitude'] = self.latitude
+            """
             #payload['gps_time'] = `self.timestamp`
             self.mqttc.publish('engineer_1/status', json.dumps(payload))
             self.newData = False
 
 if __name__ == '__main__':
     h = engineer_1()
-    h.Connect()
     h.Loop()
     h.Disconnect()
 
