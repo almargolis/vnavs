@@ -328,7 +328,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
 
 if __name__ == '__main__':
     h = cameraman()
-    h.Connect()
     h.Loop()
     h.Disconnect()
 

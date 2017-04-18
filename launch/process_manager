@@ -1,0 +1,2 @@
+#/bin/bash
+screen -d -m -S process /bin/bash ~/projects/vnavs/launch/run_process_manager
