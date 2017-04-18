@@ -4,6 +4,7 @@ from builtins import (bytes, str, open, super, range,
 
 import psutil
 import subprocess
+import sys
 import time
 
 import vnavs_mqtt
@@ -11,11 +12,12 @@ import vnavs_mqtt
 SYSTEMCTL = '/bin/systemctl'
 
 def RunCommand(cmd):
+    print("RUN COMMAND", cmd)
     start_time = time.time()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     while True:
         proc.poll()
-        if p.returncode is None:
+        if proc.returncode is None:
             print("Process is still running")
             time.sleep(10)
         else:
@@ -34,7 +36,7 @@ def StartSystemctl(service_name):
     cmd = ['sudo', SYSTEMCTL, 'start', service_name]
     proc = RunCommand(cmd)
     # we might want to log stdout result r
-    print("result code:", p.returncode)
+    print("result code:", proc.returncode)
     r = proc.stdout.read()
     print("***********")
     print(r)
@@ -64,11 +66,6 @@ class process(vnavs_mqtt.mqtt_node):
                 if not CheckSystemctlState(service):
                     StartSystemctl(service)
         time.sleep(60)
-
-if StartProcess('nfs-kernel-server'):
-    print("TRUE")
-else:
-    print("FALSE")
 
 def Run():
     p = process()
