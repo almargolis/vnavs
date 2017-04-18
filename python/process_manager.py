@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
-import psutil
 import subprocess
 import sys
 import time
@@ -65,6 +64,11 @@ class process(vnavs_mqtt.mqtt_node):
                 service = parts[1]
                 if not CheckSystemctlState(service):
                     StartSystemctl(service)
+            elif parts[0] == 'm':
+                mountpoint = parts[1]
+                proc = RunCommand(['mountpoint', '-q', mountpoint])
+                if proc.returncode != 0:
+                    proc = RunCommand(['sudo', 'mount', mountpoint])
         time.sleep(60)
 
 def Run():
