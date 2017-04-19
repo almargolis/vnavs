@@ -146,7 +146,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 except:
                     # this sometimes fails. Maybe just indoors.
                     self.timestamp = None
-                self.gps_status = gps_parsed.data[2]	# A=valid, V=invalid
+                self.gps_status = gps_parsed.data[1]	# A=valid, V=invalid
                 speedRaw = gps_parsed.data[6].strip()
                 try:
                     speedKnots = float(speedRaw)
@@ -163,6 +163,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                         print("Invalid RMC heading", `heading_raw`)
                 self.gps_mode = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
                 self.newData = True
+                print("RMC", self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude, gps_parsed.data[4], gps_parsed.data[5], self.longitude)
                 if self.goal_run:
                     self.PathToGoal(gps_parsed)
         self.orientation = self.sense.get_orientation_degrees()
@@ -172,13 +173,11 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             payload['pitch'] = self.orientation['pitch']
             payload['roll'] = self.orientation['roll']
             payload['yaw'] = self.orientation['yaw']
-            """
-            payload['quality'] = self.gps_quality
             payload['speed'] = self.speed
             payload['heading'] = self.heading
+            payload['quality'] = self.gps_quality
             payload['longitude'] = self.longitude
             payload['latitude'] = self.latitude
-            """
             #payload['gps_time'] = `self.timestamp`
             self.mqttc.publish('engineer_1/status', json.dumps(payload))
             self.newData = False
