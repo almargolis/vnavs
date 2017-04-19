@@ -27,6 +27,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.heading = None
         self.latitude = 0
         self.pausedMode = None
+        self.missionName = None
         self.map = Map()
         self.mapCt = 0
         self.gpsAction = ''
@@ -110,6 +111,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         payload['ix'] = self.waypointIx
         self.mqttc.publish('navigator/status', json.dumps(payload))
         self.navpoints.append(((self.latitude, self.longitude), steering))
+        print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.waypoints[self.waypointIx]))
         print("Path %4s dX %+03.4f dY %+03.4f dH %+03.4f H %+03.4f %2d" % (steering, deltaX, deltaY, deltaH, self.heading, self.waypointIx))
         return hypotenuse
 
@@ -127,7 +129,15 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.mode = mode
         elif mode in 'MCG':
             if (mode == "G") and (self.mode != "G"):
-                self.waypointIx = 0
+                self.missionName = payload['missionName']
+                self.waypoints = []
+                self.navpoints = []
+                f = open(self.missionName + ".mis", "r")
+                for this in f.readlines():
+                    parts = this.split(',')
+                    if parts[0] == 'W':
+                        self.waypoints.append((float(parts[1]), float(parts[2])))
+                self.waypointIx = 1
             if (mode == "M") and (self.mode == "G"):
                 # end of gps naviagion
                 for this in self.navpoints:
@@ -135,11 +145,11 @@ class navigator(vnavs_mqtt.mqtt_node):
                     d = this[1]
                     self.map.DrawPointLatLong(p, self.map.navpointColor)
                 self.WriteMap()
-                f = open("nav.txt", "w")
+                f = open(self.missionName + '.nav', "w")
                 for p in self.waypoints:
-                    f.write(`p` + u'/n')
+                    f.write(u'W,%f,%f\n' % (p[0], p[1]))
                 for p in self.navpoints:
-                    f.write(`p` + u'/n')
+                    f.write(u'N,%f,%f,%s\n' % (p[0][0], p[0][1], p[1]))
                 f.close()
             self.mode = mode
             self.pausedMode = None
@@ -153,6 +163,12 @@ class navigator(vnavs_mqtt.mqtt_node):
             self.Init()
         elif request == 'M':
             self.gpsAction = 'M'
+        elif request == 'S':
+            mission_name = payload['missionName']
+            f = open(mission_name + ".mis", "w")
+            for p in self.waypoints:
+                f.write(u'W,%f,%f\n' % (p[0], p[1]))
+            f.close
 
     def rmsg_engineer_1_status(self, msg):
         try:
@@ -198,8 +214,9 @@ class navigator(vnavs_mqtt.mqtt_node):
                 print("REQESTING GPS")
 
 class Map(object):
-    def __init__(self, waypoints=None):
+    def __init__(self, waypoints=None, navpoints=None):
         self.waypoints = waypoints
+        self.navpoints = navpoints
         self.InitMap()
         self.FindExtentsLatLong()
         self.mapOriginLongitudeX = 0
@@ -209,20 +226,25 @@ class Map(object):
         self.navpointColor = "green"
         self.navpointColor = (0, 255, 0)
 
-    def FindExtentsLatLong(self, waypoints=None):
+    def FindExtentsLatLong(self, waypoints=None, navpoints=None):
         # waypoints are (latitude, longitude) or (y, x)
         if waypoints is not None:
             self.waypoints = waypoints
+        if navpoints is not None:
+            self.navpoints = navpoints
         print("FORMAT MAP", self.waypoints)
-        if self.waypoints is None:
-            return
-        if len(self.waypoints) < 2:
+        plot_points = []
+        if self.waypoints is not None:
+            plot_points = self.waypoints
+        if self.navpoints is not None:
+            plot_points += self.navpoints
+        if len(plot_points) < 2:
             return
         minLongitudeZ = None
         maxLongitudeZ = None
         minLatitudeZ = None
         maxLatitudeZ = None
-        for point in self.waypoints:
+        for point in plot_points:
             # Offset to 0... so comparison doesn't have to worry about negative values
             x = point[1] + 180.0			# convert to range(0, 360)
             y = point[0] + 90.0				# convert to range(0, 180)
@@ -287,8 +309,14 @@ class Map(object):
             marginAdjustmentY = 0
         self.mapOriginLatitudeY = minLatitudeT - marginAdjustmentY
         print("SCALE", self.mapScalePixelsPerMeter, self.mapMetersPerLongitudeX, self.mapMetersPerLatitudeY)
+
+    def PlotWaypoints(self):
         for w in self.waypoints:
             self.DrawPointLatLong(w, self.waypointColor)
+
+    def PlotNavpoints(self):
+        for w in self.navpoints:
+            self.DrawPointLatLong(w, self.navpointColor)
 
     def InitMap(self):
         self.mapSizePixels = 200
@@ -384,6 +412,21 @@ def TestNav2():
         h.latitude = h.waypoints[ix][0]
         h.longitude = h.waypoints[ix][1]
 
+def RunMap():
+    waypoints = []
+    navpoints = []
+    f = open('test.nav', 'r')
+    for this in f.readlines():
+        parts = this.split(',')
+        if parts[0] == 'W':
+            waypoints.append((float(parts[1]), float(parts[2])))
+        elif parts[0] == 'N':
+            navpoints.append((float(parts[1]), float(parts[2])))
+    m = Map()
+    m.FindExtentsLatLong(waypoints=waypoints, navpoints=navpoints)
+    m.PlotWaypoints()
+    m.PlotNavpoints()
+    m.SaveMap('/exports/images/Runmap.jpeg')
 
 def Run():
     h = navigator()
@@ -392,6 +435,7 @@ def Run():
     h.Disconnect()
 
 if __name__ == '__main__':
-    #TestNav2()
-    #TestMap()
-    Run()
+    if sys.argv[1] == 'node':
+        Node()
+    elif sys.argv[1] == 'map':
+        RunMap()
