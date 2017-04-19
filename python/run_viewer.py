@@ -29,7 +29,6 @@ import vnavs_mqtt
 class RunViewer(vnavs_mqtt.mqtt_node):
     def __init__(self):
         super().__init__(Subscriptions=[], Blocking=True, BlockingTimeoutSecs=0.1)
-        self.tk_is_initialized = False
         self.imageDir = self.config.get("Cameraman", "ImageDir")
 
         self.tk = darkroom.TkWidgetDef('root', Tk())
@@ -84,8 +83,6 @@ class RunViewer(vnavs_mqtt.mqtt_node):
 
     def rmsg_archiver_pic_ready(self, msg):
         return # -- there are too many of these to process
-        if not self.tk_is_initialized:
-            return
         if not self.camera_snap:
             return
         payload = json.loads(msg)
@@ -100,14 +97,11 @@ class RunViewer(vnavs_mqtt.mqtt_node):
         cv2.imwrite('bgr.jpeg', opencv)
         print("IMWRITE")
 
-    def mainloop(self):
-        self.tk_is_initialized = True
-        while True:
-          # rmsg_helmsman_pic_ready is called asyncronously via mqtt
-          #self.CheckMqtt()						# this has a short timeout
-          self.tk.tkw.update()
+    def DoLoop(self):
+        # rmsg_helmsman_pic_ready is called asyncronously via mqtt
+        self.tk.tkw.update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
 if __name__ == '__main__':
     m = RunViewer()
-    m.mainloop()
+    m.Loop()

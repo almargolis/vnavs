@@ -24,15 +24,6 @@ handler_method_prefix = 'rmsg_'
 
 stop_process = False
 
-
-def PiShutdown():
-    command = "/usr/bin/sudo /sbin/shutdown -h now"
-    import subprocess
-    process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
-    output = process.communicate()[0]
-    print(output)
-
-
 #
 # Streamer() is the socket_xfer writer function which runs in its own process.
 # It empties the FIFO system queue as quickly as it can and converts that to a
@@ -188,8 +179,7 @@ class SelectServer(object):
             try:
                 self.server.connect((self.broker_host, self.broker_port))
             except socket.error as e:
-                print("E", e.errno)
-                if e.errno in [36, 56]:
+                if e.errno in [36, 56, 115]:
                     # socket.error: [Errno 36] Operation now in progress
                     # is not really an error
                     pass
@@ -410,6 +400,29 @@ class FastMqttMessage(object):
         self.qos = qos
         self.mid = mid				# this is a fast mqtt extension
 
+#
+# Blocking == True
+#	Single threaded node.
+#       if BlockingTimeoutSecs is None,
+#		mqtt loop_forever() is run and after Connect() all processing is done via
+#		callbacks.
+#       if BlockingTimeoutSecs is not None.
+#		messages are not automatically processed, call CheckMqtt() periodically
+#		to process messages.
+#               A convenient way to do this is is to call Loop() and implement a DoLoop()
+#               method. This has the advantage of working identically for blocking and
+#               non-blocking modes so the node blocking mode can be changed easily.
+#               Loop() handles most exception processing. DoLoop() is called repetitively
+#               and frequently, so it does not need to implement the overall looping
+#		or routine exceptions.
+# Blocking == False
+#	Threaded node. Mqttc runs in its own thread and communicates with the main
+#		node thread via callbacks. Since that is happening asyncronously,
+#		you must be thoughtful regarding race conditions.
+#	It is recommended to use the Loop() / DoLoop() mechanism to make sure
+#		connections and exceptions are handled properly. Since Loop()
+#		is non-blocking, DoLoop() needs to check self.mqttcConnected.
+#		 
 class mqtt_node(object):
     def __init__(self, Subscriptions=[], Readers=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
         self.config = ConfigParser.SafeConfigParser()
@@ -430,6 +443,8 @@ class mqtt_node(object):
         self.verbose = False
         self.debug = 0
         self.mqttc = None
+        self.mqttcConnected = False
+        self.lastSocketError = None
         self.verbose = Verbose
         self.streamer = None
         if Streamer:
@@ -440,6 +455,8 @@ class mqtt_node(object):
             print("Non-Blocking Mode")
 
     def Connect(self, timeout=0):
+        if self.blocking_mode:
+            timeout = None			# if blocking, always block till connected
         if self.broker_type == "M":
             self.mqttc = mqtt.Client()
         else:
@@ -448,42 +465,66 @@ class mqtt_node(object):
         self.mqttc.on_message = self.on_message
         self.mqttc.on_connect = self.on_connect
         # Connect
-        connected = False
+        self.mqttcConnected = False
         connect_time = time.time()
-        while not connected:
+        while not self.mqttcConnected:
             try:
                 self.mqttc.connect(host=self.broker_host, port=self.broker_port)
-                connected = True
-            except socket.error:
-                print ("vnavs_mqtt: unable to connect to broker @ %s:%s" % (self.broker_host, self.broker_port))
-                if (timeout > 0) and ((time.time() - connect_time) > timeout):
-                    raise
+                self.mqttcConnected = True
+            except socket.error as e:
+                self.lastSocketError = e.errno
+                print ("vnavs_mqtt: unable to connect to broker error %d @ %s:%s" % (e.errno, self.broker_host, self.broker_port))
+            if not self.mqttcConnected:
+                if timeout is None:
+                    pass			# block forever till connected
+                elif (time.time() - connect_time) >= timeout:
+                    return False
                 time.sleep(1)
         if self.blocking_mode:
-            if self.blocking_timeout < 0:
+            if self.blocking_timeout is None:
                 self.mqttc.loop_forever()
-            # else, periodically call CheckMqtt()
+                return True
+            else:
+                # client must periodically either call call Loop() or periodically call mqtt loop()
+                return True
         else:
             # this starts a separate thread which is handy, but tkinter and others don't support threads
             self.mqttc.loop_start()
+            return True
 
     def CheckMqtt(self):
+         # Blocking mode nodes with BlockingTimeoutSecs not None need
+         # to call this periodically or messages will never be seen.
+         # Depending on how you think about it, calling these blocking
+         # may seem like an oxymoron.
+         # 
          self.mqttc.loop(timeout=self.blocking_timeout)
 
     def Disconnect(self):
-        if self.blocking_mode:
-            pass
-        else:
+        if not self.blocking_mode:
             self.mqttc.loop_stop(force=False)
+        self.mqttc.disconnect()
+        self.mqttcConnected = False
 
     def Loop(self):
         try:
             while True:
+                if not self.mqttcConnected:
+                    self.Connect()
+                if self.blocking_mode:
+                    self.CheckMqtt()
                 self.DoLoop()
                 if self.CheckExceptions():
                     sys.exit(0)
         except KeyboardInterrupt:
+            self.CleanupLoop()
             sys.exit(0)
+        else:
+            traceback.print_exc()
+            self.CleanupLoop()
+
+    def CleanupLoop(self):
+        pass					# override in client if cleanup needed
 
     #
     # Long running processes should call this periodically.
@@ -577,7 +618,6 @@ class FastMqttUtil(mqtt_node):
         super().__init__(Subscriptions=[], Blocking=True, BlockingTimeoutSecs=0, BrokerType='F', Streamer=False, Verbose=Verbose)
 
 if __name__ == "__main__":
-    #PiShutdown()
     if sys.argv[1] == 's':
         n = TestSender()
         n.Connect()

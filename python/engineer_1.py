@@ -3,13 +3,17 @@ from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
 import json
-import numpy
 import os
 from geopy.distance import great_circle
 import pynmea2
 import serial
 import sys
 import time
+
+from sense_hat import SenseHat
+#import sense_hat.sense_hat
+#import SenseHat
+
 
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
@@ -40,6 +44,8 @@ class engineer_1(vnavs_mqtt.mqtt_node):
 					bytesize = serial.EIGHTBITS,
 					timeout=1
 					)
+        self.sense = SenseHat()
+        self.sense.set_imu_config(False, True, False)
 
     def GetGpsData(self, gps_parsed, key):
         for ix, this_field in enumerate(gps_parsed.fields):
@@ -140,7 +146,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 except:
                     # this sometimes fails. Maybe just indoors.
                     self.timestamp = None
-                self.gps_status = gps_parsed.data[2]	# A=valid, V=invalid
+                self.gps_status = gps_parsed.data[1]	# A=valid, V=invalid
                 speedRaw = gps_parsed.data[6].strip()
                 try:
                     speedKnots = float(speedRaw)
@@ -157,14 +163,19 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                         print("Invalid RMC heading", `heading_raw`)
                 self.gps_mode = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
                 self.newData = True
+                print("RMC", self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude, gps_parsed.data[4], gps_parsed.data[5], self.longitude)
                 if self.goal_run:
                     self.PathToGoal(gps_parsed)
+        self.orientation = self.sense.get_orientation_degrees()
         if self.newData:
             #print(self.speed, self.longitude, self.latitude)
             payload = {}
-            payload['quality'] = self.gps_quality
+            payload['pitch'] = self.orientation['pitch']
+            payload['roll'] = self.orientation['roll']
+            payload['yaw'] = self.orientation['yaw']
             payload['speed'] = self.speed
             payload['heading'] = self.heading
+            payload['quality'] = self.gps_quality
             payload['longitude'] = self.longitude
             payload['latitude'] = self.latitude
             #payload['gps_time'] = `self.timestamp`
@@ -173,7 +184,6 @@ class engineer_1(vnavs_mqtt.mqtt_node):
 
 if __name__ == '__main__':
     h = engineer_1()
-    h.Connect()
     h.Loop()
     h.Disconnect()
 

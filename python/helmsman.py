@@ -284,29 +284,30 @@ class helmsman(vnavs_mqtt.mqtt_node):
         print("ORDERS C:", time.clock(), "D:", self.deadman_clock, orders)
         self.state = 'c'
 
-    def Loop(self):
-        try:
-            while True:
-                if (self.state != 'c') and (time.clock() > self.deadman_clock):
-                    # continuous mode ignores the deadman clock
-                    self.v.Estop()
-                    new_state = 'i'
-                else:
-                    # Speed and Steering goals are set asynchronously via MQTT messages
-                    self.v.Motor(self.speed_goal)
-                    self.v.Steering(self.steering_goal)
-                    self.steering_goal = None		# only send steering goal once
-                    new_state = 'c'
-                if new_state != self.state:
-                    print("STATE", self.state, new_state, "C:", time.clock(), "D:", self.deadman_clock) 
-                    self.state = new_state
-                sleep_secs = 0.1			# This was my first try, slow speeds choppy
-                sleep_secs = 2				# This is very slow, for testing
-                sleep_secs = 0.001
-                sleep_secs = 0.02
-                time.sleep(sleep_secs)
-        except:
-            traceback.print_exc()
+    def DoLoop(self):
+        if not self.mqttcConnected:
+            self.v.Estop()
+            return
+        if (self.state != 'c') and (time.clock() > self.deadman_clock):
+            # continuous mode ignores the deadman clock
+            self.v.Estop()
+            new_state = 'i'
+        else:
+            # Speed and Steering goals are set asynchronously via MQTT messages
+            self.v.Motor(self.speed_goal)
+            self.v.Steering(self.steering_goal)
+            self.steering_goal = None		# only send steering goal once
+            new_state = 'c'
+        if new_state != self.state:
+            print("STATE", self.state, new_state, "C:", time.clock(), "D:", self.deadman_clock) 
+            self.state = new_state
+        sleep_secs = 0.1			# This was my first try, slow speeds choppy
+        sleep_secs = 2				# This is very slow, for testing
+        sleep_secs = 0.001
+        sleep_secs = 0.02
+        time.sleep(sleep_secs)
+
+    def CleanupLoop(self):
         self.v.Estop()
 
     def SpeedRequestStr(self, speed_request):
@@ -381,7 +382,6 @@ class helmsman(vnavs_mqtt.mqtt_node):
 
 def Test_Helmsman_Node():
     h = helmsman()
-    h.Connect()
     h.Loop()
     h.Disconnect()
 

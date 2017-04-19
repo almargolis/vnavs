@@ -3,4 +3,4 @@ cd ~/projects/vnavs
 export VIRTUALENVWRAPPER_PYTHON=/usr/bin/python
 source /usr/local/bin/virtualenvwrapper.sh
 workon p2
-python python/navigator.py node
+python python/process_manager.py run
