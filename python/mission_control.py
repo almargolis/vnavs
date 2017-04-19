@@ -80,12 +80,22 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         this_row += 1
         f = ttk.Frame(mainframe)
         f.grid(row=this_row, column=0, columnspan=2)
+        self.mission_name = StringVar()
+        self.mission_name.set('test')
+        self.mission_name_entry = ttk.Entry(mainframe, width=15, textvariable=self.mission_name)
+        self.mission_name_entry.grid(row=0, column=0, sticky=(W, E))
         b = ttk.Button(f, text='Start', command=self.StartNav)
-        b.grid(row=0, column=0)
-        b = ttk.Button(f, text='Stop', command=self.StopNav)
         b.grid(row=0, column=1)
-        b = ttk.Button(f, text='Snap', command=self.SnapPic)
+        b = ttk.Button(f, text='Stop', command=self.StopNav)
         b.grid(row=0, column=2)
+        b = ttk.Button(f, text='Snap', command=self.SnapPic)
+        b.grid(row=0, column=3)
+        b = ttk.Button(f, text='Clear Waypoints', command=self.ClearWaypoints)
+        b.grid(row=0, column=4)
+        b = ttk.Button(f, text='Mark Waypoint', command=self.MarkWaypoint)
+        b.grid(row=0, column=5)
+        b = ttk.Button(f, text='Save Waypoints', command=self.SaveWaypoints)
+        b.grid(row=0, column=6)
 
         #
         this_row += 1
@@ -155,6 +165,28 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.pic_processed = False
         print("PIC", self.pic_fn)
 
+    def ClearWaypoints(self):
+        payload = {}
+        payload['request'] = 'C'
+        (res, mid) = self.mqttc.publish('navigator/waypoint', json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
+
+    def MarkWaypoint(self):
+        payload = {}
+        payload['request'] = 'M'
+        (res, mid) = self.mqttc.publish('navigator/waypoint', json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
+
+    def SaveWaypoints(self):
+        payload = {}
+        payload['request'] = 'S'
+        payload['missionName'] = self.mission_name.get()
+        (res, mid) = self.mqttc.publish('navigator/waypoint', json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
+
     def SnapPic(self):
         payload = {}
         payload['loopMode'] = 'run'
@@ -174,8 +206,15 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         payload['loopPublish'] = 'stream'
         payload['captureMode'] = 'run'
         payload['captureFormat'] = 'jpeg'
-        payload['capturePublish'] = 'race'
+        payload['capturePublish'] = 'file'
         (res, mid) = self.mqttc.publish('cameraman/orders', json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
+        #
+        payload = {}
+        payload['mode'] = 'G'
+        payload['missionName'] = self.mission_name.get()
+        (res, mid) = self.mqttc.publish('navigator/mode', json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
 
@@ -192,6 +231,13 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         (res, mid) = self.mqttc.publish('helmsman/orders', json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
+        #
+        payload = {}
+        payload['mode'] = 'M'
+        payload['missionName'] = self.mission_name.get()
+        (res, mid) = self.mqttc.publish('navigator/mode', json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
 
     def ProcessImage(self):
         self.f1_fname.set(self.pic_fn)
@@ -200,7 +246,15 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         if self.img1_pil is None:
             self.img1_tk = None
         else:
-            self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
+            try:
+                self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
+            except IOError:
+                # This exception had additional info of file truncated.
+                # I am guessing that this is happening because messages are getting
+                # sent faster than they get written to SD. 
+                self.img1_tk = None
+                self.img1_pil = None
+        if self.img1_tk is not None:
             self.f1_img1.configure(image = self.img1_tk)
         self.pic_processed = True
         self.pic_requested = False
