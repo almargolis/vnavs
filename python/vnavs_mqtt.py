@@ -517,7 +517,14 @@ class mqtt_node(object):
                 if self.CheckExceptions():
                     sys.exit(0)
         except KeyboardInterrupt:
+            self.CleanupLoop()
             sys.exit(0)
+        else:
+            traceback.print_exc()
+            self.CleanupLoop()
+
+    def CleanupLoop(self):
+        pass					# override in client if cleanup needed
 
     #
     # Long running processes should call this periodically.
