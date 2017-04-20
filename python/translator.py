@@ -38,7 +38,7 @@ class translate_mosquitto_to_fast(vnavs_mqtt.mqtt_node):
 
 class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=['cameraman/pic_ready', 'engineer_1/status'], Blocking=True, BlockingTimeoutSecs=0.0, BrokerType='F', Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=['cameraman/pic_ready'], Blocking=True, BlockingTimeoutSecs=0.0, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.mosquitto = translate_mosquitto_to_fast()
         self.mosquitto.fastBroker = self
         self.mosquitto.Connect()

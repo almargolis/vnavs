@@ -46,6 +46,10 @@ class engineer_1(vnavs_mqtt.mqtt_node):
 					)
         self.sense = SenseHat()
         self.sense.set_imu_config(False, True, False)
+        self.last_status = time.time()
+        self.ct_time = time.time()
+        self.ct_gps_msg = 0
+        self.ct_imu_msg = 0
 
     def GetGpsData(self, gps_parsed, key):
         for ix, this_field in enumerate(gps_parsed.fields):
@@ -163,11 +167,15 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                         print("Invalid RMC heading", `heading_raw`)
                 self.gps_mode = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
                 self.newData = True
-                print("RMC", self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude, gps_parsed.data[4], gps_parsed.data[5], self.longitude)
+                print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f" % (
+					self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude, 
+					gps_parsed.data[4], gps_parsed.data[5], self.longitude,
+					self.heading))
                 if self.goal_run:
                     self.PathToGoal(gps_parsed)
         self.orientation = self.sense.get_orientation_degrees()
         if self.newData:
+            # we have new GPS Data
             #print(self.speed, self.longitude, self.latitude)
             payload = {}
             payload['pitch'] = self.orientation['pitch']
@@ -180,7 +188,20 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             payload['latitude'] = self.latitude
             #payload['gps_time'] = `self.timestamp`
             self.mqttc.publish('engineer_1/status', json.dumps(payload))
+            self.ct_gps_msg += 1
             self.newData = False
+            self.last_status = time.time()
+        elif (time.time() - self.last_status) > 0.1:
+            # send IMU Data at 10hz
+            payload = {}
+            payload['yaw'] = self.orientation['yaw']
+            self.mqttc.publish('engineer_1/status', json.dumps(payload))
+            self.last_status = time.time()
+            self.ct_imu_msg += 1
+        if ((self.ct_gps_msg + self.ct_imu_msg) % 100) == 0:
+            elapsed_time = time.time() - self.ct_time
+            print("MSGS GPS: %d (%f /sec) IMU: %d (%f /sec)" % (self.ct_gps_msg, self.ct_gps_msg / elapsed_time,
+								self.ct_imu_msg, self.ct_imu_msg / elapsed_time))
 
 if __name__ == '__main__':
     h = engineer_1()

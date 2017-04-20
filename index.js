@@ -109,7 +109,7 @@ io.on('connection', function(socket) {
     mqttc.publish(mqtt_topic_drive, '{"speed": "s"}')
   });
   socket.on(socket_event_steer, function(heading) {
-    console.log("left " + heading);
+    console.log("steer " + heading);
     mqttc.publish(mqtt_topic_drive, JSON.stringify({"heading": heading}))
   });
   socket.on('waypC', function() {
