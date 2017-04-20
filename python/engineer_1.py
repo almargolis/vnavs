@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
-import json
 import os
 from geopy.distance import great_circle
 import pynmea2
@@ -18,11 +17,12 @@ from sense_hat import SenseHat
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
+SEND_POSITION_PERIOD = 0.1
 METERS_PER_SECOND_PER_KNOT = 0.514444
 
 class engineer_1(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['engineer_1/goal', 'engineer_1/start', 'engineer_1/stop'], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=[], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.speed = 0
         self.heading = 0
@@ -31,6 +31,8 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.goal_longitude = None
         self.goal_latitude = None
         self.goal_run = False
+        self.gps_buffer = ''			# read buffer
+        self.gps_buffer_next = -1		# index of first <cr><lf>
         self.gps_quality = 'F'			# A=good, F=bad
         self.gps_status = 'X'			# A=valid, V=invalid
         self.gps_mode = 'X'			# A=autonomous, D=differeential GPS
@@ -42,87 +44,34 @@ class engineer_1(vnavs_mqtt.mqtt_node):
 					parity = serial.PARITY_NONE,
 					stopbits = serial.STOPBITS_ONE,
 					bytesize = serial.EIGHTBITS,
-					timeout=1
+					timeout=SEND_POSITION_PERIOD / 10
 					)
         self.sense = SenseHat()
         self.sense.set_imu_config(False, True, False)
-        self.last_status = time.time()
-        self.ct_time = time.time()
-        self.ct_gps_msg = 0
-        self.ct_imu_msg = 0
-
-    def GetGpsData(self, gps_parsed, key):
-        for ix, this_field in enumerate(gps_parsed.fields):
-            if this_field[0] == key:
-                return gps_parsed.data[ix]
-        return None
- 
-    def PathToGoal(self, p):
-        # should be reworked using GeographicLib
-        hypotenuse = great_circle((self.latitude, self.longitude), (self.goal_latitude, self.goal_longitude)).meters
-        deltaY = great_circle((self.latitude, self.longitude), (self.goal_latitude, self.longitude)).meters
-        if self.latitude > self.goal_latitude:
-            deltaY = -deltaY
-        deltaX = great_circle((self.latitude, self.longitude), (self.latitude, self.goal_longitude)).meters
-        if self.longitude > self.goal_longitude:
-            deltaX = -deltaX
-        if deltaX != 0:
-            slope = deltaY / deltaX
-        else:
-            slope = 999
-        if abs(slope) > 3:
-            heading = "AWS"
-        else:
-            if slope < 0:
-                heading = "R-2"
-            else:
-                heading = "R-2"
-        print("Path %4s %3.4f %3.4f %3.4f %3.4f %s %s %s" % (heading, deltaX, deltaY, slope, hypotenuse, p.data[6], p.data[7], p.data[11]))
-
-    def rmsg_engineer_1_start(self, msg):
-        self.goal_run = True
-
-    def rmsg_engineer_1_stop(self, msg):
-        self.goal_run = False
-
-    def rmsg_engineer_1_goal(self, msg):
-        self.goal_longitude = self.longitude
-        self.goal_latitude = self.latitude
-        self.goal_run = True
-        return
-        try:
-            orders = json.loads(msg)
-        except ValueError:
-            orders = {}
-            print("JSON Error")
-        if 'speed' in orders:
-            print("SPEED", orders['speed'])
-            self.GetGoalSpeed(orders['speed'])
+        self.last_position_message_time = time.time()
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
         #
-        #print("LOOP")
-        gps_sentence = self.gps_port.readline()
-        try:
-            gps_parsed = pynmea2.parse(gps_sentence)
-        except pynmea2.ParseError:
-            print("PARSE ERROR")
+        if self.gps_buffer_next >= 0:
+            pass				# process buffered sentence, don't read, risking timeout period
+        else:
+            self.gps_buffer += self.gps_port.read(size=1024)
+            self.gps_buffer_next = self.gps_buffer.find('\r\n')
+        if self.gps_buffer_next < 0:
+            gps_sentence = None
             gps_parsed = None
+        else:
+            gps_sentence = self.gps_buffer[:self.gps_buffer_next+2]
+            self.gps_buffer = self.gps_buffer[self.gps_buffer_next+2:]
+            self.gps_buffer_next = self.gps_buffer.find('\r\n')
+            try:
+                gps_parsed = pynmea2.parse(gps_sentence)
+            except pynmea2.ParseError:
+                print("PARSE ERROR")
+                gps_parsed = None
         if gps_parsed is not None:
-            if gps_parsed.sentence_type == 'VTG':
-                new_speed = self.GetGpsData(gps_parsed, 'Speed over ground kmph')
-                if (new_speed != None) and (new_speed != ''):
-                    pass
-                    #self.speed = new_speed
-                    #self.newData = True
-                else:
-                    print(gps_sentence)
-            #elif gps_parsed.sentence_type == 'GGA':
-            #    self.longitude = gps_parsed.longitude
-            #    self.latitude = gps_parsed.latitude
-            #    self.newData = True
-            elif gps_parsed.sentence_type == 'GSA':
+            if gps_parsed.sentence_type == 'GSA':
                 # This might help determine if readings are meaningful
                 # https://en.wikipedia.org/wiki/Dilution_of_precision_(navigation)
                 # wikipedia numbers seem off. Indoors getting garbage with numbers just over 1.5
@@ -187,21 +136,18 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             payload['longitude'] = self.longitude
             payload['latitude'] = self.latitude
             #payload['gps_time'] = `self.timestamp`
-            self.mqttc.publish('engineer_1/status', json.dumps(payload))
-            self.ct_gps_msg += 1
+            self.Publish('gps', payload)
+            self.stats.Count('GpsMsg')
             self.newData = False
-            self.last_status = time.time()
-        elif (time.time() - self.last_status) > 0.1:
+            self.last_position_message_time = time.time()
+        elif (time.time() - self.last_position_message_time) > SEND_POSITION_PERIOD:
             # send IMU Data at 10hz
             payload = {}
             payload['yaw'] = self.orientation['yaw']
-            self.mqttc.publish('engineer_1/status', json.dumps(payload))
-            self.last_status = time.time()
-            self.ct_imu_msg += 1
-        if ((self.ct_gps_msg + self.ct_imu_msg) % 100) == 0:
-            elapsed_time = time.time() - self.ct_time
-            print("MSGS GPS: %d (%f /sec) IMU: %d (%f /sec)" % (self.ct_gps_msg, self.ct_gps_msg / elapsed_time,
-								self.ct_imu_msg, self.ct_imu_msg / elapsed_time))
+            self.Publish('imu', payload)
+            self.last_position_message_time = time.time()
+            self.stats.Count('ImuMsg')
+        self.stats.Print('MSGS')
 
 if __name__ == '__main__':
     h = engineer_1()
