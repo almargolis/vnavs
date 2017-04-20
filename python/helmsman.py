@@ -74,6 +74,8 @@ class vehicle(object):
         self.steering_last = 0			# last actual steering position
         self.steering_base = 0			# general goal, 0 for navigation, X for circles
         self.steering_plan = None		# steering variations from base
+        self.steering_type = None		# R(elative) or A(bsolute)
+        self.steering_goal = 0			# this is absolute steering direction
         self.steering_tick = 0			# time increment / step in plan
         self.steering_tock = 0			# counter toward tick_width
         self.steering_tick_width = 20 		# number off loops too maintain each plan step
@@ -229,8 +231,17 @@ class vehicle(object):
         if (steering_goal is None) or (not isinstance(steering_goal, basestring)) or (steering_goal == ''):
             pass
         elif steering_goal[0] == 'R':
+            self.steering_type = 'R'
             self.NewSteeringGoal(steering_goal)
-        if self.steering_plan is not None:
+        elif steering_goal[0] == 'A':
+            self.steering_type = 'A'
+            self.steering_goal = int(steering_goal[1:])
+        if self.steering_plan is None:
+            if self.steering_type == 'A':
+                direction = self.steering_goal
+            else:
+                direction = self.steering_base
+        else:
             plan_step = self.steering_plan[self.steering_tick]
             direction = self.steering_base + plan_step
             self.steering_tock += 1
@@ -241,8 +252,6 @@ class vehicle(object):
                 if self.steering_tick >= len(self.steering_plan):
                     # steering plan has been completed
                     self.steering_plan = None
-        else:
-            direction = self.steering_base
         if direction >= 0:
             if direction > self.steering_max:
                 direction = self.steering_max

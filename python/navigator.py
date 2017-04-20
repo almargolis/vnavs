@@ -15,10 +15,13 @@ import time
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
+WAYPOINT_WINDOW_METERS = 2.0
+STEER_STRAIGHT_HEADING = 10.0
+STEER_SHARP_HEADING = 90.0
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint'],
+        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint', 'engineer_1/status'],
 					Readers=['engineer_1/status'],
 					Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
@@ -32,8 +35,14 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.mapCt = 0
         self.gpsAction = ''
         self.gpsNew = False
-        self.gpsRequested = False
+        #self.gpsRequested = False
+        self.startingYaw = None
+        self.directionYaw = None
         self.Init()
+        self.ct_time = time.time()
+        self.ct_imu_msg_rcv = 0
+        self.ct_gps_msg_rcv = 0
+        self.ct_gps_msg_prc = 0
 
     def Init(self):
         self.waypoints = []
@@ -41,8 +50,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.navpoints = []
         self.map.InitMap()
         self.mode = "M"
-        if self.mqttc is not None:
-            self.WriteMap()
 
     def WriteMap(self):
         self.mapCt += 1
@@ -93,18 +100,23 @@ class navigator(vnavs_mqtt.mqtt_node):
                 pass						# quadrant I
             else:
                 waypointHeading = 180 - waypointHeading		# quadrant II
-        deltaH = waypointHeading - self.heading
-        if abs(deltaH) < 3:
-            steering = "AWS"
+        deltaHeading = waypointHeading - self.heading
+        if deltaHeading < -180:
+            deltaHeading = deltaHeading + 360
+        elif deltaHeading > 180:
+            deltaHeading = deltaHeading - 360
+        if abs(deltaHeading) < STEER_STRAIGHT_HEADING:
+            steering = "A0"
+            self.startingYaw = None
+            self.directionYaw = None
         else:
-            if abs(deltaH) < 45:
-                turnRadius = "1"
-            else:
-                turnRadius = "2"
-            if deltaH < 0:
-                steering = "RR" + turnRadius
-            else:
-                steering = "RR-" + turnRadius
+            # deltaHeading is +/- 180 degrees, map to +/- 60 steering order.
+            # this should query the helmsman for this bots range instead of assuming 60.
+            # The signs of headings and steering command are the same. Negative means
+            # the waypoint is to the left, positive is to the right.
+            steering = 'A' + str(int(deltaHeading / 3))
+            self.startingYaw = self.yaw
+            self.directionYaw = deltaHeading
         payload = {}
         payload['heading'] = steering
         self.mqttc.publish('helmsman/orders', json.dumps(payload))
@@ -112,7 +124,8 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.mqttc.publish('navigator/status', json.dumps(payload))
         self.navpoints.append(((self.latitude, self.longitude), steering))
         print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.waypoints[self.waypointIx]))
-        print("Path %4s dX %+03.4f dY %+03.4f dH %+03.4f H %+03.4f %2d" % (steering, deltaX, deltaY, deltaH, self.heading, self.waypointIx))
+        print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (steering, deltaX, deltaY, hypotenuse,
+					deltaHeading, self.heading, waypointHeading, self.waypointIx))
         return hypotenuse
 
     def rmsg_navigator_mode(self, msg):
@@ -140,11 +153,6 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.waypointIx = 1
             if (mode == "M") and (self.mode == "G"):
                 # end of gps naviagion
-                for this in self.navpoints:
-                    p = this[0]
-                    d = this[1]
-                    self.map.DrawPointLatLong(p, self.map.navpointColor)
-                self.WriteMap()
                 f = open(self.missionName + '.nav', "w")
                 for p in self.waypoints:
                     f.write(u'W,%f,%f\n' % (p[0], p[1]))
@@ -176,15 +184,21 @@ class navigator(vnavs_mqtt.mqtt_node):
         except ValueError:
             payload = {}
             print("JSON Error")
-            self.gpsRequested = False
+            #self.gpsRequested = False
             return
-        self.longitude = payload['longitude']
-        self.latitude = payload['latitude']
-        self.speed = payload['speed']
-        self.heading = payload['heading']
-        self.gpsRequested = False
-        self.gpsNew = True
-        print("NEW GPS INFO")
+        if 'longitude' in payload:
+            # this has GPS info
+            self.longitude = payload['longitude']
+            self.latitude = payload['latitude']
+            self.speed = payload['speed']
+            self.heading = payload['heading']
+            #self.gpsRequested = False
+            self.gpsNew = True
+            print("NEW GPS INFO")
+            self.ct_gps_msg_rcv += 1
+        else:
+            self.ct_imu_msg_rcv += 1
+        self.yaw = payload['yaw']
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
@@ -194,24 +208,51 @@ class navigator(vnavs_mqtt.mqtt_node):
                 # check if repeat ??
                 self.waypoints.append((self.latitude, self.longitude))
                 #self.waypoints = [(37.627450333333336, -122.453955), (37.627469166666664, -122.45389233333333), (37.627477666666664, -122.45387333333333)]
-                if len(self.waypoints) >= 2:
-                    self.map.FindExtentsLatLong(waypoints=self.waypoints)
-                    self.WriteMap()
                 self.gpsAction = ''
                 print(self.waypoints)
             if (self.mode == 'G') and (len(self.waypoints) > 0):
+                self.ct_gps_msg_prc += 1
                 distance = self.HeadingToWaypoint(self.waypointIx)
-                if distance < 1:
+                if distance <= WAYPOINT_WINDOW_METERS:
                     self.waypointIx += 1
                     if self.waypointIx >= len(self.waypoints):
                         self.waypointIx = 0
             self.gpsNew = False
+        elif self.startingYaw is not None:
+            steering = None
+            partialDelta = self.yaw - self.startingYaw
+            if self.directionYaw < 0:
+                # we are turning left
+                if partialDelta > 180:
+                    partialDelta = partialDelta - 360
+                if partialDelta <= self.directionYaw:
+                    steering = "A0"
+                    self.startingYaw = None
+                    self.directionYaw = None
+            else:
+                # we are turning right
+                if partialDelta < -180:
+                    partialDelta = partialDelta + 360
+                if partialDelta >= self.directionYaw:
+                    steering = "A0"
+                    self.startingYaw = None
+                    self.directionYaw = None
+            if steering is not None:
+                payload = {}
+                payload['heading'] = steering
+                self.mqttc.publish('helmsman/orders', json.dumps(payload))
         if (self.gpsAction == 'M') \
             or ((self.mode == 'G') and (len(self.waypoints) > 0)):
-            if not self.gpsRequested:
-                self.gpsRequested = True
-                self.mqttc.read('engineer_1/status')
-                print("REQESTING GPS")
+            pass
+            #if not self.gpsRequested:
+            #    self.gpsRequested = True
+            #    self.mqttc.read('engineer_1/status')
+            #    print("REQESTING GPS")
+        if ((self.ct_imu_msg_rcv + self.ct_gps_msg_rcv) % 100) == 0:
+            elapsed_time = time.time() - self.ct_time
+            print("MSGS GPS %d (%f /sec) IMU %d (%f /sec) GPS Processed %d" % (self.ct_gps_msg_rcv, self.ct_gps_msg_rcv / elapsed_time,
+										self.ct_imu_msg_rcv, self.ct_imu_msg_rcv / elapsed_time,
+										self.ct_gps_msg_prc)) 
 
 class Map(object):
     def __init__(self, waypoints=None, navpoints=None):
@@ -426,9 +467,9 @@ def RunMap():
     m.FindExtentsLatLong(waypoints=waypoints, navpoints=navpoints)
     m.PlotWaypoints()
     m.PlotNavpoints()
-    m.SaveMap('/exports/images/Runmap.jpeg')
+    m.SaveMap('/exports/missions/Runmap.jpeg')
 
-def Run():
+def RunNode():
     h = navigator()
     h.Connect()
     h.Loop()
@@ -436,6 +477,6 @@ def Run():
 
 if __name__ == '__main__':
     if sys.argv[1] == 'node':
-        Node()
+        RunNode()
     elif sys.argv[1] == 'map':
         RunMap()

@@ -9,6 +9,8 @@ pids
 *.seed
 .DS_Store
 .AppleDouble
+*.mis
+*.nav
 x
 z
 
