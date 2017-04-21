@@ -112,6 +112,12 @@ io.on('connection', function(socket) {
     console.log("steer " + heading);
     mqttc.publish(mqtt_topic_drive, JSON.stringify({"heading": heading}))
   });
+  socket.on('helmsman', function(pkey, pval) {
+    console.log("helmsman", pkey, pval);
+    var payload = {};
+    payload[pkey] = pval;
+    mqttc.publish('helmsman/orders', JSON.stringify(payload))
+  });
   socket.on('waypC', function() {
     mqttc.publish('navigator/waypoint', '{"request": "C"}')
   });

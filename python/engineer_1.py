@@ -17,7 +17,7 @@ from sense_hat import SenseHat
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
-SEND_POSITION_PERIOD = 0.1
+SEND_POSITION_PERIOD = 0.05
 METERS_PER_SECOND_PER_KNOT = 0.514444
 
 class engineer_1(vnavs_mqtt.mqtt_node):
