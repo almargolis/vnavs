@@ -82,7 +82,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         payload['captureFormat'] = 'jpeg'
         self.Publish('pic_ready', payload, source='cameraman')
 
-    def HeadingToWaypoint(self, ix):
+    def NavigateTowardWaypoint(self, ix):
         # should be reworked using GeographicLib ??
         # Longitude are lines drawn between poles. +/- 180 degrees from Prime Meridian (Greenwich England)
         # delta Longitude is deltaX.
@@ -303,7 +303,7 @@ class navigator(vnavs_mqtt.mqtt_node):
             if (self.mode == 'G') and (len(self.waypoints) > 0):
                 check_yaw = False
                 self.stats.Count('GpsPrc')
-                distance = self.HeadingToWaypoint(self.waypointIx)
+                distance = self.NavigateTowardWaypoint(self.waypointIx)
                 if distance <= WAYPOINT_WINDOW_METERS:
                     self.waypointIx += 1
                     if self.waypointIx >= len(self.waypoints):
@@ -506,12 +506,13 @@ def TestNav():
     headings = [237.39, 339.99]
     for ix in range(0, len(h.waypoints)):
         h.heading = headings[ix]
-        h.HeadingToWaypoint(ix)
+        h.NavigateTowardWaypoint(ix)
         h.latitude = h.waypoints[ix][0]
         h.longitude = h.waypoints[ix][1]
 
 def TestNav2():
     h = navigator()
+    h.ConnectWait()
     h.latitude = 0
     h.longitude = 0					# start at Prime Meridian @ Equator
     h.waypoints = [
@@ -534,7 +535,7 @@ def TestNav2():
 		]
     for ix in range(0, len(h.waypoints)):
         h.heading = headings[ix]
-        h.HeadingToWaypoint(ix)
+        h.NavigateTowardWaypoint(ix)
         h.latitude = h.waypoints[ix][0]
         h.longitude = h.waypoints[ix][1]
 
@@ -565,3 +566,5 @@ if __name__ == '__main__':
         RunNode()
     elif sys.argv[1] == 'map':
         RunMap()
+    elif sys.argv[1] == 'test':
+        TestNav2()
