@@ -608,7 +608,9 @@ class mqtt_node(object):
         if source is None:
             source = self.sourceName
         fqnTopic = source + '/' + topic
-        self.mqttc.publish(fqnTopic, json.dumps(payload))
+        res, mid = self.mqttc.publish(fqnTopic, json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
 
     def on_connect(self, client, userdata, flags, rc):
         print("on_connect() rc: " + str(rc))
