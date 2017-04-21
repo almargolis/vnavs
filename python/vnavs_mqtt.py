@@ -193,7 +193,7 @@ class SelectServer(object):
                     raise
 
     def disconnect(self):
-        self.sock.close()
+        self.server.close()
         self.connected = False
         self.InitData()
 
@@ -271,8 +271,6 @@ class SelectServer(object):
                     else:
                         self.disconnect()
                         raise
-                else:
-                    raise
                 if data:
                     self.ProcessData(s, data)
                 else:
@@ -565,6 +563,9 @@ class mqtt_node(object):
             self.mqttc.loop_start()
             return True
 
+    def ConnectWait(self):
+        self.Connect(timeout=None)
+
     def CheckMqtt(self):
          # Blocking mode nodes with BlockingTimeoutSecs not None need
          # to call this periodically or messages will never be seen.
@@ -645,6 +646,9 @@ class mqtt_node(object):
 
     def Publish(self, topic, payload, source=None):
         # payload is a dict to be converted to JSON)
+        if not self.mqttcConnected:
+            # for now, silently ignore publish errors. Need to do better
+            return
         if source is None:
             source = self.sourceName
         fqnTopic = source + '/' + topic
