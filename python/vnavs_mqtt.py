@@ -155,11 +155,14 @@ class SelectServer(object):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.server.setblocking(0)
-        self.mqttPayloads = {}
+        self.InitData()
+
+    def InitData(self):
         self.inputSockets = [ self.server ]
         self.outputSockets = [ ]
         self.outputQueues = {}
         self.fragments = {}
+        self.connected = False
 
     def connect(self, host=None, port=None, keepalive=60, bind_address=""):
         if host is not None:
@@ -175,9 +178,11 @@ class SelectServer(object):
                 displayHost = self.broker_host
             print("Server listening on host %s, port %s." % (displayHost, self.broker_port))
             print("Server listening on port %s." % (`self.server.getsockname()`))
+            self.connected = True
         else:
             try:
                 self.server.connect((self.broker_host, self.broker_port))
+                self.connected = True
             except socket.error as e:
                 if e.errno in [36, 56, 115]:
                     # socket.error: [Errno 36] Operation now in progress
@@ -188,8 +193,10 @@ class SelectServer(object):
 
     def disconnect(self):
         self.sock.close()
+        self.connected = False
+        self.InitData()
 
-    def CloseConnection(self, s):
+    def CloseClientConnection(self, s):
         if s in self.outputSockets:
             self.outputSockets.remove(s)
         if s in self.inputSockets:
@@ -228,11 +235,18 @@ class SelectServer(object):
         while True:
             self.loop(timeout=None)
 
+    def PrintError(self, e):
+        print("Socket error ", e.errno)
+
     def loop(self, timeout=1.0):
+        # If this is a server and the client connection fails, we want to clean up that connection and
+        # continue serving. Potentially could want to nofify someone.
+        # If this is a client, we want to neaten things up but re-raise the exception because the
+        # main flow of the client is probably disrupted.
+        #
         # timeout=None blocks indefinately, timeout=0.0 polls and return immediately, potentially with three empty lists
         #print('LOOP waiting for the next event', self.inputSockets, timeout)
         readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
-        #print("LOOP", readable, writable, exceptional)
         for s in readable:
             if self.isServer and (s is self.server):
                 # A "readable" server socket is ready to accept a connection
@@ -244,16 +258,25 @@ class SelectServer(object):
                 try:
                     data = s.recv(1024)
                 except socket.error as e:
-                    if e.errno == 104:
-                        # socket.error: [Errno 104] Connection reset by peer
+                    # I have seen e.errno = 54 and 104 as] "Connection reset by peer"
+                    self.PrintError(e)
+                    if self.isServer:
+                        if s is self.server:
+                            self.disconnect()
+                            return
+                        else:
+                            self.CloseClientConnection(s)
                         data = None
                     else:
+                        self.disconnect()
                         raise
+                else:
+                    raise
                 if data:
                     self.ProcessData(s, data)
                 else:
                     # Interpret empty result as closed connection
-                    self.CloseConnection(s)
+                    self.CloseClientConnection(s)
         for s in writable:
             try:
                 next_msg = self.outputQueues[s].get_nowait()
@@ -264,10 +287,18 @@ class SelectServer(object):
                 try:
                     s.send(next_msg)
                 except socket.error:
-                    # socket.error: [Errno 104] Connection reset by peer (I ctrl-C client)
-                    self.CloseConnection(s)
+                    if self.isServer:
+                        # socket.error: [Errno 104] Connection reset by peer (I ctrl-C client)
+                        self.CloseClientConnection(s)
+                    else:
+                        self.disconnect()
+                        raise
         for s in exceptional:
-            self.CloseConnection(s)
+            if self.isServer:
+                self.CloseClientConnection(s)
+            else:
+                self.disconnect()
+                raise
 
 #
 # FastMqttServer is a simplified broker that is much faster thean mosquitto.
@@ -498,7 +529,10 @@ class mqtt_node(object):
          # Depending on how you think about it, calling these blocking
          # may seem like an oxymoron.
          # 
-         self.mqttc.loop(timeout=self.blocking_timeout)
+         try:
+             self.mqttc.loop(timeout=self.blocking_timeout)
+         except socket.error:
+            self.mqttcConnected = False
 
     def Disconnect(self):
         if not self.blocking_mode:
@@ -510,6 +544,8 @@ class mqtt_node(object):
         try:
             while True:
                 if not self.mqttcConnected:
+                    # This could be a reconnection. Maybe we want more logging, etc.
+                    # Exceptions with socket.error is how we detect a disconnect.
                     self.Connect()
                 if self.blocking_mode:
                     self.CheckMqtt()
@@ -520,6 +556,7 @@ class mqtt_node(object):
             self.CleanupLoop()
             sys.exit(0)
         else:
+            # we should log this and maybe try to continue / restart
             traceback.print_exc()
             self.CleanupLoop()
 

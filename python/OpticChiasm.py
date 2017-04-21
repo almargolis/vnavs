@@ -14,9 +14,11 @@ RACE_CANNY = False
 RACE_CANNY = True
 RACE_CROP_X = None
 RACE_CROP_Y = 200
+RACE_CROP_Y = None
 RACE_WTHRESHOLD = 20
 RACE_THRESHOLD = 130
 RACE_THRESHOLD = 50
+RACE_THRESHOLD = 150
 
 # automatically set threshold using technique from 
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
@@ -299,20 +301,23 @@ def thinning_example(src):
 
 def HoughLines(img, gray):
   contoured_image = img.copy()
-  edges = cv2.Canny(gray.copy() ,100,200,apertureSize = 3)	# app size is 3, 5 or 7
-  #edges = auto_canny(gray.copy(), 0.33)
+  #edges = cv2.Canny(gray.copy() ,100,200,apertureSize = 3)	# app size is 3, 5 or 7
+  edges = auto_canny(gray.copy(), 0.33)
 
   minLineLength = 30
   maxLineGap = 5
   maxLineGap = 1
-  maxLineGap = 10
+  maxLineGap = 30
   rho = 30
   rho = 90
   rho = 1
   theta = np.pi / 180
-  threshold = 15
   threshold = 1
-  lines = cv2.HoughLinesP(edges, rho, theta, threshold, minLineLength,maxLineGap)
+  threshold = 15
+  #lines = cv2.HoughLinesP(edges, rho, theta, threshold, minLineLength,maxLineGap)
+  lines = cv2.HoughLinesP(edges, 1, np.pi/180, 15, minLineLength=50, maxLineGap=10)
+  if lines is None:
+      print("NO LINES")
   if lines is not None:
     print("lineCt:", len(lines))
     for x in range(0, len(lines)):
@@ -581,6 +586,139 @@ class Race(object):
             self.avg_slope = avg_slope
             self.slope_ct = ct_slope
         cv2.imwrite('temp/ann.jpeg', self.annotated)
+
+
+class Robogames(object):
+    def __init__(self, image):
+        # im is an OpenCV BGR image object
+        self.original = image
+        if (RACE_CROP_X is not None) or (RACE_CROP_Y is not None):
+            height, width, channels = image.shape
+            if RACE_CROP_X is None:
+                c_x = 0
+                c_w = width
+            else:
+                c_x = self.img_crop[0]
+                c_w = self.img_crop[1]
+            if RACE_CROP_Y is None:
+                c_y = 0
+            else:
+                c_y = height - RACE_CROP_Y
+            print("Crop: (%d, %d) start (%d, %d) width %d" % (width, height, c_x, c_y, c_w))
+            image = image[c_y:height, c_x:c_x+c_w]
+        self.annotated = image.copy()
+        #image = simplest_cb(self.original, 20)
+        image = ColorMask(image, colors=[HSV_MASK_RED], threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
+        #bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        #bw_image = cv2.blur(bw_image.copy(), (5,5))
+        if RACE_BLUR:
+            image = cv2.GaussianBlur(image.copy(), (5,5), 0)
+        if RACE_CANNY:
+            image = auto_canny(image, 0.33)
+        #(imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        self.h_lines = cv2.HoughLinesP(image, 1, np.pi/180, 15, minLineLength=50, maxLineGap=30)
+        self.map_lines = []
+        self.avg_slope = 0
+
+    def ProcessLines(self):
+        VERTICAL_SLOPE = 9999
+        h_color = (0, 0, 255)				# blue
+        a_color = (0, 255, 0)				# green
+        h_width = 1
+        a_width = 2
+        self.map_lines = []
+        self.avg_slope = 0
+        self.slope_ct = 0
+        h, w, c = self.annotated.shape
+        m = int(w/2)
+        if self.h_lines is not None:
+            for x in range(0, len(self.h_lines)):
+                for x1,y1,x2,y2 in self.h_lines[x]:
+                    cv2.line(self.annotated,(x1,y1),(x2,y2), h_color, h_width)
+                    #deposition += "%d. (%d,%d) (%d,%d)\n" % (x, x1, y1, x2, y2)
+                    mx1 = x1 - m
+                    mx2 = x2 - m
+                    my1 = h - y1
+                    my2 = h - y2
+                    mrise = my2 - my1
+                    mrun = mx2 - mx1
+                    if abs(mrun) < 0.01:
+                        mslope = VERTICAL_SLOPE
+                    else:
+                        mslope = mrise / mrun
+                    mlen = math.sqrt((mrise ** 2) + (mrun ** 2))
+                    p1dist = math.sqrt((mx1 ** 2) + (my1 ** 2))
+                    p2dist = math.sqrt((mx2 ** 2) + (my2 ** 2))
+                    mdist = min(p1dist, p2dist)
+                    mdist = mlen
+                    # mx, mx are transposed to origin at bottom center
+                    # x, y are opencv origin upper/left
+                    self.map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2)))
+            self.map_lines.sort()
+            cum_slope = 0
+            ct_slope = 0
+            #print("MAP", h, m, w)
+            steep_lines = []
+            for this in self.map_lines[:5]:
+                slope = abs(this[2])
+                if (slope < 4) or (slope > 18):
+                    continue
+                p1 = this[5]
+                p2 = this[6]
+                middleX = int((p1[0] + p2[0]) / 2)
+                steep_lines.append((middleX, this))
+            #
+            cone_lines = []
+            if len(steep_lines) >= 2:
+                # we need two lines to form a cone
+                steep_lines.sort()
+                for ix, this in enumerate(steep_lines[:-1]):
+                    l1 = this[1]
+                    l2 = steep_lines[ix+1][1]
+                    slope1 = l1[2]
+                    slope2 = l2[2]
+                    if (slope1 > 0) and (slope2 < 0):
+                        cone_lines.append((l1, l2))
+                for this in cone_lines:
+                    points = [this[0][6], this[0][6], this[1][5], this[1][6]]
+                    lowerleftX = points[0][0]
+                    upperrightX = points[0][0]
+                    lowerleftY = points[0][1]
+                    upperrightY = points[0][1]
+                    for thisp in points[1:]:
+                        if thisp[0] < lowerleftX:
+                            lowerleftX = thisp[0]
+                        if thisp[0] > upperrightX:
+                            upperrightX = thisp[0]
+                        if thisp[1] > lowerleftY:
+                            # y-values are inverted
+                            lowerleftY = thisp[1]
+                        if thisp[1] < upperrightY:
+                            upperrightY = thisp[1]
+                    llp = (lowerleftX, lowerleftY)
+                    urp = (upperrightX, upperrightY)
+                    cv2.rectangle(self.annotated, llp, urp, a_color, a_width)
+                    print("RECT", llp, urp)
+                
+            for this in self.map_lines[:5]:
+                cv2.line(self.annotated, this[5], this[6], a_color, a_width)
+                print("len", this[0], "slope", this[2])
+                #print(this)
+                mlen = this[1]
+                mslope = this[2]
+                if (mslope < 0.5) and (mlen < 20):
+                    # this might be the front edge of a dash, go straight
+                    mslope = 999
+                ct_slope += 1
+                cum_slope += mslope
+            if ct_slope > 0:
+                avg_slope = cum_slope / ct_slope
+            else:
+                avg_slope = VERTICAL_SLOPE
+            print("MAP", avg_slope)
+            self.avg_slope = avg_slope
+            self.slope_ct = ct_slope
+        # cv2.imwrite('temp/ann.jpeg', self.annotated)
 
 
 class ImageAnalyzer(object):
@@ -911,5 +1049,77 @@ def test_ColorMask():
     cv2.imshow('bw', bw)
     cv2.waitKey()
 
+
+def test_Cone():
+    # Setup SimpleBlobDetector parameters.
+    params = cv2.SimpleBlobDetector_Params()
+ 
+    # Change thresholds
+    params.minThreshold = 0;
+    params.maxThreshold = 256;
+ 
+    # Filter by Area.
+    params.filterByArea = True
+    params.minArea = 30
+ 
+    # Filter by Circularity
+    params.filterByCircularity = False
+    params.minCircularity = 0.1
+ 
+    # Filter by Convexity
+    params.filterByConvexity = True
+    params.filterByConvexity = False
+    params.minConvexity = 0.5
+ 
+    # Filter by Inertia
+    params.filterByInertia = True
+    params.filterByInertia = False
+    params.minInertiaRatio = 0.01
+    params.minInertiaRatio = 0.50
+ 
+    # Create a detector with the parameters
+    ver = (cv2.__version__).split('.')
+    if int(ver[0]) < 3 :
+        detector = cv2.SimpleBlobDetector(params)
+    else : 
+        detector = cv2.SimpleBlobDetector_create(params)
+
+
+
+    fn = 'samples/cone_s.jpeg'
+    im = cv2.imread(fn)
+    r = Robogames(im)
+    r.ProcessLines()
+    bw = r.annotated
+
+    #bw = ColorMask(im, colors=[HSV_MASK_RED], threshold=150)
+    #bw = np.bitwise_xor(bw, 255)
+    #canny_image = auto_canny(bw, 0.33)
+    #edges, im = HoughLines(im, bw)
+    #(imgxx, opencv_contours, hierarchy) = cv2.findContours(bw.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    #(opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    #print("ContourCt", len(opencv_contours))
+    #big_area = 0
+    #big_ix = 0
+    #for ix, this in enumerate(opencv_contours):
+    #    area = cv2.contourArea(this)
+    #    if area > big_area:
+    #      big_area = area
+    #      bix_ix = ix
+    #outline_color = (0, 255, 0)	# green
+    #opencv_color = (255, 0, 0)	# red
+    #path_guide_color = (0, 255, 255)
+    #cv2.drawContours(im, opencv_contours, big_ix, outline_color, -1)
+
+    #keypoints = detector.detect(bw)
+ 
+    # Draw detected blobs as red circles.
+    # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
+    #im = cv2.drawKeypoints(im, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+ 
+    cv2.imshow('c', im)
+    cv2.imshow('bw', bw)
+    cv2.waitKey()
 if __name__ == '__main__':
-  test_ColorMask()
+  #test_ColorMask()
+  test_Cone()
