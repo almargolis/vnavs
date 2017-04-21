@@ -14,13 +14,6 @@ from pyfirmata import Arduino, util
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
-#
-# time.sleep() seems to match real time seconds.
-# time.clock() has much finer granularity but seems to be arbitrary units and
-# system dependent. This normalizes time.clock() for this execution.
-# pi: 3.58e-5  macbook: 6.3e-6
-#
-
 TICK_PATTERNS = [
 	[],				# 0 tick bits
 	[],				# 1 tick bits
@@ -269,8 +262,8 @@ class helmsman(vnavs_mqtt.mqtt_node):
         self.v = vehicle()
         self.speed_goal = 0		# (int) mm/sec
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
-        self.deadman_clock = 0		# E-Stop if time.clock() exceeds this
-        self.state = 'x'
+        self.deadman_time = 0		# E-Stop if time.time() exceeds this
+        self.state = 'd'		# d=deadman active, c=continuous-no timer, t=time out, e=e-stop
 
     def rmsg_helmsman_orders(self, msg):
         try:
@@ -278,6 +271,18 @@ class helmsman(vnavs_mqtt.mqtt_node):
         except ValueError:
             orders = {}
             print("JSON Error")
+        print("ORDERS C:", time.time(), "D:", self.deadman_time, orders)
+        if 'state' in orders:
+            print("--------------------")
+            new_state = orders['state']
+            if new_state == 'e':
+                print("XXXXXXXXXXXXXXXXXXXXXX")
+                self.v.Estop()
+                self.state = 'e'
+            if new_state in 'dc':
+                self.state = new_state
+        if self.state == 'e':
+            return
         if 'speed' in orders:
             print("SPEED", orders['speed'])
             self.GetGoalSpeed(orders['speed'])
@@ -289,27 +294,29 @@ class helmsman(vnavs_mqtt.mqtt_node):
             timer = int(orders['timer'])
         else:
             timer = 3
-        self.deadman_clock = time.clock() + (timer / 6)
-        print("ORDERS C:", time.clock(), "D:", self.deadman_clock, orders)
-        self.state = 'c'
+        self.deadman_time = time.time() + timer
+        if self.state == 't':
+            # end timeout when new command arrives
+            self.state = 'd'
 
     def DoLoop(self):
+        #print("STATE", self.state)
         if not self.mqttcConnected:
             self.v.Estop()
             return
-        if (self.state != 'c') and (time.clock() > self.deadman_clock):
-            # continuous mode ignores the deadman clock
+        if (self.state == 'd') and (time.time() > self.deadman_time):
             self.v.Estop()
-            new_state = 'i'
-        else:
+            self.state = 't'
+            self.stats.Count('timeouts')
+            return
+        if self.state == 'e':
+            self.v.Estop()
+            return
+        if self.state in 'cd':
             # Speed and Steering goals are set asynchronously via MQTT messages
             self.v.Motor(self.speed_goal)
             self.v.Steering(self.steering_goal)
             self.steering_goal = None		# only send steering goal once
-            new_state = 'c'
-        if new_state != self.state:
-            print("STATE", self.state, new_state, "C:", time.clock(), "D:", self.deadman_clock) 
-            self.state = new_state
         sleep_secs = 0.1			# This was my first try, slow speeds choppy
         sleep_secs = 2				# This is very slow, for testing
         sleep_secs = 0.001

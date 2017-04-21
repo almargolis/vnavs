@@ -18,11 +18,36 @@ import paho.mqtt.client as mqtt
 WAYPOINT_WINDOW_METERS = 2.0
 STEER_STRAIGHT_HEADING = 10.0
 STEER_SHARP_HEADING = 90.0
+FORWARD_SLOW = 4
+FORWARD_FAST = 8
+FORWARD_FAST_METERS = 10
+REVERSE_SLOW = -4
+STOP_SPEED = 0
+STOP_SECONDS = 2
+MAX_TIMED_MANUEVER_SECONDS = 10
+Y_TURN_LIMIT = 160
+
+class NavStep(object):
+    def __init__(self):
+        self.Init()
+
+    def Init(self):
+        # When we have multiple steps, all the intermediate steps must either have
+        # keepSeconds > 0 or untrustedGpsUpdates < 0 with yaw settings to cancel
+        # the operation.
+        self.steering = 'A0'
+        self.speed = 0
+        self.startingYaw = None
+        self.directionYaw = None
+        self.untrustedGpsUpdates = 0
+        self.keepSeconds = 0
+        self.timeLimit = 0
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint', 'engineer_1/status'],
-					Readers=['engineer_1/status'],
+        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint',
+					'engineer_1/gps', 'engineer_1/imu'],
+					Readers=[],
 					Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.longitude = 0
@@ -34,20 +59,16 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.map = Map()
         self.mapCt = 0
         self.gpsAction = ''
-        self.gpsNew = False
+        self.gpsReadyForNavigation = False
         #self.gpsRequested = False
-        self.startingYaw = None
-        self.directionYaw = None
         self.Init()
-        self.ct_time = time.time()
-        self.ct_imu_msg_rcv = 0
-        self.ct_gps_msg_rcv = 0
-        self.ct_gps_msg_prc = 0
 
     def Init(self):
         self.waypoints = []
         self.waypointIx = 0
         self.navpoints = []
+        self.nav = NavStep()
+        self.navSteps = []
         self.map.InitMap()
         self.mode = "M"
 
@@ -59,9 +80,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         payload = {}
         payload['filename'] = im_fn
         payload['captureFormat'] = 'jpeg'
-        (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('pic_ready', payload, source='cameraman')
 
     def HeadingToWaypoint(self, ix):
         # should be reworked using GeographicLib ??
@@ -106,27 +125,67 @@ class navigator(vnavs_mqtt.mqtt_node):
         elif deltaHeading > 180:
             deltaHeading = deltaHeading - 360
         if abs(deltaHeading) < STEER_STRAIGHT_HEADING:
-            steering = "A0"
-            self.startingYaw = None
-            self.directionYaw = None
+            self.nav.Init()
+            self.nav.steering = "A0"
+            self.nav.speed = FORWARD_SLOW
         else:
             # deltaHeading is +/- 180 degrees, map to +/- 60 steering order.
             # this should query the helmsman for this bots range instead of assuming 60.
             # The signs of headings and steering command are the same. Negative means
             # the waypoint is to the left, positive is to the right.
-            steering = 'A' + str(int(deltaHeading / 3))
-            self.startingYaw = self.yaw
-            self.directionYaw = deltaHeading
-        payload = {}
-        payload['heading'] = steering
-        self.mqttc.publish('helmsman/orders', json.dumps(payload))
-        payload['ix'] = self.waypointIx
-        self.mqttc.publish('navigator/status', json.dumps(payload))
-        self.navpoints.append(((self.latitude, self.longitude), steering))
+            if abs(deltaHeading) <= Y_TURN_LIMIT:
+                # make the direct turn
+                self.nav.Init()
+                self.nav.steering = 'A' + str(int(deltaHeading / 3))
+                self.nav.speed = FORWARD_SLOW
+                self.nav.startingYaw = self.yaw
+                self.nav.directionYaw = deltaHeading
+            else:
+                self.nav.speed = STOP_SPEED
+                self.nav.keepSeconds = STOP_SECONDS
+                step = NavStep()
+                # Note: this steering direction is reversed, but yaw is not.
+                step.steering = 'A' + str(int(-deltaHeading / 3))
+                step.speed = REVERSE_SLOW
+                step.startingYaw = self.yaw
+                step.directionYaw = deltaHeading / 2
+                step.untrustedGpsUpdates = -1
+                self.navSteps = [step]
+                #
+                step = NavStep()
+                step.steering = 'A0'
+                step.speed = STOP_SPEED
+                step.keepSeconds = STOP_SECONDS
+                step.untrustedGpsUpdates = -1
+                self.navSteps.append(step)
+                #
+                step = NavStep()
+                step.steering = 'A' + str(int(deltaHeading / 3))
+                step.speed = FORWARD_SLOW
+                step.startingYaw = self.yaw
+                step.directionYaw = deltaHeading
+                step.untrustedGpsUpdates = 1
+                self.navSteps.append(step)
+
+        self.PublishNavigation()
+        self.navpoints.append(((self.latitude, self.longitude), self.nav.steering))
         print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.waypoints[self.waypointIx]))
-        print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (steering, deltaX, deltaY, hypotenuse,
+        print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, hypotenuse,
 					deltaHeading, self.heading, waypointHeading, self.waypointIx))
         return hypotenuse
+
+    def PublishNavigation(self):
+        payload = {}
+        payload['heading'] = self.nav.steering
+        payload['speed'] = self.nav.speed
+        self.Publish('orders', payload, source='helmsman')
+        if self.nav.untrustedGpsUpdates < 0:
+            # this could be dangerous, skipping navigation indefinately
+            if self.nav.keepSeconds <= 0:
+                # we intend to end the manuever with IMU yaw, this keeps us safe
+                self.nav.keepSeconds = MAX_TIMED_MANUEVER_SECONDS
+        if self.nav.keepSeconds > 0:
+            self.nav.timeLimit = time.time() + self.nav.keepSeconds
 
     def rmsg_navigator_mode(self, msg):
         payload = json.loads(msg)
@@ -142,17 +201,21 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.mode = mode
         elif mode in 'MCG':
             if (mode == "G") and (self.mode != "G"):
+                self.Init()
                 self.missionName = payload['missionName']
-                self.waypoints = []
-                self.navpoints = []
                 f = open(self.missionName + ".mis", "r")
                 for this in f.readlines():
                     parts = this.split(',')
                     if parts[0] == 'W':
                         self.waypoints.append((float(parts[1]), float(parts[2])))
-                self.waypointIx = 1
+                self.nav.steering = 'A0'
+                self.nav.speed = FORWARD_SLOW
+                self.nav.keepSeconds = STOP_SECONDS			# allow GPS to settle
+                self.PublishNavigation() 
             if (mode == "M") and (self.mode == "G"):
                 # end of gps naviagion
+                self.nav.Init()
+                self.PublishNavigation()
                 f = open(self.missionName + '.nav', "w")
                 for p in self.waypoints:
                     f.write(u'W,%f,%f\n' % (p[0], p[1]))
@@ -161,7 +224,6 @@ class navigator(vnavs_mqtt.mqtt_node):
                 f.close()
             self.mode = mode
             self.pausedMode = None
-            self.waypointIx = 0
 
     def rmsg_navigator_waypoint(self, msg):
         payload = json.loads(msg)
@@ -178,7 +240,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 f.write(u'W,%f,%f\n' % (p[0], p[1]))
             f.close
 
-    def rmsg_engineer_1_status(self, msg):
+    def rmsg_engineer_1_gps(self, msg):
         try:
             payload = json.loads(msg)
         except ValueError:
@@ -186,73 +248,96 @@ class navigator(vnavs_mqtt.mqtt_node):
             print("JSON Error")
             #self.gpsRequested = False
             return
-        if 'longitude' in payload:
-            # this has GPS info
-            self.longitude = payload['longitude']
-            self.latitude = payload['latitude']
-            self.speed = payload['speed']
-            self.heading = payload['heading']
-            #self.gpsRequested = False
-            self.gpsNew = True
-            print("NEW GPS INFO")
-            self.ct_gps_msg_rcv += 1
-        else:
-            self.ct_imu_msg_rcv += 1
+        self.longitude = payload['longitude']
+        self.latitude = payload['latitude']
+        self.speed = payload['speed']
+        self.heading = payload['heading']
         self.yaw = payload['yaw']
+        #self.gpsRequested = False
+        self.gpsReadyForNavigation = True
+        self.stats.Count('GpsRcv')
+
+    def rmsg_engineer_1_imu(self, msg):
+        try:
+            payload = json.loads(msg)
+        except ValueError:
+            payload = {}
+            print("JSON Error")
+            #self.gpsRequested = False
+        self.yaw = payload['yaw']
+        self.stats.Count('ImuRcv')
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         #
-        if self.gpsNew:
+        if not self.mqttcConnected:
+            return
+        if self.nav.timeLimit > 0:
+            # if there is a time limit, just follow those orders until they expire.
+            # if there is an unexpired time limit, untrustedGpsUpdates is ignored, we don't get that far.
+            if  self.nav.timeLimit > time.time():
+                # we want to maintain the the current navigation orders until completed by yaw or time
+                if not self.CheckYawForCompletedManuever():
+                    return				# not ended, continue timed order
+            # the current navigation has expired or ended by IMU yaw, deal with it.
+            if len(self.navSteps) > 0:
+                self.nav = self.navSteps.pop(0)
+                self.PublishNavigation()
+                return				# new orders came from stack
+            self.nav.timeLimit = 0
+        check_yaw = True
+        if self.gpsReadyForNavigation:
+            if self.nav.untrustedGpsUpdates != 0:
+                # We are in a manuever where GPS hasn't caught up, like startup or reversing direction.
+                # We might be counting down to zero, or might have started negative, in
+                # which case we ignore GPS till reset.
+                # GPS values ARE being recorded, just not used for navigation.
+                self.nav.untrustedGpsUpdates -= 1
+                self.gpsReadyForNavigation = False
+        if self.gpsReadyForNavigation:
             if self.gpsAction == 'M':
                 # check if repeat ??
                 self.waypoints.append((self.latitude, self.longitude))
-                #self.waypoints = [(37.627450333333336, -122.453955), (37.627469166666664, -122.45389233333333), (37.627477666666664, -122.45387333333333)]
                 self.gpsAction = ''
                 print(self.waypoints)
             if (self.mode == 'G') and (len(self.waypoints) > 0):
-                self.ct_gps_msg_prc += 1
+                check_yaw = False
+                self.stats.Count('GpsPrc')
                 distance = self.HeadingToWaypoint(self.waypointIx)
                 if distance <= WAYPOINT_WINDOW_METERS:
                     self.waypointIx += 1
                     if self.waypointIx >= len(self.waypoints):
                         self.waypointIx = 0
-            self.gpsNew = False
-        elif self.startingYaw is not None:
-            steering = None
-            partialDelta = self.yaw - self.startingYaw
-            if self.directionYaw < 0:
-                # we are turning left
-                if partialDelta > 180:
-                    partialDelta = partialDelta - 360
-                if partialDelta <= self.directionYaw:
-                    steering = "A0"
-                    self.startingYaw = None
-                    self.directionYaw = None
+            self.gpsReadyForNavigation = False
+        if check_yaw and self.CheckYawForCompletedManuever():
+            self.nav.Init()
+            self.nav.speed = FORWARD_SLOW
+            self.PublishNavigation()
+        self.stats.Print("MSGS")
+
+
+    def CheckYawForCompletedManuever(self):
+        if self.nav.startingYaw is None:
+            return False				# there is nothing to complete
+        if self.yaw is None:
+            return False				# probably an error, no IMU data arriving
+        partialDelta = self.yaw - self.nav.startingYaw
+        if self.nav.directionYaw < 0:
+            # we are turning left
+            if partialDelta > 180:
+                partialDelta = partialDelta - 360
+            if partialDelta <= self.nav.directionYaw:
+                return True				# manuever completed
             else:
-                # we are turning right
-                if partialDelta < -180:
-                    partialDelta = partialDelta + 360
-                if partialDelta >= self.directionYaw:
-                    steering = "A0"
-                    self.startingYaw = None
-                    self.directionYaw = None
-            if steering is not None:
-                payload = {}
-                payload['heading'] = steering
-                self.mqttc.publish('helmsman/orders', json.dumps(payload))
-        if (self.gpsAction == 'M') \
-            or ((self.mode == 'G') and (len(self.waypoints) > 0)):
-            pass
-            #if not self.gpsRequested:
-            #    self.gpsRequested = True
-            #    self.mqttc.read('engineer_1/status')
-            #    print("REQESTING GPS")
-        if ((self.ct_imu_msg_rcv + self.ct_gps_msg_rcv) % 100) == 0:
-            elapsed_time = time.time() - self.ct_time
-            print("MSGS GPS %d (%f /sec) IMU %d (%f /sec) GPS Processed %d" % (self.ct_gps_msg_rcv, self.ct_gps_msg_rcv / elapsed_time,
-										self.ct_imu_msg_rcv, self.ct_imu_msg_rcv / elapsed_time,
-										self.ct_gps_msg_prc)) 
+                return False			# manuever continuing
+        else:
+            # we are turning right
+            if partialDelta < -180:
+                partialDelta = partialDelta + 360
+            if partialDelta >= self.nav.directionYaw:
+                return True				# manuever completed
+            else:
+                return False			# manuever continuing
 
 class Map(object):
     def __init__(self, waypoints=None, navpoints=None):

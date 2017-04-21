@@ -10,10 +10,10 @@ import vnavs_mqtt
 
 SYSTEMCTL = '/bin/systemctl'
 
-def RunCommand(cmd):
+def RunCommand(cmd, Shell=False):
     print("RUN COMMAND", cmd)
     start_time = time.time()
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    proc = subprocess.Popen(cmd, shell=Shell, stdout=subprocess.PIPE)
     while True:
         proc.poll()
         if proc.returncode is None:
@@ -35,12 +35,30 @@ def StartSystemctl(service_name):
     cmd = ['sudo', SYSTEMCTL, 'start', service_name]
     proc = RunCommand(cmd)
     # we might want to log stdout result r
+    PrintProcResult(proc)
+    return CheckSystemctlState(service_name)
+
+def PrintProcResult(proc):
     print("result code:", proc.returncode)
     r = proc.stdout.read()
     print("***********")
     print(r)
     print("***********")
-    return CheckSystemctlState(service_name)
+
+def GetScreenList():
+    screens = []
+    proc = RunCommand(['screen', '-ls'])
+    output = proc.stdout.readlines()
+    for this in output:
+        parts = this.split(' ')
+        # ['\t794.webserver\t(04/21/2017', '03:29:34', 'AM)\t(Detached)\n']
+        dot = parts[0].find('.')
+        if dot >= 0:
+            tab = parts[0].find('\t', dot+1)
+            if tab >= 0:
+                this_screen = parts[0][dot+1:tab]
+                screens.append(this_screen)
+    return screens
 
 def PiShutdown():
     command = "/usr/bin/sudo /sbin/shutdown -h now"
@@ -56,8 +74,10 @@ class process(vnavs_mqtt.mqtt_node):
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.process_specs = self.config.items("ProcessMonitor")
         self.startTime = time.time()
+        self.loop_sleep = 60
 
     def DoLoop(self):
+        screens = GetScreenList()
         for pname, pspec in self.process_specs:
             parts = pspec.split(':')
             if parts[0] == 's':
@@ -69,7 +89,11 @@ class process(vnavs_mqtt.mqtt_node):
                 proc = RunCommand(['mountpoint', '-q', mountpoint])
                 if proc.returncode != 0:
                     proc = RunCommand(['sudo', 'mount', mountpoint])
-        time.sleep(60)
+            elif parts[0] == 'v':
+                vnavs_process = parts[1]
+                if vnavs_process not in screens:
+                    proc = RunCommand('screen -d -m -S %s /bin/bash ~/projects/vnavs/launch/run_%s' % (vnavs_process, vnavs_process), Shell=True)
+                    PrintProcResult(proc)
 
 def Run():
     p = process()

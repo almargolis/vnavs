@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import json
 import multiprocessing
 import os
 import Queue
@@ -431,6 +432,41 @@ class FastMqttMessage(object):
         self.qos = qos
         self.mid = mid				# this is a fast mqtt extension
 
+class Counters(object):
+    def __init__(self):
+        self.start_time = time.time()
+        self.counters = {}
+        self.ctCt = 0
+        self.lastPrintCtCt = -1
+
+    def Count(self, name, ct=1):
+        self.ctCt += 1
+        if name in self.counters:
+            new_ct = self.counters[name] + ct
+        else:
+            new_ct = ct
+        self.counters[name] = new_ct
+
+    def Print(self, msgid, names=None, freq=100):
+        if (self.ctCt % freq) != 0:
+            return
+        if self.lastPrintCtCt == self.ctCt:
+            return
+        self.lastPrintCtCt = self.ctCt
+        elapsedTime = time.time() - self.start_time
+        if names is None:
+            names = self.counters.keys()
+        outFmt = [msgid]
+        outVal = []
+        for this in names:
+            outFmt.append(this + ':')
+            outFmt.append('{}')
+            outFmt.append('({} /sec)')
+            outVal.append(self.counters[this])
+            outVal.append(self.counters[this] / elapsedTime)
+        fmt = ' '.join(outFmt)
+        print(fmt.format(*outVal))
+
 #
 # Blocking == True
 #	Single threaded node.
@@ -455,7 +491,7 @@ class FastMqttMessage(object):
 #		is non-blocking, DoLoop() needs to check self.mqttcConnected.
 #		 
 class mqtt_node(object):
-    def __init__(self, Subscriptions=[], Readers=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+    def __init__(self, SourceName=None, Subscriptions=[], Readers=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.blocking_mode = Blocking
@@ -473,9 +509,15 @@ class mqtt_node(object):
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
+        self.loop_sleep = 0			# set if we don't want to slow loop frequency
         self.mqttc = None
         self.mqttcConnected = False
         self.lastSocketError = None
+        if SourceName is None:
+            self.sourceName = self.__class__.__name__
+        else:
+            self.sourceName = SourceName
+        self.stats = Counters()
         self.verbose = Verbose
         self.streamer = None
         if Streamer:
@@ -552,6 +594,8 @@ class mqtt_node(object):
                 self.DoLoop()
                 if self.CheckExceptions():
                     sys.exit(0)
+                if self.loop_sleep > 0:
+                    time.sleep(self.loop_sleep)
         except KeyboardInterrupt:
             self.CleanupLoop()
             sys.exit(0)
@@ -598,6 +642,15 @@ class mqtt_node(object):
             self.handlers[this_topic] = handler_method
             if this_topic in self.subscriptions:
                 self.mqttc.subscribe(this_topic, 0)
+
+    def Publish(self, topic, payload, source=None):
+        # payload is a dict to be converted to JSON)
+        if source is None:
+            source = self.sourceName
+        fqnTopic = source + '/' + topic
+        res, mid = self.mqttc.publish(fqnTopic, json.dumps(payload))
+        if res != mqtt.MQTT_ERR_SUCCESS:
+            print("MQTT Publish Error")
 
     def on_connect(self, client, userdata, flags, rc):
         print("on_connect() rc: " + str(rc))
