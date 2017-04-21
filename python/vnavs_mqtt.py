@@ -130,7 +130,7 @@ class socket_xfer(object):
             self.timer_start = timer_stop
 
 class SelectServer(object):
-    def __init__(self, IniSection=None, IsServer=True):
+    def __init__(self, IniSection=None, IsServer=True, Verbose=False):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.broker_host = None
@@ -156,6 +156,7 @@ class SelectServer(object):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.server.setblocking(0)
+        self.verbose = Verbose
         self.InitData()
 
     def InitData(self):
@@ -252,9 +253,10 @@ class SelectServer(object):
             if self.isServer and (s is self.server):
                 # A "readable" server socket is ready to accept a connection
                 connection, client_address = s.accept()
-                #print('new connection from', client_address)
                 connection.setblocking(0)
                 self.inputSockets.append(connection)
+                if self.verbose:
+                    print('new connection from', client_address, 'total connections', len(self.inputSockets))
             else:
                 try:
                     data = s.recv(1024)
@@ -271,7 +273,7 @@ class SelectServer(object):
                     else:
                         self.disconnect()
                         raise
-                else:
+                except:
                     raise
                 if data:
                     self.ProcessData(s, data)
@@ -287,6 +289,8 @@ class SelectServer(object):
             else:
                 try:
                     s.send(next_msg)
+                    if self.verbose:
+                        print("SEND", next_msg)
                 except socket.error:
                     if self.isServer:
                         # socket.error: [Errno 104] Connection reset by peer (I ctrl-C client)
@@ -314,8 +318,8 @@ class SelectServer(object):
 # volume topics for time sensitive processes.
 #
 class FastMqttServer(SelectServer):
-    def __init__(self):
-        super().__init__(IniSection="MqttFastServer")
+    def __init__(self, Verbose=False):
+        super().__init__(IniSection="MqttFastServer", Verbose=Verbose)
         self.mqttPayloads = {}
         self.subscriptions = {}
         self.message_in_ct = 0
@@ -330,14 +334,14 @@ class FastMqttServer(SelectServer):
             topic = message[1]
             payload = message[2]
             self.mqttPayloads[topic] = (self.message_in_ct, payload)
-            #print("PUBLISH", topic, self.subscriptions)
+            if self.verbose:
+                print("PUBLISH", topic, self.subscriptions)
             if topic in self.subscriptions:
                 newSubscriptionList = []
                 for sendSocket in self.subscriptions[topic]:
                     if sendSocket in self.inputSockets:
                         # we get here for subscription by still-connected sockets
                         newSubscriptionList.append(sendSocket)
-                        #print("SENDING", sendSocket.getsockname())
                         self.SendMessage(sendSocket, topic)
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
         elif action == 'read':
@@ -708,6 +712,12 @@ class FastMqttUtil(mqtt_node):
         super().__init__(Subscriptions=[], Blocking=True, BlockingTimeoutSecs=0, BrokerType='F', Streamer=False, Verbose=Verbose)
 
 if __name__ == "__main__":
+    if 'verbose' in sys.argv:
+        print("VERBOSE")
+        verbose = True
+    else:
+        print("QUIET")
+        verbose = False
     if sys.argv[1] == 's':
         n = TestSender()
         n.Connect()
@@ -716,7 +726,7 @@ if __name__ == "__main__":
         n = TestReceiver()
         n.Connect()
     elif sys.argv[1] == 'm':
-        s = FastMqttServer()
+        s = FastMqttServer(Verbose=verbose)
         s.connect()
         s.loop_forever()
     elif sys.argv[1] == 'fpub':
