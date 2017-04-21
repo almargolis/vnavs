@@ -99,6 +99,9 @@ html(lang="en")
           button(type="button" id="" onclick="socket.emit('waypM');") Mark Waypoint
           button(type="button" id="" onclick="socket.emit('modeG');") GPS Navigation
           button(type="button" id="" onclick="socket.emit('modeM');") Manual
+          br
+          button(type="button" id="" onclick="socket.emit('helmsman', 'state', 'e');") E-Stop
+          button(type="button" id="" onclick="socket.emit('helmsman', 'state', 'd');") Resume
       div(style="display: inline-block;")
         input(type="range" id="speedctl" min="0" max="100" step="1" value="50" style="width: 200px;")
     // end controls area

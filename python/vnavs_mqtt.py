@@ -478,6 +478,7 @@ class mqtt_node(object):
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
+        self.loop_sleep = 0			# set if we don't want to slow loop frequency
         self.mqttc = None
         self.mqttcConnected = False
         self.lastSocketError = None
@@ -557,6 +558,8 @@ class mqtt_node(object):
                 self.DoLoop()
                 if self.CheckExceptions():
                     sys.exit(0)
+                if self.loop_sleep > 0:
+                    time.sleep(self.loop_sleep)
         except KeyboardInterrupt:
             self.CleanupLoop()
             sys.exit(0)
