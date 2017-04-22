@@ -217,6 +217,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         burst_start_time = time.time()
         burst_ct = 0
         print("READY", burst_loopMode, burst_loopFormat, burst_loopPublish, burst_dest)
+        last_time = 0
         for im_fn in self.camera.capture_continuous(burst_dest, format=burst_loopFormat, use_video_port=True):
             self.image_ct += 1
             burst_ct += 1
@@ -266,9 +267,11 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     payload['filename'] = im_fn
                     payload['captureFormat'] = captureFormat
                     payload['capturePublish'] = capturePublish
-                    (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
-                    if res != mqtt.MQTT_ERR_SUCCESS:
-                        print("MQTT Publish Error")
+                    if time.time() - last_time > 2:
+                        (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
+                        if res != mqtt.MQTT_ERR_SUCCESS:
+                            print("MQTT Publish Error")
+                        last_time = time.time()
                 if capturePublish == 'race':
                     assert burst_loopPublish == 'stream'
                     assert burst_loopFormat == 'bgr'
