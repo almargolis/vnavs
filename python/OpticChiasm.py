@@ -5,9 +5,12 @@ import time
 import sys
 import re
 
+# OpenCv uses a range of 0 to 179 instead of 0 to 360.
 HSV_MASK_WHITE = -1
-HSV_MASK_RED = 170
 HSV_MASK_YELLOW = 30
+HSV_MASK_ORANGE = 12
+HSV_MASK_BLUE = 120
+HSV_MASK_RED = 178
 
 RACE_BLUR = False
 RACE_CANNY = False
@@ -589,9 +592,10 @@ class Race(object):
 
 
 class Robogames(object):
-    def __init__(self, image):
+    def __init__(self, image, colors):
         # im is an OpenCV BGR image object
         self.original = image
+        self.green = (0, 255, 0)				# green
         if (RACE_CROP_X is not None) or (RACE_CROP_Y is not None):
             height, width, channels = image.shape
             if RACE_CROP_X is None:
@@ -608,7 +612,7 @@ class Robogames(object):
             image = image[c_y:height, c_x:c_x+c_w]
         self.annotated = image.copy()
         #image = simplest_cb(self.original, 20)
-        image = ColorMask(image, colors=[HSV_MASK_RED], threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
+        image = ColorMask(image, colors=colors, threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
         #bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         #bw_image = cv2.blur(bw_image.copy(), (5,5))
         if RACE_BLUR:
@@ -623,7 +627,6 @@ class Robogames(object):
     def ProcessLines(self):
         VERTICAL_SLOPE = 9999
         h_color = (0, 0, 255)				# blue
-        a_color = (0, 255, 0)				# green
         h_width = 1
         a_width = 2
         self.map_lines = []
@@ -655,32 +658,57 @@ class Robogames(object):
                     # x, y are opencv origin upper/left
                     self.map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2)))
             self.map_lines.sort()
+
+    def FilterLines(self):
             cum_slope = 0
             ct_slope = 0
             #print("MAP", h, m, w)
-            steep_lines = []
+            self.filteredLines = []
             for this in self.map_lines[:5]:
                 slope = abs(this[2])
-                if (slope < 4) or (slope > 18):
-                    continue
+                print(slope)
+                #if (slope < 4) or (slope > 18):
+                #if slope > 1:
+                #    continue
                 p1 = this[5]
                 p2 = this[6]
                 middleX = int((p1[0] + p2[0]) / 2)
-                steep_lines.append((middleX, this))
-            #
-            cone_lines = []
-            if len(steep_lines) >= 2:
+                self.filteredLines.append((middleX, this))
+
+    def SelectLines(self):
+            print("FI:TERED", len(self.filteredLines))
+            self.rectangles = []
+            self.selectedLines = []
+            Allpoints = []
+            for thisX in self.filteredLines:
+                this = thisX[1]
+                points = [this[5], this[6]]
+                Allpoints  += points
+            self.MakeRec(Allpoints)
+
+    def SelectCone(self):
+            self.selectedLines = []
+            if len(self.filteredLines) >= 2:
                 # we need two lines to form a cone
-                steep_lines.sort()
-                for ix, this in enumerate(steep_lines[:-1]):
+                self.filteredLines.sort()
+                for ix, this in enumerate(self.filteredLines[:-1]):
                     l1 = this[1]
-                    l2 = steep_lines[ix+1][1]
+                    l2 = self.filteredLines[ix+1][1]
                     slope1 = l1[2]
                     slope2 = l2[2]
                     if (slope1 > 0) and (slope2 < 0):
-                        cone_lines.append((l1, l2))
-                for this in cone_lines:
-                    points = [this[0][6], this[0][6], this[1][5], this[1][6]]
+                        self.selectedLines.append((l1, l2))
+
+    def MakeConeRec(self):  
+                self.rectangles = []
+                for this in self.selectedLines:
+                    points = [this[0][5], this[0][6], this[1][5], this[1][6]]
+                    self.MakeRec(points)
+
+    def MakeRec(self, points):
+                    if len(points) < 1:
+                        return
+                    a_width = 1
                     lowerleftX = points[0][0]
                     upperrightX = points[0][0]
                     lowerleftY = points[0][1]
@@ -697,29 +725,10 @@ class Robogames(object):
                             upperrightY = thisp[1]
                     llp = (lowerleftX, lowerleftY)
                     urp = (upperrightX, upperrightY)
-                    cv2.rectangle(self.annotated, llp, urp, a_color, a_width)
+                    cv2.rectangle(self.annotated, llp, urp, self.green, a_width)
+                    self.rectangles.append((llp, urp))
                     print("RECT", llp, urp)
                 
-            for this in self.map_lines[:5]:
-                cv2.line(self.annotated, this[5], this[6], a_color, a_width)
-                print("len", this[0], "slope", this[2])
-                #print(this)
-                mlen = this[1]
-                mslope = this[2]
-                if (mslope < 0.5) and (mlen < 20):
-                    # this might be the front edge of a dash, go straight
-                    mslope = 999
-                ct_slope += 1
-                cum_slope += mslope
-            if ct_slope > 0:
-                avg_slope = cum_slope / ct_slope
-            else:
-                avg_slope = VERTICAL_SLOPE
-            print("MAP", avg_slope)
-            self.avg_slope = avg_slope
-            self.slope_ct = ct_slope
-        # cv2.imwrite('temp/ann.jpeg', self.annotated)
-
 
 class ImageAnalyzer(object):
     def __init__(self, fpath=None, Crop=None, CroppedHeight=None,
