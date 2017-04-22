@@ -18,6 +18,9 @@ import vnavs_mqtt
 import paho.mqtt.client as mqtt
 
 SEND_POSITION_PERIOD = 0.05
+SEND_POSITION_PERIOD = 0.1			# sense has is far noisier at high read rates
+SEND_POSITION_PERIOD = 0.3			# sense has is far noisier at high read rates
+SEND_POSITION_PERIOD = 0.05
 METERS_PER_SECOND_PER_KNOT = 0.514444
 
 class engineer_1(vnavs_mqtt.mqtt_node):
@@ -51,7 +54,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.last_position_message_time = time.time()
 
     def DoLoop(self):
-        # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
+        # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         #
         if self.gps_buffer_next >= 0:
             pass				# process buffered sentence, don't read, risking timeout period
@@ -122,10 +125,10 @@ class engineer_1(vnavs_mqtt.mqtt_node):
 					self.heading))
                 if self.goal_run:
                     self.PathToGoal(gps_parsed)
-        self.orientation = self.sense.get_orientation_degrees()
         if self.newData:
             # we have new GPS Data
             #print(self.speed, self.longitude, self.latitude)
+            self.orientation = self.sense.get_orientation_degrees()
             payload = {}
             payload['pitch'] = self.orientation['pitch']
             payload['roll'] = self.orientation['roll']
@@ -141,7 +144,8 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             self.newData = False
             self.last_position_message_time = time.time()
         elif (time.time() - self.last_position_message_time) > SEND_POSITION_PERIOD:
-            # send IMU Data at 10hz
+            # send only IMU Data if not GPS updates available
+            self.orientation = self.sense.get_orientation_degrees()
             payload = {}
             payload['yaw'] = self.orientation['yaw']
             self.Publish('imu', payload)
@@ -149,8 +153,22 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             self.stats.Count('ImuMsg')
         self.stats.Print('MSGS')
 
-if __name__ == '__main__':
+def TestImu():
+    sense = SenseHat()
+    p = sense.get_orientation_degrees()
+    while True:
+        o = sense.get_orientation_degrees()
+        print("IMU P: {:+09.4f}  R: {:+09.4f}  Y: {:+09.4f} {:+09.4f}".format(o['pitch'], o['roll'], o['yaw'], p['yaw']-o['yaw']))
+        p = o
+        time.sleep(0.1)
+
+def RunNode():
     h = engineer_1()
     h.Loop()
     h.Disconnect()
 
+if __name__ == '__main__':
+    if sys.argv[1] == 'node':
+        RunNode()
+    elif sys.argv[1] == 'testimu':
+        TestImu()
