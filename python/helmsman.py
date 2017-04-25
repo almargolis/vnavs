@@ -265,16 +265,11 @@ class helmsman(vnavs_mqtt.mqtt_node):
         self.deadman_time = 0		# E-Stop if time.time() exceeds this
         self.state = 'd'		# d=deadman active, c=continuous-no timer, t=time out, e=e-stop
 
-    def rmsg_helmsman_orders(self, msg):
-        try:
-            orders = json.loads(msg)
-        except ValueError:
-            orders = {}
-            print("JSON Error")
-        print("ORDERS C:", time.time(), "D:", self.deadman_time, orders)
-        if 'state' in orders:
+    def rmsg_helmsman_orders(self, payload):
+        print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
+        if 'state' in payload:
             print("--------------------")
-            new_state = orders['state']
+            new_state = payload['state']
             if new_state == 'e':
                 print("XXXXXXXXXXXXXXXXXXXXXX")
                 self.v.Estop()
@@ -283,15 +278,15 @@ class helmsman(vnavs_mqtt.mqtt_node):
                 self.state = new_state
         if self.state == 'e':
             return
-        if 'speed' in orders:
-            print("SPEED", orders['speed'])
-            self.GetGoalSpeed(orders['speed'])
-        if 'heading' in orders:
-            print ("STEER", orders['heading'])
-            self.GetGoalSteering(orders['heading'])
-        if 'timer' in orders:
-            print("TIMER", orders['timer'])
-            timer = int(orders['timer'])
+        if 'speed' in payload:
+            print("SPEED", payload['speed'])
+            self.GetGoalSpeed(payload['speed'])
+        if 'heading' in payload:
+            print ("STEER", payload['heading'])
+            self.GetGoalSteering(payload['heading'])
+        if 'timer' in payload:
+            print("TIMER", payload['timer'])
+            timer = int(payload['timer'])
         else:
             timer = 3
         self.deadman_time = time.time() + timer

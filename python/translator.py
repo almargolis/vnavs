@@ -20,21 +20,10 @@ class translate_mosquitto_to_fast(vnavs_mqtt.mqtt_node):
 					Blocking=True, BlockingTimeoutSecs=0.0, BrokerType='M', Streamer=False, Verbose=Verbose)
         self.fastBroker = None
 
-    def rmsg_cameraman_orders(self, msg):
-        print("Send cameraman/orders to fast", msg)
-        self.fastBroker.mqttc.publish('cameraman/orders', msg)
-
-    def rmsg_helmsman_orders(self, msg):
-        print("Send helmsman/orders to fast", msg)
-        self.fastBroker.mqttc.publish('helmsman/orders', msg)
-
-    def rmsg_navigator_mode(self, msg):
-        print("Send orders to fast", msg)
-        self.fastBroker.mqttc.publish('navigator/mode', msg)
-
-    def rmsg_navigator_waypoint(self, msg):
-        print("Send orders to fast", msg)
-        self.fastBroker.mqttc.publish('navigator/waypoint', msg)
+    def rmsg_wildcard(self, topic, payload):
+        print("Send {} to fast {}".format(topic, payload))
+        parts = topic.split('/')
+        self.Publish(source[1], payload, source=parts[0])
 
 class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=True):
@@ -43,13 +32,10 @@ class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
         self.mosquitto.fastBroker = self
         self.mosquitto.Connect()
 
-    def rmsg_cameraman_pic_ready(self, msg):
-        print("Send cameraman/pic_ready to mosquitto", msg)
-        self.mosquitto.mqttc.publish('cameraman/pic_ready', msg)
-
-    def rmsg_engineer_1_status(self, msg):
-        print("Send gps to mosquitto", msg)
-        self.mosquitto.mqttc.publish('engineer_1/status', msg)
+    def rmsg_wildcard(self, topic, payload):
+        print("Send {} to fast {}".format(topic, payload))
+        parts = topic.split('/')
+        self.Publish(source[1], payload, source=parts[0])
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
@@ -57,8 +43,12 @@ class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
         self.mosquitto.CheckMqtt()	# checks for mosquitto messages
         time.sleep(0.1)			# leave cpu for automation, this is human speed
 
-if __name__ == '__main__':
+def RunNode():
     h = translate_fast_to_mosquitto()
     h.Loop()
     h.Disconnect()
+
+if __name__ == '__main__':
+    if sys.argv[1] = 'node':
+        RunNode()
 

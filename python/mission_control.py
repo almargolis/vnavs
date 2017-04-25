@@ -146,17 +146,16 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             im = None
         return im
 
-    def rmsg_helmsman_orders(self, msg):
-        self.f1_helmsman_status.set(msg)
+    def rmsg_helmsman_orders(self, payload):
+        self.f1_helmsman_status.set(payload)
 
-    def rmsg_engineer_1_status(self, msg):
-        self.f1_engineer_1_status.set(msg)
+    def rmsg_engineer_1_status(self, payload):
+        self.f1_engineer_1_status.set(payload)
 
-    def rmsg_cameraman_pic_ready(self, msg):
-        self.rmsg_cameraman_last(msg)
+    def rmsg_cameraman_pic_ready(self, payload):
+        self.rmsg_cameraman_last(payload)
 
-    def rmsg_cameraman_last(self, msg):
-        payload = json.loads(msg)
+    def rmsg_cameraman_last(self, payload):
         self.pic_fn = payload['filename']
         self.pic_processed = False
         print("PIC", self.pic_fn)

@@ -76,7 +76,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.last_format = ''
         self.imageDir = self.config.get("Cameraman", "ImageDir")
 
-    def rmsg_cameraman_ask_last(self, msg):
+    def rmsg_cameraman_ask_last(self, payload):
         payload = {}
         payload['filename'] = self.last_fn
         payload['CaptureFormat'] = self.last_format
@@ -85,13 +85,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             print("MQTT Publish Error")
 
 
-    def ValidateMessage(self, specs, msg):
-        print("RMSG", msg)
-        try:
-            payload = json.loads(msg)
-        except ValueError:
-            payload = {}
-            print("Invalid JSON", `msg`)
+    def ValidateMessage(self, specs, payload):
         for this_spec in specs:
             fld_error = False
             key = this_spec['key']
@@ -120,8 +114,8 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 if not fld_error:
                     setattr(self, key, value)
 
-    def rmsg_cameraman_orders(self, msg):
-        self.ValidateMessage(self.orders_parms, msg)
+    def rmsg_cameraman_orders(self, payload):
+        self.ValidateMessage(self.orders_parms, payload)
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.

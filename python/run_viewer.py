@@ -81,11 +81,10 @@ class RunViewer(vnavs_mqtt.mqtt_node):
             self.im2.UpdateImage(fp=fp)
             
 
-    def rmsg_archiver_pic_ready(self, msg):
+    def rmsg_archiver_pic_ready(self, payload):
         return # -- there are too many of these to process
         if not self.camera_snap:
             return
-        payload = json.loads(msg)
         fn = payload['filename']
         fnp = os.path.join('temp', fn)
         ifile = open(fnp, "rb")

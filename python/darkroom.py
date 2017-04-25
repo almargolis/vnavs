@@ -774,11 +774,10 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         time.sleep(1)
         self.mqttc.publish('cameraman/ask_last', '')
 
-    def rmsg_archiver_pic_ready(self, msg):
+    def rmsg_archiver_pic_ready(self, payload):
         return # -- there are too many of these to process
         if not self.camera_snap:
             return
-        payload = json.loads(msg)
         fn = payload['filename']
         fnp = os.path.join('temp', fn)
         ifile = open(fnp, "rb")
@@ -794,22 +793,19 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         ProcessStep.steps[0].opencv = opencv
         ProcessStep.steps[0].UpdateAll()
 
-    def rmsg_cameraman_last(self, msg):
+    def rmsg_cameraman_last(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
-        print("LAST", msg)
         if not self.camera_snap:
             return
-        payload = json.loads(msg)
         self.camera_last_filename  = payload['filename']
         self.camera_last_processed = False
         print("LAST", ProcessStep.steps[0].parm_values)
 
-    def rmsg_cameraman_pic_ready(self, msg):
+    def rmsg_cameraman_pic_ready(self, payload):
         return # -- there are too many of these to process
         if not self.camera_snap:
             return
-        payload = json.loads(msg)
         fn = payload['filename']
         format = payload['format']
         buffer = None

@@ -21,8 +21,11 @@ STEER_STRAIGHT_HEADING = 10.0
 STEER_SHARP_HEADING = 90.0
 FORWARD_VERY_SLOW = 6
 FORWARD_SLOW = 6
+FORWARD_SLOW = 16
 FORWARD_FAST = 8
 FORWARD_FAST = 10
+FORWARD_FAST = 14
+FORWARD_FAST = 20
 FORWARD_FAST_METERS = 10
 REVERSE_SLOW = -4
 STOP_SPEED = 0
@@ -31,6 +34,58 @@ MAX_TIMED_MANUEVER_SECONDS = 10
 Y_TURN_LIMIT = 160
 INITIAL_GPS_WAIT = 3
 OVERSTEER_ADJUSTMENT = 0.5
+
+class Mission(object):
+    def __init__(self, MissionDir, MissionName=None):
+        self.missionDir = MissionDir
+        self.Init(MissionName=MissionName)
+
+    def Init(self, MissionName=None):
+        if MissionName is not None:
+            # If supplied, this is a permanent change.
+            # But keep previous if not specified, this is a reset.
+            self.missionName = Mission
+        self.waypoints = []
+        self.waypointIx = 0
+        self.navpoints = []
+
+    def LoadMission(self, MissionName=None):
+        mission_name = self.missionName
+        if MissionName is not None:
+            mission_name = MissionName
+        fp = os.path.join(self.missionDir, mission_dir) + '.mis'
+        f = open(fp, "r")
+        for this in f.readlines():
+            parts = this.split(',')
+            if parts[0] == 'W':
+                self.waypoints.append(('W', (float(parts[1]), float(parts[2]))))
+            elif parts[0] == 'M':			# Magic
+                    self.waypoints.append(('M', parts[1]))
+
+    def SaveMission(self, MissionName=None):
+        mission_name = self.missionName
+        if MissionName is not None:
+            mission_name = MissionName
+        fp = os.path.join(self.missionDir, mission_dir) + '.mis'
+        f = open(fp, "w")
+        for p in self.waypoints:
+            f.write(u'W,%f,%f\n' % (p[1][0], p[1][1]))
+        f.close
+
+    def SaveNavigation(self, MissionName=None):
+        mission_name = self.missionName
+        if MissionName is not None:
+            mission_name = MissionName
+        fp = os.path.join(self.missionDir, mission_dir) + '.nav'
+        f = open(fp, "w")
+        for p in self.waypoints:
+            if p[0] == 'W':
+                f.write(u'W,%s,%s\n' % (p[1][0], p[1][1]))
+            elif p[0] == 'M':
+                f.write(u'M,%s\n' % (p[1]))
+        for p in self.navpoints:
+            f.write(u'N,%f,%f,%s\n' % (p[0][0], p[0][1], p[1]))
+        f.close()
 
 class NavStep(object):
     def __init__(self):
@@ -52,13 +107,14 @@ class NavStep(object):
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/mode', 'navigator/waypoint',
+        super().__init__(Subscriptions=['navigator/service',
 					'engineer_1/gps', 'engineer_1/imu',
 					'cameraman/last'
 					],
 					Readers=[],
 					Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
+        self.missionDir = self.config.get("Pilot", "MissionDir")
         self.longitude = 0
         self.speed = None
         self.heading = None
@@ -69,19 +125,22 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.missionName = None
         self.map = Map()
         self.mapCt = 0
+        self.new_gps_payload = None
+        self.new_imu_payload = None
+        self.new_mode = None
+        self.serviceNames = ['ClearWaypaoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
+        self.serviceRequests = []
         self.gpsAction = ''
         self.gpsReadyForNavigation = False
         #self.gpsRequested = False
         self.Init()
 
-    def Init(self):
-        self.waypoints = []
-        self.waypointIx = 0
-        self.navpoints = []
+    def Init(self, MissionName=None):
         self.nav = NavStep()
         self.navSteps = []
         self.map.InitMap()
         self.mode = "M"
+        self.mission = Mission(self.missionDir, MissionName=MissionName)
 
     def WriteMap(self):
         self.mapCt += 1
@@ -104,7 +163,7 @@ class navigator(vnavs_mqtt.mqtt_node):
             # we aren't receiving GPS info. Can't navigate.
             print("NO HEADING - can't navigate.")
             return None
-        w = self.waypoints[ix][1]			# Assume this is a navigation waypoint W
+        w = self.mission.waypoints[ix][1]			# Assume this is a navigation waypoint W
         waypointLatitude = w[0]
         waypointLongitude = w[1]
         deltaY = great_circle((self.latitude, self.longitude), (w[0], self.longitude)).meters
@@ -191,9 +250,9 @@ class navigator(vnavs_mqtt.mqtt_node):
 
         self.PublishNavigation()
         self.navpoints.append(((self.latitude, self.longitude), self.nav.steering))
-        print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.waypoints[self.waypointIx]))
+        print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.mission.waypoints[self.mission.waypointIx]))
         print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, hypotenuse,
-					deltaHeading, self.heading, waypointHeading, self.waypointIx))
+					deltaHeading, self.heading, waypointHeading, self.mission.waypointIx))
         return hypotenuse
 
     def PublishNavigation(self):
@@ -212,13 +271,20 @@ class navigator(vnavs_mqtt.mqtt_node):
         if self.nav.hardKeepSeconds > 0:
             self.nav.hardTimeLimit = time.time() + self.nav.hardKeepSeconds
 
-    def rmsg_cameraman_last(self, msg):
-        payload = json.loads(msg)
+    def rmsg_cameraman_last(self, payload):
         self.imageFn = payload['filename']
 
-    def rmsg_navigator_mode(self, msg):
-        payload = json.loads(msg)
-        mode = payload['mode']
+    def rmsg_navigator_mode(self, payload):
+        new_mode = payload['mode']
+        if new_mode not in "GMPR":
+            return 'invalid mode'
+        self.new_mode = new_mode
+
+    def ChangeMode(self):
+        mode = self.new_mode
+        self.new_mode = None
+        if mode is None:
+            return
         print("MODE", mode)
         if mode == 'R':
             if self.pausedMode is not None:
@@ -228,61 +294,51 @@ class navigator(vnavs_mqtt.mqtt_node):
             if self.mode in 'GC':
                 self.pausedMode = self.mode
                 self.mode = mode
-        elif mode in 'MCG':
+        elif mode in 'MG':
             if (mode == "G") and (self.mode != "G"):
-                self.Init()
-                self.missionName = payload['missionName']
-                f = open(self.missionName + ".mis", "r")
-                for this in f.readlines():
-                    parts = this.split(',')
-                    if parts[0] == 'W':
-                        self.waypoints.append(('W', (float(parts[1]), float(parts[2]))))
-                    elif parts[0] == 'M':			# Magic
-                        self.waypoints.append(('M', parts[1]))
+                # Start a mission
+                mission_name = payload['missionName']
+                self.Init(MissionName=mission_name)
                 self.nav.steering = 'A0'
                 self.nav.speed = FORWARD_SLOW
-                if self.waypoints[self.waypointIx][0] == "W":
+                if self.mission.waypoints[self.mission.waypointIx][0] == "W":
                     self.nav.untrustedGpsUpdates = INITIAL_GPS_WAIT		# allow gps to settle
                     self.PublishNavigation() 
             if (mode == "M") and (self.mode == "G"):
                 # end of gps naviagion
                 self.nav.Init()
                 self.PublishNavigation()
-                f = open(self.missionName + '.nav', "w")
-                for p in self.waypoints:
-                    if p[0] == 'W':
-                        f.write(u'W,%s,%s\n' % (p[1][0], p[1][1]))
-                    elif p[0] == 'M':
-                        f.write(u'M,%s\n' % (p[1]))
-                for p in self.navpoints:
-                    f.write(u'N,%f,%f,%s\n' % (p[0][0], p[0][1], p[1]))
-                f.close()
+                self.mission.SaveNavigation()
             self.mode = mode
             self.pausedMode = None
 
-    def rmsg_navigator_waypoint(self, msg):
-        payload = json.loads(msg)
+    def rmsg_navigator_service(self, payload):
         request = payload['request']
-        print("WAY", request)
-        if request == 'C':
-            self.Init()
-        elif request == 'M':
-            self.gpsAction = 'M'
-        elif request == 'S':
-            mission_name = payload['missionName']
-            f = open(mission_name + ".mis", "w")
-            for p in self.waypoints:
-                f.write(u'W,%f,%f\n' % (p[1][0], p[1][1]))
-            f.close
+        if request not in self.serviceNames:
+            return 'unknown service'
+        self.serviceRequests.append(payload)
 
-    def rmsg_engineer_1_gps(self, msg):
-        try:
-            payload = json.loads(msg)
-        except ValueError:
-            payload = {}
-            print("JSON Error")
-            #self.gpsRequested = False
+    def ProcessServiceRequest(self):
+        if len(self.serviceRequests) < 1:
             return
+        payload = self.serviceRequests.pop(0)
+        request = payload['request']
+        if request == 'ClearWaypoints':
+            self.mission.Init()
+        elif request == 'MarkWaypoint':
+            self.gpsAction = 'M'
+        elif request == 'SaveWaypoints':
+            mission_name = payload['missionName']
+            self.mission.SaveMission(MissionName=mission_name)
+
+    def rmsg_engineer_1_gps(self, payload):
+        self.new_gps_payload = payload
+
+    def LoadGpsPayload(self):
+        payload = self.new_gps_payload
+        if payload is None:
+            return False
+        self.new_gps_payload = None
         self.longitude = payload['longitude']
         self.latitude = payload['latitude']
         self.speed = payload['speed']
@@ -291,23 +347,31 @@ class navigator(vnavs_mqtt.mqtt_node):
         #self.gpsRequested = False
         self.gpsReadyForNavigation = True
         self.stats.Count('GpsRcv')
+        return True
 
-    def rmsg_engineer_1_imu(self, msg):
-        try:
-            payload = json.loads(msg)
-        except ValueError:
-            payload = {}
-            print("JSON Error")
-            #self.gpsRequested = False
+    def rmsg_engineer_1_imu(self, payload):
+        self.new_imu_payload = payload
+
+    def LoadImuPayload(self):
+        payload = self.new_imu_payload
+        if payload is None:
+            return False
+        self.new_imu_payload = None
         self.yaw = payload['yaw']
         self.stats.Count('ImuRcv')
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         #
+        # Handle message data within this thread.
+        #
+        self.ChangeMode()
+        if not self.LoadGpsPayload():
+            self.LoadImuPayload()
+        #
         if not self.mqttcConnected:
             return
-        if (self.mode == 'G') and (len(self.waypoints) > 0) and (self.waypoints[self.waypointIx][0] == "M"):
+        if (self.mode == 'G') and (len(self.mission.waypoints) > 0) and (self.mission.waypoints[self.mission.waypointIx][0] == "M"):
             print("MAGIC")
             if self.imageFn is None:
                 if not self.imageRequested:
@@ -366,19 +430,19 @@ class navigator(vnavs_mqtt.mqtt_node):
         if self.gpsReadyForNavigation:
             if self.gpsAction == 'M':
                 # check if repeat ??
-                self.waypoints.append(('W', (self.latitude, self.longitude)))
+                self.mission.waypoints.append(('W', (self.latitude, self.longitude)))
                 self.gpsAction = ''
-                print(self.waypoints)
-            if (self.mode == 'G') and (len(self.waypoints) > 0):
+                print(self.mission.waypoints)
+            if (self.mode == 'G') and (len(self.mission.waypoints) > 0):
                 print("GPS")
                 check_yaw = False
                 self.stats.Count('GpsPrc')
-                distance = self.NavigateTowardWaypoint(self.waypointIx)
+                distance = self.NavigateTowardWaypoint(self.mission.waypointIx)
                 if distance <= WAYPOINT_WINDOW_METERS:
-                    self.waypointIx += 1
-                    if self.waypointIx >= len(self.waypoints):
-                        self.waypointIx = 0
-                    distance = self.NavigateTowardWaypoint(self.waypointIx)		# navigate toward new waypoint immediately
+                    self.mission.waypointIx += 1
+                    if self.mission.waypointIx >= len(self.mission.waypoints):
+                        self.mission.waypointIx = 0
+                    distance = self.NavigateTowardWaypoint(self.mission.waypointIx)		# navigate toward new waypoint immediately
             self.gpsReadyForNavigation = False
         if check_yaw and self.CheckYawForCompletedManuever():
             print("IMU")
@@ -400,17 +464,29 @@ class navigator(vnavs_mqtt.mqtt_node):
         yawDeltaSoFar = self.yaw - self.nav.startingYaw
         print("IMU YAW {:+8.4f} Goal Delta: {:+8.4f} Progress: {:+8.4f}".format(self.yaw, self.nav.deltaYawGoal, yawDeltaSoFar))
         if self.nav.deltaYawGoal < 0:
-            # we are turning left
-            if yawDeltaSoFar > 180:
-                yawDeltaSoFar = yawDeltaSoFar - 360
+            # we are turning left. Heading going down in value.
+            # Possibly wrapping from 0 to 359
+            if self.yaw > self.nav.startingYaw:
+                # we have probably wrapped 0/360, but it could be noise or wind
+                try:
+                    if (self.yaw - self.nav.startingYaw) > 30:
+                        # it's a significant difference, not noise
+                        yawDeltaSoFar -= 360
+                except TypeError:
+                    # not sure how this happened!
+                    print("TYPE ERROR")
+                    pass
             if yawDeltaSoFar <= self.nav.deltaYawGoal:
+                # we have gone more negative, further left
                 return True				# manuever completed
             else:
                 return False			# manuever continuing
         else:
-            # we are turning right
-            if yawDeltaSoFar < -180:
-                yawDeltaSoFar = yawDeltaSoFar + 360
+            # we are turning right, Heading going up in value.
+            # Possibly wrapping from 359 to 0
+            if self.yaw < self.nav.startingYaw:
+                if (self.yaw - self.nav.startingYaw) < -30:
+                    yawDeltaSoFar += 360
             if yawDeltaSoFar >= self.nav.deltaYawGoal:
                 return True				# manuever completed
             else:

@@ -22,6 +22,7 @@ else:
 
 config_file_path = os.path.expanduser("~/vnavs.ini")
 handler_method_prefix = 'rmsg_'
+wildcard_method_name = handler_method_prefix + 'wildcard'
 
 stop_process = False
 
@@ -501,6 +502,7 @@ class mqtt_node(object):
         self.readers = Readers
         self.subscriptions = Subscriptions
         self.handlers = {}
+        self.wildcardHandler = None
         self.broker_type = BrokerType
         if self.broker_type == 'M':
             iniSection = 'MqttBroker'		# Mosquitto
@@ -638,12 +640,14 @@ class mqtt_node(object):
 
     def RegisterMessageHandlers(self):
         self.handlers = {}
+        self.wildcardHandler = getattr(self, wildcard_method_name, None)
         topics = self.subscriptions + self.readers
         for this_topic in topics:
             handler_name = handler_method_prefix + this_topic.replace('/', '_')
             handler_method = getattr(self, handler_name, None)
             if handler_method is None:
-                print("No message handler for topic '%s'" % (this_topic))
+                if self.wildcardHandlerName is None:
+                    print("No message handler for topic '%s'" % (this_topic))
             self.handlers[this_topic] = handler_method
             if this_topic in self.subscriptions:
                 self.mqttc.subscribe(this_topic, 0)
@@ -656,9 +660,35 @@ class mqtt_node(object):
         if source is None:
             source = self.sourceName
         fqnTopic = source + '/' + topic
+        payload['_topic'] = topic
+        payload['_source'] = source
+        payload['_sender'] = self.sourceName
+        payload['_sendTime'] = time.time()
         res, mid = self.mqttc.publish(fqnTopic, json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
+
+    def PublishAck(self, payload, error=None):
+        # Info about original message is always there thanks to Publish()
+        sender = payload['_sender']
+        sourceTopic = payload['_topic']
+        sourceSource = payload['_source']
+        payload['_ackSourceTopic'] = sourceTopic
+        payload['_ackSourceSource'] = sourceSource
+        if not ('_ack' in payload):
+            # ack was not requested, so only send if there was an error
+            if error is None:
+                return
+            payload['_ackStatus'] = error
+            Publish('notice', payload, source=sender)
+        parts = payload['_ack'].split('/')
+        topic = parts[0]
+        source = parts[1]
+        if error is None:
+            error = 'ack'
+        payload['_ackStatus'] = error
+        del payload['_ack']				# ack not needed, avoids ack-ing ack loops
+        self.Publish(topic, Payload=Payload, source=source)
 
     def on_connect(self, client, userdata, flags, rc):
         print("on_connect() rc: " + str(rc))
@@ -667,11 +697,24 @@ class mqtt_node(object):
     def on_message(self, client, userdata, message):
         if self.verbose:
             print("on_message()", message.topic + " " + str(message.qos) + " " + self.MessageStr(message.payload))
+        msg = message.payload.decode("utf-8")
+        try:
+            payload = json.loads(msg)
+        except ValueError:
+            payload = {}
+            print("JSON Error")
         handler_method = self.handlers[message.topic]
         if handler_method is None:
-            print("on_message() no handler for ", message.topic)
+            if self.wildcardHandler is not None:
+                error = self.wildcardHandler(message.topic, payload)
+            else:
+                error = ' no handler for topic'
         else:
-            handler_method(message.payload.decode("utf-8"))
+            error = handler_method(payload)
+        # Acks get sent automagically as needed.
+        # Only a small percentage of messages get ack-ed, based on
+        # the state of error and the _ack payload property.
+        self.PublishAck(payload, error=error)
 
     def on_log(self, client, userdata, level, buf):
         print(buf)
