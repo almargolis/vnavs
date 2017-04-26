@@ -45,7 +45,7 @@ class Mission(object):
         if MissionName is not None:
             # If supplied, this is a permanent change.
             # But keep previous if not specified, this is a reset.
-            self.missionName = Mission
+            self.missionName = MissionName
         if self.missionName is None:
             self.missionName = 'test'
         self.waypoints = []
@@ -54,6 +54,7 @@ class Mission(object):
         self.LoadMission()
 
     def LoadMission(self, MissionName=None):
+        print("LOAD", self.missionDir, self.missionName, MissionName)
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
@@ -111,7 +112,7 @@ class NavStep(object):
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/service',
+        super().__init__(Subscriptions=['navigator/mode', 'navigator/service',
 					'engineer_1/gps', 'engineer_1/imu',
 					'cameraman/last'
 					],
@@ -123,7 +124,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.speed = None
         self.heading = None
         self.imageFn = None
-        self.imageRequested = False
+        self.imageRequested = None
         self.latitude = 0
         self.pausedMode = None
         self.missionName = None
@@ -131,7 +132,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.mapCt = 0
         self.new_gps_payload = None
         self.new_imu_payload = None
-        self.new_mode = None
+        self.new_mode_payload = None
         self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
@@ -276,18 +277,21 @@ class navigator(vnavs_mqtt.mqtt_node):
 
     def rmsg_cameraman_last(self, payload):
         self.imageFn = payload['filename']
+        print("LAST", payload)
 
     def rmsg_navigator_mode(self, payload):
         new_mode = payload['mode']
         if new_mode not in "GMPR":
             return 'invalid mode'
-        self.new_mode = new_mode
+        self.new_mode_payload = payload
+        print("MODE_MSG", payload)
 
     def ChangeMode(self):
-        mode = self.new_mode
-        self.new_mode = None
-        if mode is None:
+        payload = self.new_mode_payload
+        self.new_mode_payload = None
+        if payload is None:
             return
+        mode = payload['mode']
         print("MODE", mode)
         if mode == 'R':
             if self.pausedMode is not None:
@@ -387,11 +391,12 @@ class navigator(vnavs_mqtt.mqtt_node):
         if not self.mqttcConnected:
             return
         if (self.mode == 'G') and (len(self.mission.waypoints) > 0) and (self.mission.waypoints[self.mission.waypointIx][0] == "M"):
-            print("MAGIC")
+            #print("MAGIC")
             if self.imageFn is None:
-                if not self.imageRequested:
+                if (self.imageRequested is None) or ((time.time() - self.imageRequested) > 1.0):
+                    print("REQUEST IMAGE")
                     self.Publish('ask_last', {}, source='cameraman')
-                    self.imageRequested = True
+                    self.imageRequested = time.time()
                 return
             fp = os.path.join(self.imageDir, self.imageFn)
             print("image", fp)
@@ -400,6 +405,8 @@ class navigator(vnavs_mqtt.mqtt_node):
                 print("IM RETRY")
                 time.sleep(0.5)
                 im = cv2.imread(fp)
+                if im is None:
+                    return
             r = OpticChiasm.Robogames(im, [OpticChiasm.HSV_MASK_YELLOW])
             r.ProcessLines()
             r.FilterLines()

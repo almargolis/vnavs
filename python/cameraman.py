@@ -81,6 +81,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         payload['filename'] = self.last_fn
         payload['CaptureFormat'] = self.last_format
         self.Publish('last', payload)
+        print("ASK LAST")
 
     def ValidateMessage(self, specs, payload):
         for this_spec in specs:
