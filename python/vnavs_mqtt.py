@@ -517,6 +517,8 @@ class mqtt_node(object):
         self.mqttc = None
         self.mqttcConnected = False
         self.lastSocketError = None
+        self.pendingReads = {}
+        self.arrivedReads = {}
         if SourceName is None:
             self.sourceName = self.__class__.__name__
         else:
@@ -652,6 +654,39 @@ class mqtt_node(object):
             if this_topic in self.subscriptions:
                 self.mqttc.subscribe(this_topic, 0)
 
+    def Get(self, topic, source=None, timeout=1.0):
+        # Get the most recent message without repeats and automatically request more.
+        # Expect frequent None
+        if not self.mqttcConnected:
+            # for now, silently ignore publish errors. Need to do better
+            return
+        if source is None:
+            source = self.sourceName
+        fqnTopic = source + '/' + topic
+        if fqnTopic in self.arrivedReads:
+            payload = self.arrivedReads[fqnTopic]
+            del self.arrivedReads[fqnTopic]
+            return payload
+        self.Read(topic, source=source)
+        return None
+
+    def Read(self, topic, source=None, timeout=1.0):
+        if not self.mqttcConnected:
+            # for now, silently ignore publish errors. Need to do better
+            return
+        if source is None:
+            source = self.sourceName
+        fqnTopic = source + '/' + topic
+        # maybe check if its in subscription / reader list
+        if fqnTopic in self.pendingReads:
+            t = self.pendingReads[fqnTopic]
+            if (time.time() - t) < timeout:
+                return					# read still reasonably pending
+            print("TIMEOUT", fqnTopic)
+        self.mqttc.read(fqnTopic)
+        # error messages ???
+        self.pendingReads.append(time.time())
+
     def Publish(self, topic, payload, source=None):
         # payload is a dict to be converted to JSON)
         if not self.mqttcConnected:
@@ -708,6 +743,10 @@ class mqtt_node(object):
             payload = {}
             print("JSON Error")
         handler_method = self.handlers[message.topic]
+        #
+        if message.topic in self.pendingReads:
+            del self.pendingReads[message.topic]
+            self.arrivedReads[message.topic] = payload
         if handler_method is None:
             if self.wildcardHandler is not None:
                 error = self.wildcardHandler(message.topic, payload)
