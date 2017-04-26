@@ -670,6 +670,8 @@ class mqtt_node(object):
 
     def PublishAck(self, payload, error=None):
         # Info about original message is always there thanks to Publish()
+        if '_sender' not in payload:
+            print("SENDER", payload)
         sender = payload['_sender']
         sourceTopic = payload['_topic']
         sourceSource = payload['_source']
@@ -680,7 +682,9 @@ class mqtt_node(object):
             if error is None:
                 return
             payload['_ackStatus'] = error
-            Publish('notice', payload, source=sender)
+            self.Publish('notice', payload, source=sender)
+            return
+        # An ack was requested
         parts = payload['_ack'].split('/')
         topic = parts[0]
         source = parts[1]
