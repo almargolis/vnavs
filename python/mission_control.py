@@ -34,7 +34,11 @@ BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self):
         super().__init__(Subscriptions=['cameraman/last', 'cameraman/pic_ready', 
-						'engineer_1/status', 'helmsman/orders'], 
+						'engineer_1/status',
+						'helmsman/orders',
+						'MissionControl/notice',
+						'navigator/status'
+						], 
 						Blocking=True, BlockingTimeoutSecs=0.1,
 						BrokerType='F')
         self.lastfn = ""
@@ -146,11 +150,8 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             im = None
         return im
 
-    def rmsg_helmsman_orders(self, payload):
+    def rmsg_wildcard(self, topic, payload):
         self.f1_helmsman_status.set(payload)
-
-    def rmsg_engineer_1_status(self, payload):
-        self.f1_engineer_1_status.set(payload)
 
     def rmsg_cameraman_pic_ready(self, payload):
         self.rmsg_cameraman_last(payload)
@@ -162,25 +163,19 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
     def ClearWaypoints(self):
         payload = {}
-        payload['request'] = 'C'
-        (res, mid) = self.mqttc.publish('navigator/waypoint', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        payload['request'] = 'ClearWaypoints'
+        self.Publish('service', payload, source='navigator')
 
     def MarkWaypoint(self):
         payload = {}
-        payload['request'] = 'M'
-        (res, mid) = self.mqttc.publish('navigator/waypoint', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        payload['request'] = 'MarkWaypoint'
+        self.Publish('service', payload, source='navigator')
 
     def SaveWaypoints(self):
         payload = {}
-        payload['request'] = 'S'
+        payload['request'] = 'SaveWaypoints'
         payload['missionName'] = self.mission_name.get()
-        (res, mid) = self.mqttc.publish('navigator/waypoint', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('service', payload, source='navigator')
 
     def SnapPic(self):
         payload = {}
@@ -190,9 +185,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         payload['captureMode'] = 'run'
         payload['captureFormat'] = 'jpeg'
         payload['capturePublish'] = 'file'
-        (res, mid) = self.mqttc.publish('cameraman/orders', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('orders', payload, source='cameraman')
 
     def StartNav(self):
         payload = {}
@@ -202,37 +195,28 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         payload['captureMode'] = 'run'
         payload['captureFormat'] = 'jpeg'
         payload['capturePublish'] = 'file'
-        (res, mid) = self.mqttc.publish('cameraman/orders', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('orders', payload, source='cameraman')
         #
         payload = {}
         payload['mode'] = 'G'
         payload['missionName'] = self.mission_name.get()
-        (res, mid) = self.mqttc.publish('navigator/mode', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('mode', payload, source='navigator')
+        print("STARTNAV", payload)
 
     def StopNav(self):
         payload = {}
         payload['captureMode'] = 'none'
-        (res, mid) = self.mqttc.publish('cameraman/orders', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('orders', payload, source='cameraman')
         #
         time.sleep(1)
         payload = {}
         payload['speed'] = 0
-        (res, mid) = self.mqttc.publish('helmsman/orders', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('orders', payload, source='helmsman')
         #
         payload = {}
         payload['mode'] = 'M'
         payload['missionName'] = self.mission_name.get()
-        (res, mid) = self.mqttc.publish('navigator/mode', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('mode', payload, source='navigator')
 
     def ProcessImage(self):
         self.f1_fname.set(self.pic_fn)

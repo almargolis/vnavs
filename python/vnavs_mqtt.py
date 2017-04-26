@@ -646,7 +646,7 @@ class mqtt_node(object):
             handler_name = handler_method_prefix + this_topic.replace('/', '_')
             handler_method = getattr(self, handler_name, None)
             if handler_method is None:
-                if self.wildcardHandlerName is None:
+                if self.wildcardHandler is None:
                     print("No message handler for topic '%s'" % (this_topic))
             self.handlers[this_topic] = handler_method
             if this_topic in self.subscriptions:
@@ -670,6 +670,8 @@ class mqtt_node(object):
 
     def PublishAck(self, payload, error=None):
         # Info about original message is always there thanks to Publish()
+        if not '_sender' in payload:
+            print("SENDER", payload)
         sender = payload['_sender']
         sourceTopic = payload['_topic']
         sourceSource = payload['_source']
