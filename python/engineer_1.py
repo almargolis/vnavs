@@ -52,6 +52,9 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.sense = SenseHat()
         self.sense.set_imu_config(False, True, False)
         self.last_position_message_time = time.time()
+        self.speed_forward = 0
+        self.speed_sideways = 0
+        self.speed_last_time = None
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
@@ -73,6 +76,22 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             except pynmea2.ParseError:
                 print("PARSE ERROR")
                 gps_parsed = None
+        #
+        # Estimate speed using accelerometer
+        #
+        if self.speed_last_time is None:
+            self.speed_last_time = time.time()
+        now = time.time()
+        interval = now - self.speed_last_time
+        self.speed_last_time = now
+        if self.speed < 0.03:
+            self.speed_forward = 0
+            self.speed_sideways = 0
+        else:
+            accel = self.sense.get_accelerometer_raw()
+            self.speed_forward += (accel['x'] * interval)
+            self.speed_sideways += (accel['y'] * interval)
+        #
         if gps_parsed is not None:
             if gps_parsed.sentence_type == 'GSA':
                 # This might help determine if readings are meaningful
@@ -151,6 +170,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             self.Publish('imu', payload)
             self.last_position_message_time = time.time()
             self.stats.Count('ImuMsg')
+            print("ACCC %+8.4f %+8.4f %+8.4f" % (self.speed_forward, self.speed_sideways, self.speed))
         self.stats.Print('MSGS')
 
 def TestImu():
@@ -162,6 +182,50 @@ def TestImu():
         p = o
         time.sleep(0.1)
 
+def TestSensors():
+    sense = SenseHat()
+    v = {}
+    for s in 'gma':
+        for a in 'xyz':
+            v[s+a] = [None, None]
+    t = time.time()
+    prev_time = t
+    speed = 0
+    max_speed = 0
+    #
+    while True:
+        n = {}
+        n['g'] = sense.get_gyroscope_raw()
+        n['m'] = sense.get_compass_raw()
+        n['a'] = sense.get_accelerometer_raw()
+        #
+        now = time.time()
+        interval = now - prev_time
+        prev_time = now
+        speed += (n['a']['x'] + 0.062) * interval * 32.0
+        if speed > max_speed:
+            max_speed = speed
+        #
+        for s in 'gma':
+            d = n[s]
+            for a in 'xyz':
+                if v[s+a][0] is None:
+                    v[s+a][0] = d[a]
+                    v[s+a][1] = d[a]
+                if d[a] < v[s+a][0]:
+                    v[s+a][0] = d[a]
+                if d[a] > v[s+a][1]:
+                    v[s+a][1] = d[a]
+        if (time.time() - t > 5):
+            break
+    for s in 'gma':
+        for a in 'xyz':
+            print("%s %s %+8.4f %+8.4f" % (s, a, v[s+a][0], v[s+a][1]))
+    print("SPEED", speed, max_speed)
+    
+
+
+
 def RunNode():
     h = engineer_1()
     h.Loop()
@@ -172,3 +236,5 @@ if __name__ == '__main__':
         RunNode()
     elif sys.argv[1] == 'testimu':
         TestImu()
+    elif sys.argv[1] == 'testsen':
+        TestSensors()
