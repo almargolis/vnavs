@@ -38,22 +38,27 @@ OVERSTEER_ADJUSTMENT = 0.5
 class Mission(object):
     def __init__(self, MissionDir, MissionName=None):
         self.missionDir = MissionDir
+        self.missionName = None
         self.Init(MissionName=MissionName)
 
     def Init(self, MissionName=None):
         if MissionName is not None:
             # If supplied, this is a permanent change.
             # But keep previous if not specified, this is a reset.
-            self.missionName = Mission
+            self.missionName = MissionName
+        if self.missionName is None:
+            self.missionName = 'test'
         self.waypoints = []
         self.waypointIx = 0
         self.navpoints = []
+        self.LoadMission()
 
     def LoadMission(self, MissionName=None):
+        print("LOAD", self.missionDir, self.missionName, MissionName)
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_dir) + '.mis'
+        fp = os.path.join(self.missionDir, mission_name) + '.mis'
         f = open(fp, "r")
         for this in f.readlines():
             parts = this.split(',')
@@ -66,7 +71,7 @@ class Mission(object):
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_dir) + '.mis'
+        fp = os.path.join(self.missionDir, mission_name) + '.mis'
         f = open(fp, "w")
         for p in self.waypoints:
             f.write(u'W,%f,%f\n' % (p[1][0], p[1][1]))
@@ -76,7 +81,7 @@ class Mission(object):
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_dir) + '.nav'
+        fp = os.path.join(self.missionDir, mission_name) + '.nav'
         f = open(fp, "w")
         for p in self.waypoints:
             if p[0] == 'W':
@@ -107,7 +112,7 @@ class NavStep(object):
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/service',
+        super().__init__(Subscriptions=['navigator/mode', 'navigator/service',
 					'engineer_1/gps', 'engineer_1/imu',
 					'cameraman/last'
 					],
@@ -119,7 +124,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.speed = None
         self.heading = None
         self.imageFn = None
-        self.imageRequested = False
+        self.imageRequested = None
         self.latitude = 0
         self.pausedMode = None
         self.missionName = None
@@ -127,10 +132,9 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.mapCt = 0
         self.new_gps_payload = None
         self.new_imu_payload = None
-        self.new_mode = None
-        self.serviceNames = ['ClearWaypaoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
+        self.new_mode_payload = None
+        self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
         self.serviceRequests = []
-        self.gpsAction = ''
         self.gpsReadyForNavigation = False
         #self.gpsRequested = False
         self.Init()
@@ -273,18 +277,21 @@ class navigator(vnavs_mqtt.mqtt_node):
 
     def rmsg_cameraman_last(self, payload):
         self.imageFn = payload['filename']
+        print("LAST", payload)
 
     def rmsg_navigator_mode(self, payload):
         new_mode = payload['mode']
         if new_mode not in "GMPR":
             return 'invalid mode'
-        self.new_mode = new_mode
+        self.new_mode_payload = payload
+        print("MODE_MSG", payload)
 
     def ChangeMode(self):
-        mode = self.new_mode
-        self.new_mode = None
-        if mode is None:
+        payload = self.new_mode_payload
+        self.new_mode_payload = None
+        if payload is None:
             return
+        mode = payload['mode']
         print("MODE", mode)
         if mode == 'R':
             if self.pausedMode is not None:
@@ -304,6 +311,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 if self.mission.waypoints[self.mission.waypointIx][0] == "W":
                     self.nav.untrustedGpsUpdates = INITIAL_GPS_WAIT		# allow gps to settle
                     self.PublishNavigation() 
+            print("MISSION", self.mission.waypoints)
             if (mode == "M") and (self.mode == "G"):
                 # end of gps naviagion
                 self.nav.Init()
@@ -322,14 +330,22 @@ class navigator(vnavs_mqtt.mqtt_node):
         if len(self.serviceRequests) < 1:
             return
         payload = self.serviceRequests.pop(0)
+        print("PROCESS", payload)
         request = payload['request']
         if request == 'ClearWaypoints':
             self.mission.Init()
         elif request == 'MarkWaypoint':
-            self.gpsAction = 'M'
+            self.mission.waypoints.append(('W', (self.latitude, self.longitude)))
         elif request == 'SaveWaypoints':
-            mission_name = payload['missionName']
+            if 'MissionName' in payload:
+                mission_name = payload['MissionName']
+            else:
+                mission_name = None
             self.mission.SaveMission(MissionName=mission_name)
+        payload = {}
+        payload['MissionName'] = self.mission.missionName
+        payload['WaypointCt'] = len(self.mission.waypoints)
+        self.Publish('status', payload)
 
     def rmsg_engineer_1_gps(self, payload):
         self.new_gps_payload = payload
@@ -368,15 +384,19 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.ChangeMode()
         if not self.LoadGpsPayload():
             self.LoadImuPayload()
+        # We might not want to ProcessSerivceRequest() here if any of them take much time.
+        # Maybe only run when in paused or manual mode.
+        self.ProcessServiceRequest()
         #
         if not self.mqttcConnected:
             return
         if (self.mode == 'G') and (len(self.mission.waypoints) > 0) and (self.mission.waypoints[self.mission.waypointIx][0] == "M"):
-            print("MAGIC")
+            #print("MAGIC")
             if self.imageFn is None:
-                if not self.imageRequested:
+                if (self.imageRequested is None) or ((time.time() - self.imageRequested) > 1.0):
+                    print("REQUEST IMAGE")
                     self.Publish('ask_last', {}, source='cameraman')
-                    self.imageRequested = True
+                    self.imageRequested = time.time()
                 return
             fp = os.path.join(self.imageDir, self.imageFn)
             print("image", fp)
@@ -385,6 +405,8 @@ class navigator(vnavs_mqtt.mqtt_node):
                 print("IM RETRY")
                 time.sleep(0.5)
                 im = cv2.imread(fp)
+                if im is None:
+                    return
             r = OpticChiasm.Robogames(im, [OpticChiasm.HSV_MASK_YELLOW])
             r.ProcessLines()
             r.FilterLines()
@@ -428,11 +450,6 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.nav.untrustedGpsUpdates -= 1
                 self.gpsReadyForNavigation = False
         if self.gpsReadyForNavigation:
-            if self.gpsAction == 'M':
-                # check if repeat ??
-                self.mission.waypoints.append(('W', (self.latitude, self.longitude)))
-                self.gpsAction = ''
-                print(self.mission.waypoints)
             if (self.mode == 'G') and (len(self.mission.waypoints) > 0):
                 print("GPS")
                 check_yaw = False
