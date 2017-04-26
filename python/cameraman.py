@@ -80,10 +80,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         payload = {}
         payload['filename'] = self.last_fn
         payload['CaptureFormat'] = self.last_format
-        (res, mid) = self.mqttc.publish('cameraman/last', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
-
+        self.Publish('last', payload)
 
     def ValidateMessage(self, specs, payload):
         for this_spec in specs:
@@ -163,18 +160,14 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 directions['heading'] = 'RR-' + steering_angle
             else:
                 directions['heading'] = 'RL+' + steering_angle
-        (res, mid) = self.mqttc.publish('helmsman/orders', json.dumps(directions))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('orders', directions, source='helmsman')
         #
         self.last_fn = annotated_fn
         self.last_format = 'jpeg'
         payload = {}
         payload['filename'] = self.last_fn
         payload['format'] = self.last_format
-        (res, mid) = self.mqttc.publish('cameraman/last', json.dumps(payload))
-        if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+        self.Publish('last', payload)
 
     def ImageBurst(self):
         # establish paramters for this burst. Since MQTT is running in a separate thread
@@ -262,9 +255,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     payload['captureFormat'] = captureFormat
                     payload['capturePublish'] = capturePublish
                     if time.time() - last_time > 2:
-                        (res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
-                        if res != mqtt.MQTT_ERR_SUCCESS:
-                            print("MQTT Publish Error")
+                        self.Publish('pic_ready', payload)
                         last_time = time.time()
                 if capturePublish == 'race':
                     assert burst_loopPublish == 'stream'

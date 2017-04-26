@@ -38,6 +38,7 @@ OVERSTEER_ADJUSTMENT = 0.5
 class Mission(object):
     def __init__(self, MissionDir, MissionName=None):
         self.missionDir = MissionDir
+        self.missionName = None
         self.Init(MissionName=MissionName)
 
     def Init(self, MissionName=None):
@@ -45,15 +46,18 @@ class Mission(object):
             # If supplied, this is a permanent change.
             # But keep previous if not specified, this is a reset.
             self.missionName = Mission
+        if self.missionName is None:
+            self.missionName = 'test'
         self.waypoints = []
         self.waypointIx = 0
         self.navpoints = []
+        self.LoadMission()
 
     def LoadMission(self, MissionName=None):
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_dir) + '.mis'
+        fp = os.path.join(self.missionDir, mission_name) + '.mis'
         f = open(fp, "r")
         for this in f.readlines():
             parts = this.split(',')
@@ -66,7 +70,7 @@ class Mission(object):
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_dir) + '.mis'
+        fp = os.path.join(self.missionDir, mission_name) + '.mis'
         f = open(fp, "w")
         for p in self.waypoints:
             f.write(u'W,%f,%f\n' % (p[1][0], p[1][1]))
@@ -76,7 +80,7 @@ class Mission(object):
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_dir) + '.nav'
+        fp = os.path.join(self.missionDir, mission_name) + '.nav'
         f = open(fp, "w")
         for p in self.waypoints:
             if p[0] == 'W':
@@ -128,9 +132,8 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.new_gps_payload = None
         self.new_imu_payload = None
         self.new_mode = None
-        self.serviceNames = ['ClearWaypaoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
+        self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
         self.serviceRequests = []
-        self.gpsAction = ''
         self.gpsReadyForNavigation = False
         #self.gpsRequested = False
         self.Init()
@@ -304,6 +307,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 if self.mission.waypoints[self.mission.waypointIx][0] == "W":
                     self.nav.untrustedGpsUpdates = INITIAL_GPS_WAIT		# allow gps to settle
                     self.PublishNavigation() 
+            print("MISSION", self.mission.waypoints)
             if (mode == "M") and (self.mode == "G"):
                 # end of gps naviagion
                 self.nav.Init()
@@ -322,14 +326,22 @@ class navigator(vnavs_mqtt.mqtt_node):
         if len(self.serviceRequests) < 1:
             return
         payload = self.serviceRequests.pop(0)
+        print("PROCESS", payload)
         request = payload['request']
         if request == 'ClearWaypoints':
             self.mission.Init()
         elif request == 'MarkWaypoint':
-            self.gpsAction = 'M'
+            self.mission.waypoints.append(('W', (self.latitude, self.longitude)))
         elif request == 'SaveWaypoints':
-            mission_name = payload['missionName']
+            if 'MissionName' in payload:
+                mission_name = payload['MissionName']
+            else:
+                mission_name = None
             self.mission.SaveMission(MissionName=mission_name)
+        payload = {}
+        payload['MissionName'] = self.mission.missionName
+        payload['WaypointCt'] = len(self.mission.waypoints)
+        self.Publish('status', payload)
 
     def rmsg_engineer_1_gps(self, payload):
         self.new_gps_payload = payload
@@ -368,6 +380,9 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.ChangeMode()
         if not self.LoadGpsPayload():
             self.LoadImuPayload()
+        # We might not want to ProcessSerivceRequest() here if any of them take much time.
+        # Maybe only run when in paused or manual mode.
+        self.ProcessServiceRequest()
         #
         if not self.mqttcConnected:
             return
@@ -428,11 +443,6 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.nav.untrustedGpsUpdates -= 1
                 self.gpsReadyForNavigation = False
         if self.gpsReadyForNavigation:
-            if self.gpsAction == 'M':
-                # check if repeat ??
-                self.mission.waypoints.append(('W', (self.latitude, self.longitude)))
-                self.gpsAction = ''
-                print(self.mission.waypoints)
             if (self.mode == 'G') and (len(self.mission.waypoints) > 0):
                 print("GPS")
                 check_yaw = False
