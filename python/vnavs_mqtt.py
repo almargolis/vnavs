@@ -594,6 +594,8 @@ class Counters(object):
 #
 class mqtt_node(object):
     def __init__(self, SourceName=None, Subscriptions=[], Readers=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+        self.vnavs_pid = int(time.time())		# non-repeating with ~ 1 second
+        self.vnavs_mid = 0				# Publish() sequence
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.blocking_mode = Blocking
@@ -798,19 +800,30 @@ class mqtt_node(object):
         payload['_source'] = source
         payload['_sender'] = self.sourceName
         payload['_sendTime'] = time.time()
+        payload['_sendPid'] = self.vnavs_pid
+        self.vnavs_mid += 1
+        payload['_sendSeq'] = self.vnavs_mid
         res, mid = self.mqttc.publish(fqnTopic, json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
 
-    def PublishAck(self, payload, error=None):
+    def PrepareResponse(self, payload):
+        # Prepares payload to be used as a response.
+        # Copy identifier fields so recipients can match source message
+        # so it knows request is completed and where to continue its process.
         # Info about original message is always there thanks to Publish()
-        if '_sender' not in payload:
-            print("SENDER", payload)
-        sender = payload['_sender']
         sourceTopic = payload['_topic']
         sourceSource = payload['_source']
         payload['_ackSourceTopic'] = sourceTopic
         payload['_ackSourceSource'] = sourceSource
+        payload['_ackPid'] = payload['_sendPid']
+        payload['_ackSeq'] = payload['_sendSeq']
+
+    def PublishAck(self, payload, error=None):
+        self.PrepareResponse(payload)
+        if '_sender' not in payload:
+            print("SENDER", payload)
+        sender = payload['_sender']
         if not ('_ack' in payload):
             # ack was not requested, so only send if there was an error
             if error is None:

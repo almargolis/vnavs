@@ -3,18 +3,15 @@ from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
 import cv2
-import json
 import math
 import numpy as np
 import os
 from geopy.distance import great_circle
-from PIL import Image, ImageDraw
 import sys
 import time
 
 import vnavs_mqtt
 import OpticChiasm
-import paho.mqtt.client as mqtt
 
 WAYPOINT_WINDOW_METERS = 2.0
 STEER_STRAIGHT_HEADING = 10.0
@@ -67,6 +64,13 @@ class Mission(object):
                 self.waypoints.append(('W', (float(parts[1]), float(parts[2]))))
             elif parts[0] == 'M':			# Magic
                     self.waypoints.append(('M', parts[1]))
+
+    def WayPoints(self):
+        waypoints = []
+        for p in self.waypoints:
+            if p[0] == 'W':
+                waypoints.append(p[1])
+        return waypoints
 
     def SaveMission(self, MissionName=None):
         mission_name = self.missionName
@@ -129,8 +133,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.latitude = 0
         self.pausedMode = None
         self.missionName = None
-        self.map = Map()
-        self.mapCt = 0
         self.new_gps_payload = None
         self.new_imu_payload = None
         self.new_mode_payload = None
@@ -143,19 +145,8 @@ class navigator(vnavs_mqtt.mqtt_node):
     def Init(self, MissionName=None):
         self.nav = NavStep()
         self.navSteps = []
-        self.map.InitMap()
         self.mode = "M"
         self.mission = Mission(self.missionDir, MissionName=MissionName)
-
-    def WriteMap(self):
-        self.mapCt += 1
-        im_fn = 'Map_%d.jpeg' % self.mapCt
-        im_fp = os.path.join(self.imageDir, im_fn)
-        self.map.SaveMap(im_fp)
-        payload = {}
-        payload['filename'] = im_fn
-        payload['captureFormat'] = 'jpeg'
-        self.Publish('pic_ready', payload, source='cameraman')
 
     def NavigateTowardWaypoint(self, ix):
         # should be reworked using GeographicLib ??
@@ -335,6 +326,9 @@ class navigator(vnavs_mqtt.mqtt_node):
         payload = self.serviceRequests.pop(0)
         print("PROCESS", payload)
         request = payload['request']
+        self.PrepareResponse(payload)
+        payload['MissionName'] = self.mission.missionName
+        payload['WaypointCt'] = len(self.mission.waypoints)
         if request == 'ClearWaypoints':
             self.mission.Init()
         elif request == 'MarkWaypoint':
@@ -345,9 +339,14 @@ class navigator(vnavs_mqtt.mqtt_node):
             else:
                 mission_name = None
             self.mission.SaveMission(MissionName=mission_name)
-        payload = {}
-        payload['MissionName'] = self.mission.missionName
-        payload['WaypointCt'] = len(self.mission.waypoints)
+        elif request == 'MakeWaypointMap':
+            mission_map = MissionMap(waypoints=self.mission.Waypoints())
+            map_fn = 'Map_%s_%s_%s.jpeg' % (payload['_sender'], payload['_sendPid'], payload['_sendSeq'])
+            map_fp = os.path.join(self.imageDir, map_fn)
+            mission_map.SaveMap(map_fp)
+            payload['filename'] = map_fn
+            payload['captureFormat'] = 'jpeg'
+
         self.Publish('status', payload)
 
     def rmsg_engineer_1_gps(self, payload):
@@ -512,7 +511,7 @@ class navigator(vnavs_mqtt.mqtt_node):
             else:
                 return False			# manuever continuing
 
-class Map(object):
+class MissionMap(object):
     def __init__(self, waypoints=None, navpoints=None):
         self.waypoints = waypoints
         self.navpoints = navpoints
@@ -625,8 +624,6 @@ class Map(object):
         self.mapScalePixelsPerMeter = 0.0
         self.originOffsetMetersX = 0.0
         self.originOffsetMetersY = 0.0
-        #self.map = Image.new('RGB', (self.mapSizePixels, self.mapSizePixels), color="white")
-        #self.mapDraw = ImageDraw.Draw(self.map)
         self.map = np.zeros((self.mapSizePixels, self.mapSizePixels, 3), np.uint8)
         self.map[:] = (255, 255, 255)
 
@@ -665,7 +662,7 @@ def TestMap():
 			(37.6272, -122.4541),
 			(38.6276, -123.4522)
 		]
-    m = Map(waypoints)
+    m = MissionMap(waypoints)
     m.Save()
             
 def TestNav():
@@ -743,7 +740,7 @@ def RunMap():
             waypoints.append((float(parts[1]), float(parts[2])))
         elif parts[0] == 'N':
             navpoints.append((float(parts[1]), float(parts[2])))
-    m = Map()
+    m = MissionMap()
     m.FindExtentsLatLong(waypoints=waypoints, navpoints=navpoints)
     m.PlotWaypoints()
     m.PlotNavpoints()
