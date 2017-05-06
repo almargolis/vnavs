@@ -1,18 +1,10 @@
 from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
-from Tkinter import *		# python 2.7
-from tkinter import ttk	# python 3
-from tkinter import Canvas
-import tkFileDialog
-#from Tkinter import *		# python 2.7
-#import ttk			# python 2.7
 
-import base64
 import json
 import math
 import os
-import pickle
 import sys
 import traceback
 from PIL import ImageTk, Image
@@ -23,6 +15,7 @@ import time
 import cv2
 import numpy as np
 
+import easytk
 import OpticChiasm
 import vnavs_mqtt
 
@@ -35,324 +28,6 @@ BOT_1_MAP_TRANSPOSE = [
 
 BOT_1_H = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
-SAME_ROW = -1
-NEXT_ROW = -2
-NEXT_COL = -3
-
-class TkWidgetDef(object):
-    root = None
-
-    def __init__(self, wname, tkw, Data=None, tkw_label=None, parm_id=None):
-        self.wname = wname		# reference name for this widget
-        self.tkw = tkw			# tk widget
-        self.tkw_label = tkw_label	# tk widget of associated label
-        self.tkd = Data			# the tk data (usually StringVar) for this widget
-        self.hbar = None
-        self.vbar = None
-        self.opencv_im = None
-        self.row = None			# row where positioned
-        self.col = None			# col where positioned (left side)
-        self.right_col = None		# furthest right colum used
-        self.last_row = 0		# not necesarilly, highest used. for sequential positioning
-        self.last_col = 0		# not necesarilly highest used. for sequential positioning
-        self.row_ct = 0			# height of this TkWidgetDef object (# of rows)
-        self.col_ct = 0			# width of this TkWidgetDef object (# of columns)
-        self.thumbnail = None		# update this thumbnail if image is changed
-        self.thumbnailwidth = 0		# width of thumbnail
-        self.children = []
-        self.canvasWidth = 400
-        self.canvasHeight = 200
-        self.parm_id = parm_id		# associated application field, not directly used for TK stuff
-        if self.root is None:
-            self.root = self
-
-        self.file_opt = options = {}
-        options['defaultextension'] = '.txt'
-        #specifying file types on OSX seems limit what can be selected
-        # osx doesn't have an option to select the file categories
-        #options['filetypes'] = [('all files', '.*'), ('text files', '.txt')]
-        options['initialdir'] = 'C:\\'
-        options['initialfile'] = 'myfile.txt'
-        options['title'] = 'This is a title'
-
-    def DoFileNameDialog(self):
-        self.file_opt['parent'] = self.tkw
-        return tkFileDialog.askopenfilename(**self.file_opt)
-
-    def DoFileOpenDialog(self):
-        return tkFileDialog.askopenfile(mode='r', **self.file_opt)
-
-    def AddButton(self, caption, command, row=-2, col=-2):
-        row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
-        frame = TkWidgetDef(refname, ttk.Button(self.tkw, text=caption, command=command))
-        frame.tkw.grid(row=row, column=col)
-        self.RememberPosition(frame, row, col, 1)
-        self.children.append(frame)
-        return frame
-
-    def AddEntryField(self, caption, Width=10, Value='', row=-2, col=-2):
-        row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
-
-        tk_data = StringVar()
-        tk_data.set(Value)
-        tk_label = ttk.Label(self.tkw, text=caption)
-        tk_label.grid(column=col, row=row, sticky=W)
-        tk_entry = ttk.Entry(self.tkw, width=Width, textvariable=tk_data)
-        tk_entry.grid(column=col+1, row=row, sticky=(W, E))
-        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
-        self.RememberPosition(frame, row, col, 2)
-        self.children.append(frame)
-        return frame
-
-    def UpdateEntryField(self, Value='', Caption=None):
-        self.tkd.set(Value)
-        if Caption is not None:
-            self.tkw_label.config(text=Caption)
-
-    def AddLabel(self, text='', Width=10, Value='', row=-2, col=-2):
-        refname = 'X'
-        row, col = self.Position(row=row, col=col)
-        tk_label = ttk.Label(self.tkw, text=text)
-        tk_label.grid(column=col, row=row, sticky=W)
-        frame = TkWidgetDef(refname, tk_label)
-        self.RememberPosition(frame, row, col, 1)
-        self.children.append(frame)
-        return frame
-
-    def UpdateLabel(self, text):
-        self.tkw.config(text=text)
-
-    def AddListbox(self, caption, s_items, Selection=None, row=-2, col=-2, height=5, rowspan=0, Command=None):
-        row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
-
-        tk_data = StringVar()
-        tk_data.set('')
-        tk_label = ttk.Label(self.tkw, text=caption).grid(column=0, row=self.last_row, sticky=W)
-        scrollbar = ttk.Scrollbar(self.tkw, orient=VERTICAL)
-        tk_entry = Listbox(self.tkw, yscrollcommand=scrollbar.set, exportselection=0)
-        tk_entry.config(height=height)
-        #tk_entry = Listbox(self.tkw, exportselection=0)
-        scrollbar.config(command=tk_entry.yview)
-        for this_item in s_items:
-            tk_entry.insert(END, this_item)
-        if Command is not None:
-            tk_entry.bind("<Double-Button-1>", Command)
-        if Selection is None:
-            active_index = 0
-        else:
-            try:
-                active_index = s_items.index(Selection)
-            except ValueError:
-                active_index = 0
-        tk_entry.selection_set(active_index)
-        tk_entry.see(active_index)
-        parms = {'column': 1, 'row': self.last_row, 'sticky': (W, E) }
-        if rowspan > 0:
-            parms['rowspan'] = rowspan
-        tk_entry.grid(**parms)
-        if self.col_ct < 2:
-            self.col_ct = 2
-        frame = TkWidgetDef(refname, tk_entry, Data=tk_data)
-        self.RememberPosition(frame, row, col, 2)
-        self.children.append(frame)
-        return frame
-
-    def CurrentValue(self):
-        if isinstance(self.tkw, ttk.Entry):
-            v = self.tkd.get()
-            print("CurrentValue", v)
-            return v
-        if isinstance(self.tkw, Listbox):
-            # ix is a tuple like (2,). I assume the 2nd element would be the end of
-            # the range. Or maybe it a list of items for multi-selection.
-            # This works for now.
-            ix = self.tkw.curselection()
-            return self.tkw.get(ix)
-         
-    def MakeThumbnail(self, im, width):
-        if im is None:
-            return None
-        if len(im.shape) > 2:
-            ih, iw, ic = im.shape
-        else:
-            ih, iw = im.shape
-            ic = 1
-        tw = width
-        th = int((tw / iw) * ih)
-        t = cv2.resize(im, (tw, th), interpolation=cv2.INTER_LINEAR)
-        return t
-
-    def Position(self, row=-2, col=-2):
-        if row == -1:
-            # same row as the previous item
-            row = self.last_row
-        elif row == -2:
-            # next sequential row
-            self.last_row += 1
-            row = self.last_row
-        elif row == -3:
-            # row below everything else
-            row = self.row_ct + 1
-        if col == -2:
-            # use current column -- consisten with row -2 for most common sequential position
-            col = self.last_col
-        elif col == -3:
-            # use next column to right of everything else
-            col = self.col_ct + 1
-        return (row, col)
-
-    def RememberPosition(self, new_TkWidgetDef, row, col, colspan=1, rowspan=1):
-        new_TkWidgetDef.row = row
-        new_TkWidgetDef.col = col
-        new_TkWidgetDef.col_ct = colspan
-        new_TkWidgetDef.row_ct = rowspan
-        new_TkWidgetDef.right_col = col + colspan - 1
-        self.last_row = row
-        self.last_col = col
-        if row > self.row_ct:
-            self.row_ct = row
-        if new_TkWidgetDef.right_col > self.col_ct:
-            self.col_ct = new_TkWidgetDef.right_col
-
-    def AddCanvas(self, fp=None, opencv=None, opencvfn=None, 
-				thumbnailof=None, thumbnailwidth=100,
-				width=400, height=200,
-				row=-2, col=-2, colspan=1, rowspan=1):
-        row, col = self.Position(row=row, col=col)
-        canvas = Canvas(self.tkw, width=width, height=height)
-        frame = TkWidgetDef('', canvas)
-
-        # The scrollbars are TK properties of the same frame as as the canvas.
-        # We save the widget definitions with the canvas.
-        frame.scrollableImage = None
-        frame.canvasWidth = width
-        frame.canvasHeight = height
-        frame.hbar=ttk.Scrollbar(self.tkw, orient=HORIZONTAL)
-        frame.hbar.grid(row=row+1, column=col, sticky=E+W)
-        frame.vbar=ttk.Scrollbar(self.tkw, orient=VERTICAL)
-        frame.vbar.grid(row=row, column=col+1, sticky=N+S)
-        frame.tkw.config(width=frame.canvasWidth, height=frame.canvasHeight)
-        self.AttachScrollbars()
-
-        if thumbnailof is None:
-            frame.UpdateImage(fp=fp, opencv=opencv, opencvfn=opencvfn)
-        else:
-            # after this, the thumbnail will be automatically updated whenever the base image is updated
-            frame.UpdateImage(opencv=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
-            thumbnailof.thumbnail = frame
-            thumbnailof.thumbnailwidth = thumbnailwidth
-      
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=W)
-        # colspan and rowspan need to be expanded to allow for scrollbars ???
-        self.RememberPosition(frame, row, col, colspan=colspan+1, rowspan=rowspan+1)
-        self.children.append(frame)
-        return frame
-
-    def AttachScrollbars(self):
-        if self.hbar is not None:
-            self.hbar.config(command=self.tkw.xview)
-            self.tkw.config(xscrollcommand=self.hbar.set)
-        if self.vbar is not None:
-            self.vbar.config(command=self.tkw.yview)
-            self.tkw.config(yscrollcommand=self.vbar.set)
-
-    def AddLabelImage(self, fn=None, opencv=None, opencvfn=None, 
-				thumbnailof=None, thumbnailwidth=100,
-				row=-2, col=-2, colspan=1):
-        row, col = self.Position(row=row, col=col)
-        frame = TkWidgetDef('', ttk.Label(self.tkw))
-        if thumbnailof is None:
-            frame.UpdateImage(fn=fn, opencv=opencv, opencvfn=opencvfn)
-        else:
-            # after this, the thumbnail will be automatically updated whenever the base image is updated
-            frame.UpdateImage(opencv=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
-            thumbnailof.thumbnail = frame
-            thumbnailof.thumbnailwidth = thumbnailwidth
-      
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=W)
-        self.RememberPosition(frame, row, col, colspan)
-        self.children.append(frame)
-        return frame
-
-    def UpdateImage(self, fp=None, opencv=None, opencvfn=None):
-        # Replaces image in Canvas and Label widgets
-        img_pil = None
-        img_tk = None
-        if fp is not None:
-            try:
-                img_pil = Image.open(fp)
-            except IOError:
-                img_pil = None
-            self.opencv_im = None
-        elif opencv is not None:
-            img_pil = Image.fromarray(opencv)
-            self.opencv_im = opencv
-        elif opencvfn is not None:
-            opencv = cv2.imread(opencvfn)
-            self.opencv_im = opencv
-            img_pil = Image.fromarray(opencv)
-        #
-        if img_pil is not None:
-            imWidth = img_pil.width
-            if self.canvasWidth < imWidth:
-                imHeight = img_pil.height
-                height = int((self.canvasWidth / imWidth) * imHeight)
-                img_pil = img_pil.resize((self.canvasWidth, height))
-                print("RESIZE", self.canvasWidth, height)
-            img_tk = ImageTk.PhotoImage(img_pil)
-        self.tkd = img_tk
-        if img_tk is not None:
-            if isinstance(self.tkw, ttk.Label):
-                self.tkw.configure(image=img_tk)
-            elif isinstance(self.tkw, Canvas):
-                if self.scrollableImage is None:
-                    self.scrollableImage = self.tkw.create_image(0, 0, image=img_tk, anchor='nw')
-                else:
-                    self.tkw.itemconfig(self.scrollableImage, image=img_tk)
-                width, height = img_pil.size
-                self.tkw.config(scrollregion=(0, 0, width, height))
-                pctWidth = self.canvasWidth / width
-                if pctWidth > 1.0:
-                    pctWidth = 1.0
-                self.hbar.set(0.0, pctWidth)
-                pctHeight = self.canvasHeight / height
-                if pctHeight > 1.0:
-                    pctHeight = 1.0
-                self.vbar.set(0.0, pctHeight)
-            else:
-                raise TypeError("Unsupported image widget: " + self.tkw.__class__.__name__)
-        self.AttachScrollbars()
-        if self.thumbnail:
-            self.thumbnail.UpdateImage(opencv=self.MakeThumbnail(self.opencv_im, self.thumbnailwidth))
-
-    def AddLabelFrame(self, caption, row=-2, col=-2, colspan=1):
-        row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
-        frame = TkWidgetDef(refname, ttk.Labelframe(self.tkw, text=caption))
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=W)
-        self.RememberPosition(frame, row, col, colspan)
-        self.children.append(frame)
-        return frame
-
-    def AddNotebook(self, row=-2, col=-2, colspan=1):
-        row, col = self.Position(row=row, col=col)
-	frame = TkWidgetDef('', ttk.Notebook(self.tkw))
-        #frame.tkw.pack(expand="yes")
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=W)
-        self.RememberPosition(frame, row, col, colspan)
-        self.children.append(frame)
-        return frame
-
-    def AddTab(self, caption):
-        # Add a tab to notebook
-        refname = caption.lower().replace(' ', '_')
-        frame = TkWidgetDef(refname, ttk.Frame(self.tkw))
-        self.tkw.add(frame.tkw, text=caption)
-        self.children.append(frame)
-        return frame
 
 TEST_FILTER = 'bw'
 TEST_FILTER = 'crayola'
@@ -360,7 +35,7 @@ TEST_FILTER = 'crayola'
 # Filter functions should modify only:
 #	ProcessStep.annotation_base
 #	xstep.im
-# GetParm() must filter parameters to avoid code injection attacks 
+# GetParm() must filter parameters to avoid code injection attacks
 FILTERS = [
 		{'Name': 'None',		'Parms': [],
 						'Code': None,
@@ -439,9 +114,9 @@ class ProcessStep(object):
         #
         self.filter_selection = self.input_panel.AddListbox('Filters', self.filter_labels, Selection=cv_filter, Command=self.NewFilter, rowspan=4)
         self.parmEntries = []
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=-3)) 
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm2')) 
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm3')) 
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=-3))
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm2'))
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm3'))
         self.parmEntries.append(self.input_panel.AddEntryField('Parm4'))
         #
         self.image = self.output_panel.AddCanvas()
@@ -698,11 +373,11 @@ class ProcessStep(object):
             self.image.UpdateImage(opencv=im.copy())
         return
 
-            
-        
+
+
 class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=['archiver/pic_ready', 'cameraman/last', 'cameraman/pic_ready'],
+        super().__init__(Subscriptions=['cameraman/last'],
 					Blocking=True, BrokerType='F', BlockingTimeoutSecs=0.1,
 					Verbose=True)
         self.tk_is_initialized = False
@@ -718,13 +393,13 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.image.img_source_dir = '/volumes/pi/projects/vnavs/temp'
         self.image.img_fname_suffix = ''
 
-        self.tk = TkWidgetDef('root', Tk())
+        self.tk = easytk.EasyTk()
         self.tk.tkw.title("VNAVS OpenCV Visualizer")
-	self.statusFrame = self.tk.AddLabelFrame('Status', row=1)
-	self.thumbnailFrame = self.tk.AddLabelFrame('Thumbnails', row=2)
+        self.statusFrame = self.tk.AddLabelFrame('Status', row=1)
+        self.thumbnailFrame = self.tk.AddLabelFrame('Thumbnails', row=2)
         self.notebook = self.tk.AddNotebook(row=3)
-        self.camera_iso = self.statusFrame.AddEntryField('ISO', Value=800) 
-        self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', Value=10000, row=-1, col=-3) 
+        self.camera_iso = self.statusFrame.AddEntryField('ISO', Value=800)
+        self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', Value=10000, row=-1, col=-3)
         self.camera_snap = False
         self.camera_last_filename = ''
         self.camera_last_processed = True
@@ -741,7 +416,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         ProcessStep('CannyAuto')
         ProcessStep('Contours')
         #ProcessStep('HoughLinesP')
-        
+
         # self.f1_run_name_entry.focus()
 
     def ChooseImageFile(self):
@@ -753,45 +428,25 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
     def CaptureImageFile(self):
         self.camera_snap = True
-        settings = {}
+        payload = {}
         try:
-            settings['iso'] = int(self.camera_iso.CurrentValue())
+            payload['iso'] = int(self.camera_iso.CurrentValue())
         except TypeError:
             self.camera_iso.set(100)
         try:
-            settings['shutterSpeed'] = int(self.camera_shutter_speed.CurrentValue())
+            payload['shutterSpeed'] = int(self.camera_shutter_speed.CurrentValue())
         except TypeError:
             self.camera_shutter_speed.set(0)
-        settings['loopMode'] = 'run'
-        settings['loopFormat'] = 'bgr'
-        settings['loopPublish'] = 'stream'
-        settings['captureMode'] = 'single'
-        settings['captureFormat'] = 'jpeg'
-        settings['capturePublish'] = 'file'
-        settings_j = json.dumps(settings)
-        print("SNAP", settings_j)
-        self.mqttc.publish('cameraman/orders', settings_j)
+        payload['loopMode'] = 'run'
+        payload['loopFormat'] = 'bgr'
+        payload['loopPublish'] = 'stream'
+        payload['captureMode'] = 'single'
+        payload['captureFormat'] = 'jpeg'
+        payload['capturePublish'] = 'file'
+        print("SNAP", payload)
+        self.Publish('orders', payload, source='cameraman')
         time.sleep(1)
-        self.mqttc.publish('cameraman/ask_last', '')
-
-    def rmsg_archiver_pic_ready(self, payload):
-        return # -- there are too many of these to process
-        if not self.camera_snap:
-            return
-        fn = payload['filename']
-        fnp = os.path.join('temp', fn)
-        ifile = open(fnp, "rb")
-        buflen = int(payload['buflen'])
-        buffer = ifile.read()
-        bgr = pickle.loads(buffer)
-        opencv = bgr[...,::-1]
-        print("IMAGE", fn, buflen, len(buffer), opencv.shape)
-        cv2.imwrite('bgr.jpeg', opencv)
-        print("IMWRITE")
-        ProcessStep.steps[0].filter = 'CapturedImage'
-        ProcessStep.steps[0].colorspace = 'BGR'
-        ProcessStep.steps[0].opencv = opencv
-        ProcessStep.steps[0].UpdateAll()
+        self.Publish('ask_last', {}, source='cameraman')
 
     def rmsg_cameraman_last(self, payload):
         # Do as little as possible here in mqtt thread.
@@ -802,45 +457,6 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.camera_last_processed = False
         print("LAST", ProcessStep.steps[0].parm_values)
 
-    def rmsg_cameraman_pic_ready(self, payload):
-        return # -- there are too many of these to process
-        if not self.camera_snap:
-            return
-        fn = payload['filename']
-        format = payload['format']
-        buffer = None
-        buffer_len = 0
-        bgr = None
-        opencv = None
-        opencv_shape = None
-        if 'buflen' in payload:
-            buflen = int(payload['buflen'])
-        else:
-            buflen = 0
-        #im = base64.b64decode(payload['imageBGR64'])
-        #im = payload['imageBGR64']
-        if 'imageBGRpk' in payload:
-            buffer = payload['imageBGRpk']
-            buffer_len = len(buffer)
-            bgr = pickle.loads(buffer)
-            opencv = bgr[...,::-1]
-        publish = payload['publish']
-        if publish == 'f':
-            fn = os.path.join(self.imageDir, fn)
-            opencv = cv2.imread(fn)
-        if opencv is not None:
-            opencv_shape = opencv.shape
-        print("IMAGE", fn, buflen, buffer_len, opencv_shape)
-        #print("PIC", msg, fn)
-        #ProcessStep.steps[0].parms['opencvfn'] = fn
-        #opencv =  np.fromstring(im, dtype=np.uint8)
-        cv2.imwrite('bgr.jpeg', opencv)
-        print("IMWRITE")
-        ProcessStep.steps[0].filter = 'CapturedImage'
-        ProcessStep.steps[0].colorspace = 'BGR'
-        ProcessStep.steps[0].opencv = opencv
-        ProcessStep.steps[0].UpdateAll()
-
     def DoLoop(self):
         if not self.camera_last_processed:
             # There is a potential race condition with self.camera_last_processed being
@@ -848,10 +464,20 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             # program fee unresponsive but shouldn't cause real harm.
             # THIS ASSUMES capture to step zero, we should seatch for actual step.
             fpath = os.path.join(self.imageDir, self.camera_last_filename)
-            ProcessStep.steps[0].parm_values['opencvfn'] = fpath
-            ProcessStep.steps[0].filter = 'FileImage'
-            ProcessStep.steps[0].UpdateAll()
-            self.camera_last_processed = True
+            im = None
+            retry_ct = 0
+            while (im is None) and (retry_ct < 10):
+                im = cv2.imread(fpath)
+                if (im is None):
+                    if retry_ct > 10:
+                        break
+                    retry_ct += 1
+                    time.sleep(0.1)
+            if im is not None:
+                ProcessStep.steps[0].parm_values['opencvfn'] = fpath
+                ProcessStep.steps[0].filter = 'FileImage'
+                ProcessStep.steps[0].UpdateAll()
+                self.camera_last_processed = True
         self.tk.tkw.update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

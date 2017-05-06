@@ -1,8 +1,8 @@
 from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
-from tkinter import *		# python 3
-from tkinter import ttk	# python 3
+#from tkinter import *		# python 3
+#from tkinter import ttk	# python 3
 
 #from Tkinter import *		# python 2.7
 #import ttk			# python 2.7
@@ -33,12 +33,15 @@ BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=['cameraman/last', 'cameraman/pic_ready', 
+        super().__init__(Subscriptions=['cameraman/last',
 						'engineer_1/status',
 						'helmsman/orders',
 						'MissionControl/notice',
 						'navigator/status'
 						], 
+			Readers=[
+						'cameraman/pic_ready'
+						],
 						Blocking=True, BlockingTimeoutSecs=0.1,
 						BrokerType='F')
         self.lastfn = ""
@@ -56,6 +59,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.image.img_fname_suffix = ''
         self.image.do_save_snaps = False
         self.pic_fn = None
+        self.pic_last_time = time.time()
         self.pic_processed = False
         self.pic_requested = False
         self.pic_request_time = 0
@@ -241,10 +245,17 @@ class MissionControl(vnavs_mqtt.mqtt_node):
     def DoLoop(self):
         #speed = int(self.f1_speed_control.get())
         #self.f1_speed_display.configure(text=str(speed))
-        if (self.pic_fn is None) or (self.pic_fn == '') or self.pic_processed:
+        if (time.time() - self.pic_last_time) > 1.0:
+            image_info = self.Get('pic_ready', source='cameraman')
+            if image_info is not None:
+                if 'filename' in image_info:
+                    print("PICPIC", image_info)
+                    self.pic_fn = image_info['filename']
+                    self.ProcessImage()
+        #if (self.pic_fn is None) or (self.pic_fn == '') or self.pic_processed:
             pass
-        else:
-            self.ProcessImage()
+        #else:
+        #    self.ProcessImage()
         #if (not self.pic_requested) or ((time.time() - self.pic_request_time) > 1):
         #    print("ASK LAST")
         #    #self.mqttc.publish('cameraman/ask_last', '')
