@@ -20,12 +20,13 @@ WAYPOINT_WINDOW_METERS = 2.0
 STEER_STRAIGHT_HEADING = 10.0
 STEER_SHARP_HEADING = 90.0
 FORWARD_VERY_SLOW = 6
-FORWARD_SLOW = 6
-FORWARD_SLOW = 16
-FORWARD_FAST = 8
+FORWARD_SLOW = 4		# too slow for court (maybe depends on battery)
+FORWARD_SLOW = 6		# OK slow for court 
+FORWARD_SLOW = 16		# this is what it took to move well on grass at robogames
 FORWARD_FAST = 10
 FORWARD_FAST = 14
-FORWARD_FAST = 20
+FORWARD_FAST = 8
+FORWARD_FAST = 20		# robgames on grass
 FORWARD_FAST_METERS = 10
 REVERSE_SLOW = -4
 STOP_SPEED = 0
@@ -253,7 +254,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.navSteps.append(step)
 
         self.PublishNavigation()
-        self.navpoints.append(((self.latitude, self.longitude), self.nav.steering))
+        self.mission.navpoints.append(((self.latitude, self.longitude), self.nav.steering))
         print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.mission.waypoints[self.mission.waypointIx]))
         print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, hypotenuse,
 					deltaHeading, self.heading, waypointHeading, self.mission.waypointIx))
@@ -277,6 +278,8 @@ class navigator(vnavs_mqtt.mqtt_node):
 
     def rmsg_cameraman_last(self, payload):
         self.imageFn = payload['filename']
+        if self.imageFn == '':
+            self.imageFn
         print("LAST", payload)
 
     def rmsg_navigator_mode(self, payload):

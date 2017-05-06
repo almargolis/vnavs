@@ -61,13 +61,17 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.shutterSpeed = 0
         self.camera_resolution = (720, 480)
         self.camera = picamera.PiCamera()
+        self.camera.vflip = True
+        self.camera.hflip = True
+        self.camera.iso = self.iso
+        self.iso = self.camera.iso
+        self.camera.shutter_speed = self.shutterSpeed
         self.loopMode = 'pause'			# single, run, pause
         self.loopFormat = 'jpeg'		# jpeg, bgr
         self.loopPublish = 'file'
         self.captureMode = 'none'		# n=none, s=single, r=run
         self.captureFormat = 'jpeg'		# jpeg, bgr
         self.capturePublish = 'file'		# f=file system, m=mqtt, s=streamer
-        self.configuration_changed = True
         self.run = ''				# identifier to add to file names
         self.image_ct = 0			# ct of images captured since __init__
         time.sleep(2)				# camera setling time, needed?
@@ -116,21 +120,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.ValidateMessage(self.orders_parms, payload)
 
     def DoLoop(self):
-        # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.
-        #
-        #print("LOOP")
-        if self.configuration_changed:
-            # there is a small posibility of a race condition if a new configuration change
-            # arrives between this if and setting the flag to False. This should be
-            # infrequent enough and quick enough to recover that its not worth managing
-            # a propper queue or semaphore.
-            self.configuration_changed = False
-            self.camera_iso = self.iso
-            self.camera_resolution = self.camera_resolution
-            self.camera_shutter_speed = self.shutterSpeed		# microseconds, 1000 = 1ms
-            self.camera.vflip = True
-            self.camera.hflip = True
-            # self.camera.zoom = (0.5, 0.5, 0.5, 0.5)	# % x, y, w, h
+        # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
         self.ImageBurst()
 
@@ -288,6 +278,13 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 """
                 if self.verbose:
                     print("PIC", im_fn)
+            if self.camera.iso != self.iso:
+                # The camera may not use the exact ISO specified. Save the corrected value in
+                # self.iso so we don't keep repeating the request.
+                self.camera.iso = self.iso
+                self.iso = self.camera.iso
+            if self.camera.shutter_speed != self.shutterSpeed:
+                self.camera.shutter_speed = self.shutterSpeed
             if burst_loopPublish == 'stream':
                 # prepare for next image. This is needed even when not published
                 burst_dest.truncate()
@@ -297,9 +294,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
             if burst_loopMode == 'single':
                 # enter paused mode if we have taken our single picture
                 self.loopMode = 'pause'
-                break
-            if  self.configuration_changed:
-                # end burst so configuration can be changed
                 break
         if burst_ct >= 10:
             burst_time = time.time() - burst_start_time
