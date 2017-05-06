@@ -8,7 +8,6 @@ import os
 import Queue
 import select
 import socket
-import SocketServer
 import sys
 import threading
 import time
@@ -35,7 +34,7 @@ stop_process = False
 #
 # This process assumes that we have a network that is faster than storage (SDCARD).
 # We therefore manage memory to avoid hitting the swap disk.
-# Getting 
+# Getting
 #
 def Streamer(q, q_len, host_ip, host_socket):
     lifo = []
@@ -131,7 +130,7 @@ class socket_xfer(object):
             self.timer_start = timer_stop
 
 class SelectServer(object):
-    def __init__(self, IniSection=None, IsServer=True, Verbose=False):
+    def __init__(self, IniSection=None, IsServer=True, IsZeroOneProtocol=True, Verbose=False):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.broker_host = None
@@ -154,6 +153,7 @@ class SelectServer(object):
         # the RPI side of the communications (RPI <-> RPI) only (RPI <-> OSX).
         #
         self.isServer = IsServer
+        self.isZeroOneProtocol = IsZeroOneProtocol
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.server.setblocking(0)
@@ -275,7 +275,10 @@ class SelectServer(object):
                         self.disconnect()
                         raise
                 if data:
-                    self.ProcessData(s, data)
+                    if self.IsZeroOneProtocol:
+                        self.ProcessData(s, data)
+                    else:
+                        self.RecvData(s, data)
                 else:
                     # Interpret empty result as closed connection
                     self.CloseClientConnection(s)
@@ -304,6 +307,100 @@ class SelectServer(object):
                 self.disconnect()
                 raise
 
+    def BlockingWriteSocket(self, msg):
+        # For clients that want to block while sending
+        retry_ct = 0
+        while retry_ct < 10:
+            try:
+                self.server.sendall(msg)
+                return True
+            except socket.error:
+                # socket.error: [Errno 11] Resource temporarily unavailable
+                # need to check Errno - kept running even when server died
+                retry_ct += 1
+        return False
+
+class FileServer(SelectServer):
+    def __init__(self, Verbose=False):
+        super().__init__(IniSection="FileServer", Verbose=Verbose)
+
+    def ProcessMessage(self, s, message):
+        f = open(message[0], 'rb')
+        c = f.read()
+        f.close()
+        message = "{}\x00{}\x01".format(len(c), c)
+        self.outputQueues[s].put(message)
+
+class FileClient(SelectServer):
+    def __init__(self):
+        super().__init__(IniSection="FileClient", IsServer=False, IsZeroOneProtocol=False)
+        self.Init()
+
+    def Init(self):
+        self.file_name = None
+        self.file_out = None
+        self.buffer = ""
+        self.file_received = False
+
+    def GetFile(self, filename):
+        self.Init()
+        self.connect()
+        self.file_name = filename
+        self.file_out = open(filename, "wb")
+        message = "{}\x01".format(filename)
+        msg_sent = super().BlockingWriteSocket(message)
+        if not msg_sent:
+            return False
+        while not self.file_received:
+            self.loop()
+        return True
+
+    def RecvData(self, s, data):
+        self.buffer += data
+        p = self.buffer.find('\x00')
+        if p > 0:
+            file_len = int(self.buffer[:p])
+            buf_len = p + file_len + 2
+            if len(self.buffer) == buf_len:
+                self.file_out.write(self.buffer[p+1:-1])
+                self.file_out.close()
+                self.file_received = True
+
+class MessageArchiver(object):
+    def __init__(self):
+        self.archive_buffer = []
+        self.archive_size = 0
+        self.archive_file = None
+
+    def Open(self, MissionName):
+        fp = MissionName + 'nav'
+        self.archive_file = open(fp, 'w')
+        self.archive_buffer = []
+        self.archive_size = 0
+
+    def Close(self):
+        if self.archive_file is None:
+            return
+        self.WriteBuffer()
+        self.archive_file.close()
+        self.archive_file = None
+        
+    def Archive(self, mid, ptime, payload):
+        # message id, server publish time, json string payload
+        if self.archive_file is None:
+            return
+        self.archive_buffer.append("{}\x00{}\x00{}\x01".format(mid, ptime, payload))
+        self.archive_size += len(payload)
+        if self.archive_size >= 4096:
+            self.WriteBuffer()
+
+    def WriteBuffer(self):
+        if len(self.archive_buffer) < 1:
+            return
+        self.archive_file.write(u"".join(self.archive_buffer))
+        self.archive_buffer = []
+        self.archive_size = 0
+
 #
 # FastMqttServer is a simplified broker that is much faster thean mosquitto.
 # It supports publish/subscribe with less chance of blockage due to increased
@@ -323,6 +420,7 @@ class FastMqttServer(SelectServer):
         self.subscriptions = {}
         self.message_in_ct = 0
         self.message_out_ct = 0
+        self.archiver = MessageArchiver()
 
     def ProcessMessage(self, s, message):
         if message[0] == '':
@@ -330,6 +428,7 @@ class FastMqttServer(SelectServer):
         action = message[0]
         if action == 'publish':
             self.message_in_ct += 1
+            server_time = time.time()
             topic = message[1]
             payload = message[2]
             self.mqttPayloads[topic] = (self.message_in_ct, payload)
@@ -343,6 +442,15 @@ class FastMqttServer(SelectServer):
                         newSubscriptionList.append(sendSocket)
                         self.SendMessage(sendSocket, topic)
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
+            if topic == 'navigator/mode':
+                payload_dict = json.loads(payload)
+                mode = payload_dict['mode']
+                if (mode == 'G') and (self.archiver.archive_file is None):
+                    mission_name = payload_dict['missionName']
+                    self.archiver.Open(mission_name)
+                elif (mode == 'M') and (self.archiver.archive_file is not None):
+                    self.archiver.Close()
+            self.archiver.Archive(self.message_in_ct, server_time, payload)
         elif action == 'read':
             topic = message[1]
             self.SendMessage(s, topic)
@@ -385,17 +493,8 @@ class FastMqttClient(SelectServer):
             rc = 0				# not implemented
             self.on_connect(client, userdata, flags, rc)
 
-    def send_socket(self, msg):
-        msg_sent = False
-        retry_ct = 0
-        while (not msg_sent) and (retry_ct < 10):
-            try:
-                self.server.sendall(msg)
-                msg_sent = True
-            except socket.error:
-                # socket.error: [Errno 11] Resource temporarily unavailable
-                # need to check Errno - kept running even when server died
-                retry_ct += 1
+    def BlockingWriteSocket(self, msg):
+        msg_sent = super().BlockingWriteSocket(msg)
         if msg_sent:
             mid = 0				# not implemented -- message id
             return (mqtt.MQTT_ERR_SUCCESS, mid)
@@ -405,12 +504,12 @@ class FastMqttClient(SelectServer):
 
     def publish(self, topic, msg, qos=0):
         message = "publish\x00%s\x00%s\x01" % (topic, msg)
-        return self.send_socket(message)
+        return self.BlockingWriteSocket(message)
 
     def read(self, topic, qos=0):
         # This is a non-repeating request to get the latest message
         message = "read\x00%s\x01" % (topic)
-        return self.send_socket(message)
+        return self.BlockingWriteSocket(message)
 
     def subscribe(self, topic, qos):
         self.server.sendall("subscribe\x00%s\x01" % (topic))
@@ -492,7 +591,7 @@ class Counters(object):
 #	It is recommended to use the Loop() / DoLoop() mechanism to make sure
 #		connections and exceptions are handled properly. Since Loop()
 #		is non-blocking, DoLoop() needs to check self.mqttcConnected.
-#		 
+#
 class mqtt_node(object):
     def __init__(self, SourceName=None, Subscriptions=[], Readers=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
         self.config = ConfigParser.SafeConfigParser()
@@ -579,7 +678,7 @@ class mqtt_node(object):
          # to call this periodically or messages will never be seen.
          # Depending on how you think about it, calling these blocking
          # may seem like an oxymoron.
-         # 
+         #
          try:
              self.mqttc.loop(timeout=self.blocking_timeout)
          except socket.error:
@@ -634,11 +733,11 @@ class mqtt_node(object):
         return False
 
     def MessageStr(self, msg):
-        max = 25
+        max_chars = 25
         s = str(msg)
-        if len(s) <= max:
+        if len(s) <= max_chars:
             return s
-        return s[:max] + ' [...]'
+        return s[:max_chars] + ' [...]'
 
     def RegisterMessageHandlers(self):
         self.handlers = {}
@@ -685,7 +784,7 @@ class mqtt_node(object):
             print("TIMEOUT", fqnTopic)
         self.mqttc.read(fqnTopic)
         # error messages ???
-        self.pendingReads.append(time.time())
+        self.pendingReads[fqnTopic] = time.time()
 
     def Publish(self, topic, payload, source=None):
         # payload is a dict to be converted to JSON)
@@ -741,12 +840,13 @@ class mqtt_node(object):
             payload = json.loads(msg)
         except ValueError:
             payload = {}
-            print("JSON Error")
+            print("JSON Error", msg)
         handler_method = self.handlers[message.topic]
         #
         if message.topic in self.pendingReads:
             del self.pendingReads[message.topic]
             self.arrivedReads[message.topic] = payload
+            return
         if handler_method is None:
             if self.wildcardHandler is not None:
                 error = self.wildcardHandler(message.topic, payload)
@@ -825,4 +925,3 @@ if __name__ == "__main__":
         time.sleep(1)
         s.mqttc.publish(sys.argv[2], sys.argv[3])
         time.sleep(1)
-

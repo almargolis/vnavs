@@ -27,7 +27,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
-        self.speed = 0
+        self.gps_speed = 0
         self.heading = 0
         self.longitude = 0
         self.latitude = 0
@@ -38,7 +38,8 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.gps_buffer_next = -1		# index of first <cr><lf>
         self.gps_quality = 'F'			# A=good, F=bad
         self.gps_status = 'X'			# A=valid, V=invalid
-        self.gps_mode = 'X'			# A=autonomous, D=differeential GPS
+        self.gps_differential = 'X'		# A=autonomous, D=differeential GPS
+        self.gps_mode = '1'			# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites 
         self.timestamp = 0
         self.newData = False
         self.gps_port= serial.Serial(
@@ -84,7 +85,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         now = time.time()
         interval = now - self.speed_last_time
         self.speed_last_time = now
-        if self.speed < 0.03:
+        if self.gps_speed < 0.03:
             self.speed_forward = 0
             self.speed_sideways = 0
         else:
@@ -101,17 +102,26 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 # Outdoors, maybe only when moving, some of the dilution numbers dropped below 1.
                 cksum_mark = gps_sentence.rfind('*')
                 gps_data = gps_sentence[:cksum_mark].split(',')
+                mode1 = gps_data[1]		# A(utomatic) or M(anual 2D/3D - s/b A
+                mode2 = gps_data[2]		# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites 
                 satCt = 0
                 for ix in range(3,15):
                     if gps_data[ix] != '':
                         satCt += 1
-                posDOP = gps_data[15]
-                horzDOP = gps_data[16]
-                vertDOP = gps_data[17]
-                if (posDOP < 1) or (horzDOP < 1.0) or (vertDOP < 1.0):
-                    self.gps_quality = 'A'
+                # DOP: Dilution of Precision < 1.0 is ideal but hard to get
+                posDOP = float(gps_data[15])		# position (overall ?)
+                horzDOP = float(gps_data[16])		# horizontal
+                vertDOP = float(gps_data[17])		# vertical
+                if mode2 == '3':
+                    if (posDOP < 1.0) or (horzDOP < 1.0) or (vertDOP < 1.0):
+                        self.gps_quality = 'A'
+                    else:
+                        self.gps_quality = 'B'
+                elif mode2 == '2':
+                    self.gps_quality = 'C'
                 else:
                     self.gps_quality = 'F'
+                self.gps_mode = mode2
                         
             elif gps_parsed.sentence_type == 'RMC':
                 self.longitude = gps_parsed.longitude
@@ -125,7 +135,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 speedRaw = gps_parsed.data[6].strip()
                 try:
                     speedKnots = float(speedRaw)
-                    self.speed = speedKnots * METERS_PER_SECOND_PER_KNOT
+                    self.gps_speed = speedKnots * METERS_PER_SECOND_PER_KNOT
                 except ValueError:
                     print("Invalid RMC speed", `speedRaw`)
                 heading_raw = gps_parsed.data[7].strip()
@@ -136,28 +146,32 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                         self.heading = float(heading_raw)	# degrees clockwise from North
                     except ValueError:
                         print("Invalid RMC heading", `heading_raw`)
-                self.gps_mode = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
+                self.gps_differential = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
                 self.newData = True
-                print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f" % (
+                print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
 					self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude, 
 					gps_parsed.data[4], gps_parsed.data[5], self.longitude,
-					self.heading))
+					self.heading, self.gps_quality))
                 if self.goal_run:
                     self.PathToGoal(gps_parsed)
         if self.newData:
             # we have new GPS Data
-            #print(self.speed, self.longitude, self.latitude)
+            #print(self.gps_speed, self.longitude, self.latitude)
             self.orientation = self.sense.get_orientation_degrees()
             payload = {}
             payload['pitch'] = self.orientation['pitch']
             payload['roll'] = self.orientation['roll']
-            payload['yaw'] = self.orientation['yaw']
-            payload['speed'] = self.speed
+            payload['yaw'] = self.orientation['yaw']		# s/b ~ gps heading ??
+            payload['acc_speed_f'] = self.speed_forward
+            payload['acc_speed_s'] = self.speed_sideways
+            payload['gps_speed'] = self.gps_speed
             payload['heading'] = self.heading
             payload['quality'] = self.gps_quality
             payload['longitude'] = self.longitude
             payload['latitude'] = self.latitude
-            #payload['gps_time'] = `self.timestamp`
+            payload['gps_time'] = `self.timestamp`
+            payload['gps_mode'] = self.gps_mode
+            payload['gps_differential'] = self.gps_differential
             self.Publish('gps', payload)
             self.stats.Count('GpsMsg')
             self.newData = False
@@ -167,10 +181,12 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             self.orientation = self.sense.get_orientation_degrees()
             payload = {}
             payload['yaw'] = self.orientation['yaw']
+            payload['acc_speed_f'] = self.speed_forward
+            payload['acc_speed_s'] = self.speed_sideways
             self.Publish('imu', payload)
             self.last_position_message_time = time.time()
             self.stats.Count('ImuMsg')
-            print("ACCC %+8.4f %+8.4f %+8.4f" % (self.speed_forward, self.speed_sideways, self.speed))
+            print("ACCC %+8.4f %+8.4f GPS: %+8.4f" % (self.speed_forward, self.speed_sideways, self.gps_speed))
         self.stats.Print('MSGS')
 
 def TestImu():
