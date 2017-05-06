@@ -304,6 +304,41 @@ class SelectServer(object):
                 self.disconnect()
                 raise
 
+class MessageArchiver(object):
+    def __init__(self):
+        self.archive_buffer = []
+        self.archive_size = 0
+        self.archive_file = None
+
+    def Open(self, MissionName):
+        fp = MissionName + 'nav'
+        self.archive_file = open(fp, 'w')
+        self.archive_buffer = []
+        self.archive_size = 0
+
+    def Close(self):
+        if self.archive_file is None:
+            return
+        self.WriteBuffer()
+        self.archive_file.close()
+        self.archive_file = None
+        
+    def Archive(self, mid, ptime, payload):
+        # message id, server publish time, json string payload
+        if self.archive_file is None:
+            return
+        self.archive_buffer.append("{}\x00{}\x00{}\x01".format(mid, ptime, payload))
+        self.archive_size += len(payload)
+        if self.archive_size >= 4096:
+            self.WriteBuffer()
+
+    def WriteBuffer(self):
+        if len(self.archive_buffer) < 1:
+            return
+        self.archive_file.write(u"".join(self.archive_buffer))
+        self.archive_buffer = []
+        self.archive_size = 0
+
 #
 # FastMqttServer is a simplified broker that is much faster thean mosquitto.
 # It supports publish/subscribe with less chance of blockage due to increased
@@ -323,6 +358,7 @@ class FastMqttServer(SelectServer):
         self.subscriptions = {}
         self.message_in_ct = 0
         self.message_out_ct = 0
+        self.archiver = MessageArchiver()
 
     def ProcessMessage(self, s, message):
         if message[0] == '':
@@ -330,6 +366,7 @@ class FastMqttServer(SelectServer):
         action = message[0]
         if action == 'publish':
             self.message_in_ct += 1
+            server_time = time.time()
             topic = message[1]
             payload = message[2]
             self.mqttPayloads[topic] = (self.message_in_ct, payload)
@@ -343,6 +380,15 @@ class FastMqttServer(SelectServer):
                         newSubscriptionList.append(sendSocket)
                         self.SendMessage(sendSocket, topic)
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
+            if topic == 'navigator/mode':
+                payload_dict = json.loads(payload)
+                mode = payload_dict['mode']
+                if (mode == 'G') and (self.archiver.archive_file is None):
+                    mission_name = payload_dict['missionName']
+                    self.archiver.Open(mission_name)
+                elif (mode == 'M') and (self.archiver.archive_file is not None):
+                    self.archiver.Close()
+            self.archiver.Archive(self.message_in_ct, server_time, payload)
         elif action == 'read':
             topic = message[1]
             self.SendMessage(s, topic)
