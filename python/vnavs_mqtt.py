@@ -187,10 +187,16 @@ class SelectServer(object):
                 self.server.connect((self.broker_host, self.broker_port))
                 self.connected = True
             except socket.error as e:
-                if e.errno in [36, 56, 115]:
+                if e.errno in [36, 56]:
+                    # At least under OSX, succesful connections raises 36
+                    # and repeated attemps raises 56 without disturbing connection.
                     # socket.error: [Errno 36] Operation now in progress
+                    # socket error: [Errno 56] Socket is already connected
+                    # 115?
                     # is not really an error
-                    pass
+                    print("SOFT", e)
+                    if e.errno == 56:
+                        self.connected = True
                 else:
                     raise
 
@@ -215,14 +221,19 @@ class SelectServer(object):
             data = self.fragments[s] + data
             del self.fragments[s]
         messages = data.split('\x01')
+        print("PRC", data, "**", messages)
         if data[-1] != '\x01':
             # the last message isn't complete, save the fragment
             fragment = messages.pop()
             self.fragments[s] = fragment
         for this_message in messages:
+            if this_message == '':
+                # This happens routinely if the last character of data is \x01.
+                # split() always splits, so it creates an empty string at the end of the list.
+                continue
             parts = this_message.split('\x00')
+            print("RCV", parts)
             self.ProcessMessage(s, parts)
-            #print("recieve", parts)
 
     def loop_start(self):
         self.thread = threading.Thread(target=self.loop_forever)
@@ -283,6 +294,7 @@ class SelectServer(object):
                     # Interpret empty result as closed connection
                     self.CloseClientConnection(s)
         for s in writable:
+            print("SOMETHING WRITABLE")
             try:
                 next_msg = self.outputQueues[s].get_nowait()
             except Queue.Empty:
@@ -314,26 +326,37 @@ class SelectServer(object):
             try:
                 self.server.sendall(msg)
                 return True
-            except socket.error:
+            except socket.error as e:
+                print("BLOCKING", e)
                 # socket.error: [Errno 11] Resource temporarily unavailable
                 # need to check Errno - kept running even when server died
                 retry_ct += 1
         return False
 
 class FileServer(SelectServer):
-    def __init__(self, Verbose=False):
+    def __init__(self, Verbose=True):
         super().__init__(IniSection="FileServer", Verbose=Verbose)
+        self.imageDir = self.config.get("Cameraman", "ImageDir")
 
     def ProcessMessage(self, s, message):
-        f = open(message[0], 'rb')
+        fn = message[0]
+        fp = os.path.join(self.imageDir, fn)
+        print("FS", fn, fp, message)
+        f = open(fp, 'rb')
         c = f.read()
         f.close()
         message = "{}\x00{}\x01".format(len(c), c)
+        # Need to think about this. Should queueu creation be here
+        # and in FastMqtt or in SelectServer?
+        if not s in self.outputQueues:
+            self.outputQueues[s] = Queue.Queue()
         self.outputQueues[s].put(message)
+        if s not in self.outputSockets:
+            self.outputSockets.append(s)
 
 class FileClient(SelectServer):
-    def __init__(self):
-        super().__init__(IniSection="FileClient", IsServer=False, IsZeroOneProtocol=False)
+    def __init__(self, Verbose=False):
+        super().__init__(IniSection="FileClient", IsServer=False, IsZeroOneProtocol=False, Verbose=Verbose)
         self.Init()
 
     def Init(self):
@@ -342,22 +365,48 @@ class FileClient(SelectServer):
         self.buffer = ""
         self.file_received = False
 
-    def GetFile(self, filename):
+    def GetFile(self, filename, timeout=30.0):
         self.Init()
-        self.connect()
+        retry_ct = 0
+        while (not self.connected) and (retry_ct < 5):
+            retry_ct += 1
+            # There is an issue here that effects all connects.
+            # Possibly just OSX connecting to RPI, but not sure.
+            # First connect fails -- or seems to
+            # If you try to reconnect immediately, you get a fail
+            #    socket.error: [Errno 37] Operation already in progress
+            # So some patience is needed. Somewhere there is some latency or
+            # inconsistency of block / no block. Or one of hte OSes trying to be polite.
+            time.sleep(1)
+            print("FC TRY CONNECT", self.broker_host, self.broker_port)
+            self.connect()
+        print("FC CONNECTED")
         self.file_name = filename
         self.file_out = open(filename, "wb")
         message = "{}\x01".format(filename)
-        msg_sent = super().BlockingWriteSocket(message)
+        msg_sent = self.BlockingWriteSocket(message)
         if not msg_sent:
+            print("FC MSG NOT SENT")
             return False
-        while not self.file_received:
-            self.loop()
-        return True
+        else:
+            print("FC MSG SENT")
+        start_time = time.time()
+        while (not self.file_received) and ((time.time() - start_time) < timeout):
+            self.Reader()
+        self.file_out.close()
+        return self.file_received
 
-    def RecvData(self, s, data):
-        self.buffer += data
+    def Reader(self):
+        try:
+            d = self.server.recv(1024)
+        except socket.error as e:
+            if e.errno == 35:
+                # resource temporarily unavailble
+                return
+            raise
+        self.buffer += d
         p = self.buffer.find('\x00')
+        print("RCV DATA", len(d), len(self.buffer))
         if p > 0:
             file_len = int(self.buffer[:p])
             buf_len = p + file_len + 2
@@ -851,11 +900,14 @@ class mqtt_node(object):
         if self.verbose:
             print("on_message()", message.topic + " " + str(message.qos) + " " + self.MessageStr(message.payload))
         msg = message.payload.decode("utf-8")
-        try:
-            payload = json.loads(msg)
-        except ValueError:
+        if msg == '':
             payload = {}
-            print("JSON Error", msg)
+        else:
+            try:
+                payload = json.loads(msg)
+            except ValueError:
+                payload = {}
+                print("JSON Error", message.payload)
         handler_method = self.handlers[message.topic]
         #
         if message.topic in self.pendingReads:
@@ -930,6 +982,10 @@ if __name__ == "__main__":
     elif sys.argv[1] == 'r':
         n = TestReceiver()
         n.Connect()
+    elif sys.argv[1] == 'f':
+        s = FileServer(Verbose=verbose)
+        s.connect()
+        s.loop_forever()
     elif sys.argv[1] == 'm':
         s = FastMqttServer(Verbose=verbose)
         s.connect()

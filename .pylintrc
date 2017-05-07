@@ -54,6 +54,7 @@ redefining-builtins-modules=builtins
 disable=all
 
 enable=import-error,
+       function-redefined,
        import-self,
        reimported,
        wildcard-import,
@@ -97,7 +98,6 @@ enable=import-error,
        # anomalous-unicode-escape-in-string,
        # anomalous-backslash-in-string,
        # not-in-loop,
-       # function-redefined,
        # continue-in-finally,
        # abstract-class-instantiated,
        # star-needs-assignment-target,

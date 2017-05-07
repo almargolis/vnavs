@@ -4,8 +4,8 @@ from builtins import (bytes, str, open, super, range,
 #from tkinter import *		# python 3
 #from tkinter import ttk	# python 3
 
-#from Tkinter import *		# python 2.7
-#import ttk			# python 2.7
+import Tkinter
+import ttk			# python 2.7
 
 import json
 import sys
@@ -32,7 +32,7 @@ BOT_1_MAP_TRANSPOSE = [
 BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class MissionControl(vnavs_mqtt.mqtt_node):
-    def __init__(self):
+    def __init__(self, Verbose=False):
         super().__init__(Subscriptions=['cameraman/last',
 						'engineer_1/status',
 						'helmsman/orders',
@@ -43,9 +43,10 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						'cameraman/pic_ready'
 						],
 						Blocking=True, BlockingTimeoutSecs=0.1,
-						BrokerType='F')
+						BrokerType='F',
+						Verbose=Verbose)
         self.lastfn = ""
-        self.tk_root = Tk()
+        self.tk_root = Tkinter.Tk()
         self.tk_root.title("VNAVS Mission Control")
         self.image = OpticChiasm.ImageAnalyzer()
         self.image.img_crop=(300,200)
@@ -68,28 +69,28 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
         #
         this_row = 0
-        self.f1_helmsman_status = StringVar()
+        self.f1_helmsman_status = Tkinter.StringVar()
         self.f1_helmsman_status.set('')
-        ttk.Label(mainframe, text='Helmsman').grid(column=0, row=this_row, sticky=W)
+        ttk.Label(mainframe, text='Helmsman').grid(column=0, row=this_row, sticky=Tkinter.W)
         self.f1_helmsman_entry = ttk.Entry(mainframe, width=75, textvariable=self.f1_helmsman_status)
-        self.f1_helmsman_entry.grid(column=1, row=this_row, sticky=(W, E))
+        self.f1_helmsman_entry.grid(column=1, row=this_row, sticky=(Tkinter.W, Tkinter.E))
 
         #
         this_row += 1
-        self.f1_engineer_1_status = StringVar()
+        self.f1_engineer_1_status = Tkinter.StringVar()
         self.f1_engineer_1_status.set('')
-        ttk.Label(mainframe, text='Engineer_1').grid(column=0, row=this_row, sticky=W)
+        ttk.Label(mainframe, text='Engineer_1').grid(column=0, row=this_row, sticky=Tkinter.W)
         self.f1_engineer_1_entry = ttk.Entry(mainframe, width=75, textvariable=self.f1_engineer_1_status)
-        self.f1_engineer_1_entry.grid(column=1, row=this_row, sticky=(W, E))
+        self.f1_engineer_1_entry.grid(column=1, row=this_row, sticky=(Tkinter.W, Tkinter.E))
 
         #
         this_row += 1
         f = ttk.Frame(mainframe)
         f.grid(row=this_row, column=0, columnspan=2)
-        self.mission_name = StringVar()
+        self.mission_name = Tkinter.StringVar()
         self.mission_name.set('test')
         self.mission_name_entry = ttk.Entry(mainframe, width=15, textvariable=self.mission_name)
-        self.mission_name_entry.grid(row=0, column=0, sticky=(W, E))
+        self.mission_name_entry.grid(row=0, column=0, sticky=(Tkinter.W, Tkinter.E))
         b = ttk.Button(f, text='Start', command=self.StartNav)
         b.grid(row=0, column=1)
         b = ttk.Button(f, text='Stop', command=self.StopNav)
@@ -102,21 +103,23 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         b.grid(row=0, column=5)
         b = ttk.Button(f, text='Save Waypoints', command=self.SaveWaypoints)
         b.grid(row=0, column=6)
+        b = ttk.Button(f, text='Map Waypoints', command=self.MapWaypoints)
+        b.grid(row=0, column=7)
 
         #
         this_row += 1
-        ttk.Label(mainframe, text='Steering').grid(column=0, row=this_row, sticky=W)
-        self.f1_steering_control = Scale(mainframe, from_=0, to=100, orient="horizontal")
+        ttk.Label(mainframe, text='Steering').grid(column=0, row=this_row, sticky=Tkinter.W)
+        self.f1_steering_control = Tkinter.Scale(mainframe, from_=0, to=100, orient="horizontal")
         self.f1_steering_control.grid(column=1, row=this_row)
         self.f1_steering_display = ttk.Label(mainframe, text='0')
-        self.f1_steering_display.grid(column=2, row=this_row, sticky=W)
+        self.f1_steering_display.grid(column=2, row=this_row, sticky=Tkinter.W)
 
         #
         this_row += 1
-        self.f1_fname = StringVar()
+        self.f1_fname = Tkinter.StringVar()
         self.f1_fname.set('fname')
         self.f1_label1 = ttk.Label(mainframe, textvariable=self.f1_fname)
-        self.f1_label1.grid(columnspan=2, row=this_row, sticky=W)
+        self.f1_label1.grid(columnspan=2, row=this_row, sticky=Tkinter.W)
 
         #
         this_row += 1
@@ -131,7 +134,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         else:
             self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
             self.f1_img1.configure(image = self.img1_tk)
-        self.f1_img1.grid(column=0, columnspan=2, row=this_row, sticky=W)
+        self.f1_img1.grid(column=0, columnspan=2, row=this_row, sticky=Tkinter.W)
 
         self.f1_helmsman_entry.focus()
 
@@ -165,6 +168,14 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.pic_processed = False
         print("PIC", self.pic_fn)
 
+    def rmsg_navigator_status(self, payload):
+        print("NAV STAT", payload)
+        self.f1_helmsman_status.set(payload)
+        if 'filename' in payload:
+            self.pic_fn = payload['filename']
+            self.pic_processed = False
+            print("NAV FILE", self.pic_fn)
+
     def ClearWaypoints(self):
         payload = {}
         payload['request'] = 'ClearWaypoints'
@@ -178,6 +189,12 @@ class MissionControl(vnavs_mqtt.mqtt_node):
     def SaveWaypoints(self):
         payload = {}
         payload['request'] = 'SaveWaypoints'
+        payload['missionName'] = self.mission_name.get()
+        self.Publish('service', payload, source='navigator')
+
+    def MapWaypoints(self):
+        payload = {}
+        payload['request'] = 'MakeWaypointMap'
         payload['missionName'] = self.mission_name.get()
         self.Publish('service', payload, source='navigator')
 
@@ -223,8 +240,19 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.Publish('mode', payload, source='navigator')
 
     def ProcessImage(self):
-        self.f1_fname.set(self.pic_fn)
-        path = os.path.join(self.imageDir, self.pic_fn)
+        if self.pic_fn is None:
+            return
+        if True:
+            fc = vnavs_mqtt.FileClient(Verbose=True)
+            if fc.GetFile(self.pic_fn):
+                print("GOT", self.pic_fn)
+                path = self.pic_fn
+            else:
+                print("NOT GOT", self.pic_fn)
+                return
+        else:
+            # This is code to get file file system including AFP)
+            path = os.path.join(self.imageDir, self.pic_fn)
         self.img1_pil = self.ImagePillow(path)
         if self.img1_pil is None:
             self.img1_tk = None
@@ -239,21 +267,25 @@ class MissionControl(vnavs_mqtt.mqtt_node):
                 self.img1_pil = None
         if self.img1_tk is not None:
             self.f1_img1.configure(image = self.img1_tk)
+        self.f1_fname.set(self.pic_fn)
+        self.pic_fn = None
         self.pic_processed = True
         self.pic_requested = False
+        self.pic_last_time = time.time()
 
     def DoLoop(self):
         #speed = int(self.f1_speed_control.get())
         #self.f1_speed_display.configure(text=str(speed))
         if (time.time() - self.pic_last_time) > 1.0:
-            image_info = self.Get('pic_ready', source='cameraman')
-            if image_info is not None:
-                if 'filename' in image_info:
-                    print("PICPIC", image_info)
-                    self.pic_fn = image_info['filename']
-                    self.ProcessImage()
+            self.ProcessImage()
+            #image_info = self.Get('pic_ready', source='cameraman')
+            #if image_info is not None:
+            #    if 'filename' in image_info:
+            #        print("PICPIC", image_info)
+            #        self.pic_fn = image_info['filename']
+            #        self.ProcessImage()
         #if (self.pic_fn is None) or (self.pic_fn == '') or self.pic_processed:
-            pass
+        #    pass
         #else:
         #    self.ProcessImage()
         #if (not self.pic_requested) or ((time.time() - self.pic_request_time) > 1):
