@@ -215,14 +215,19 @@ class SelectServer(object):
             data = self.fragments[s] + data
             del self.fragments[s]
         messages = data.split('\x01')
+        print("PRC", data, "**", messages)
         if data[-1] != '\x01':
             # the last message isn't complete, save the fragment
             fragment = messages.pop()
             self.fragments[s] = fragment
         for this_message in messages:
+            if this_message == '':
+                # This happens routinely if the last character of data is \x01.
+                # split() always splits, so it creates an empty string at the end of the list.
+                continue
             parts = this_message.split('\x00')
+            print("RCV", parts)
             self.ProcessMessage(s, parts)
-            #print("recieve", parts)
 
     def loop_start(self):
         self.thread = threading.Thread(target=self.loop_forever)
@@ -275,7 +280,7 @@ class SelectServer(object):
                         self.disconnect()
                         raise
                 if data:
-                    if self.IsZeroOneProtocol:
+                    if self.isZeroOneProtocol:
                         self.ProcessData(s, data)
                     else:
                         self.RecvData(s, data)
@@ -283,6 +288,7 @@ class SelectServer(object):
                     # Interpret empty result as closed connection
                     self.CloseClientConnection(s)
         for s in writable:
+            print("SOMETHING WRITABLE")
             try:
                 next_msg = self.outputQueues[s].get_nowait()
             except Queue.Empty:
@@ -321,15 +327,25 @@ class SelectServer(object):
         return False
 
 class FileServer(SelectServer):
-    def __init__(self, Verbose=False):
+    def __init__(self, Verbose=True):
         super().__init__(IniSection="FileServer", Verbose=Verbose)
+        self.imageDir = self.config.get("Cameraman", "ImageDir")
 
     def ProcessMessage(self, s, message):
-        f = open(message[0], 'rb')
+        fn = message[0]
+        fp = os.path.join(self.imageDir, fn)
+        print("FS", fn, fp, message)
+        f = open(fp, 'rb')
         c = f.read()
         f.close()
         message = "{}\x00{}\x01".format(len(c), c)
+        # Need to think about this. Should queueu creation be here
+        # and in FastMqtt or in SelectServer?
+        if not s in self.outputQueues:
+            self.outputQueues[s] = Queue.Queue()
         self.outputQueues[s].put(message)
+        if s not in self.outputSockets:
+            self.outputSockets.append(s)
 
 class FileClient(SelectServer):
     def __init__(self):
@@ -928,6 +944,10 @@ if __name__ == "__main__":
     elif sys.argv[1] == 'r':
         n = TestReceiver()
         n.Connect()
+    elif sys.argv[1] == 'f':
+        s = FileServer(Verbose=verbose)
+        s.connect()
+        s.loop_forever()
     elif sys.argv[1] == 'm':
         s = FastMqttServer(Verbose=verbose)
         s.connect()
