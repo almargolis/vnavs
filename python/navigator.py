@@ -65,7 +65,7 @@ class Mission(object):
             elif parts[0] == 'M':			# Magic
                     self.waypoints.append(('M', parts[1]))
 
-    def WayPoints(self):
+    def Waypoints(self):
         waypoints = []
         for p in self.waypoints:
             if p[0] == 'W':
@@ -126,7 +126,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.missionDir = self.config.get("Pilot", "MissionDir")
         self.longitude = 0
-        self.speed = None
+        self.gps_speed = None
         self.heading = None
         self.imageFn = None
         self.imageRequested = None
@@ -223,7 +223,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 step = NavStep()
                 # Note: this steering direction is reversed, but yaw is not.
                 step.steering = 'A' + str(int(-deltaHeading / 3))
-                step.speed = REVERSE_SLOW
+                step.gps_speed = REVERSE_SLOW
                 step.startingYaw = self.yaw
                 step.deltaYawGoal = deltaHeading * OVERSTEER_ADJUSTMENT
                 step.untrustedGpsUpdates = -1
@@ -231,14 +231,14 @@ class navigator(vnavs_mqtt.mqtt_node):
                 #
                 step = NavStep()
                 step.steering = 'A0'
-                step.speed = STOP_SPEED
+                step.gps_speed = STOP_SPEED
                 step.hardKeepSeconds = STOP_SECONDS
                 step.untrustedGpsUpdates = -1
                 self.navSteps.append(step)
                 #
                 step = NavStep()
                 step.steering = 'A' + str(int(deltaHeading / 3))
-                step.speed = FORWARD_SLOW
+                step.gps_speed = FORWARD_SLOW
                 step.startingYaw = self.yaw
                 step.deltaYawGoal = deltaHeading * OVERSTEER_ADJUSTMENT
                 step.untrustedGpsUpdates = 1
@@ -359,7 +359,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.new_gps_payload = None
         self.longitude = payload['longitude']
         self.latitude = payload['latitude']
-        self.speed = payload['speed']
+        self.gps_speed = payload['gps_speed']
         self.heading = payload['heading']
         self.yaw = payload['yaw']
         #self.gpsRequested = False

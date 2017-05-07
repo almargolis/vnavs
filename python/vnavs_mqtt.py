@@ -275,7 +275,7 @@ class SelectServer(object):
                         self.disconnect()
                         raise
                 if data:
-                    if self.IsZeroOneProtocol:
+                    if self.isZeroOneProtocol:
                         self.ProcessData(s, data)
                     else:
                         self.RecvData(s, data)
@@ -816,8 +816,10 @@ class mqtt_node(object):
         sourceSource = payload['_source']
         payload['_ackSourceTopic'] = sourceTopic
         payload['_ackSourceSource'] = sourceSource
-        payload['_ackPid'] = payload['_sendPid']
-        payload['_ackSeq'] = payload['_sendSeq']
+        if '_sendPid' in payload:
+            payload['_ackPid'] = payload['_sendPid']
+        if '_sendSeq' in payload:
+            payload['_ackSeq'] = payload['_sendSeq']
 
     def PublishAck(self, payload, error=None):
         self.PrepareResponse(payload)

@@ -27,7 +27,6 @@ class engineer_1(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
-        self.gps_speed = 0
         self.heading = 0
         self.longitude = 0
         self.latitude = 0
@@ -37,6 +36,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.gps_buffer = ''			# read buffer
         self.gps_buffer_next = -1		# index of first <cr><lf>
         self.gps_quality = 'F'			# A=good, F=bad
+        self.gps_speed = 0
         self.gps_status = 'X'			# A=valid, V=invalid
         self.gps_differential = 'X'		# A=autonomous, D=differeential GPS
         self.gps_mode = '1'			# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites 
