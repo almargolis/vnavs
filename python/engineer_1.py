@@ -25,7 +25,7 @@ METERS_PER_SECOND_PER_KNOT = 0.514444
 
 class engineer_1(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[], Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=[], SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.heading = 0
         self.longitude = 0
@@ -148,10 +148,12 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                         print("Invalid RMC heading", `heading_raw`)
                 self.gps_differential = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
                 self.newData = True
+                """
                 print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
 					self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude, 
 					gps_parsed.data[4], gps_parsed.data[5], self.longitude,
 					self.heading, self.gps_quality))
+                """
                 if self.goal_run:
                     self.PathToGoal(gps_parsed)
         if self.newData:
@@ -186,7 +188,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             self.Publish('imu', payload)
             self.last_position_message_time = time.time()
             self.stats.Count('ImuMsg')
-            print("ACCC %+8.4f %+8.4f GPS: %+8.4f" % (self.speed_forward, self.speed_sideways, self.gps_speed))
+            #print("ACCC %+8.4f %+8.4f GPS: %+8.4f" % (self.speed_forward, self.speed_sideways, self.gps_speed))
         self.stats.Print('MSGS')
 
 def TestImu():

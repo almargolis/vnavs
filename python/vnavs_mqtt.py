@@ -209,7 +209,7 @@ class SocketWrapper(object):
 
     def InitSelectData(self):
         self.inputSockets = [ self.os_socket ]
-        self.outputSockets = [ ]
+        self.outputSockets = []
         self.outputQueues = {}
         self.fragments = {}
 
@@ -285,8 +285,17 @@ class SocketWrapper(object):
         # If this is a client, we want to neaten things up but re-raise the exception because the
         # main flow of the client is probably disrupted.
         #
+        # OS select() waits for inputs, just as you would casually expect, so it is safe to have all inout sockets
+        # in the list. Output sockets are ready whenever the buffer is empty, so if you leave an inactive socket
+        # in the output list, select returns immediately because it is writable. Therefore, output sockets should
+        # only be in hte list when you actually have something to write.n If you are a no-timeout select when that
+        # socket gets added to the output list, nothing happens immediatly because the OS doesn't know about it.
+        # The new output message will languish until something else releases the select. Because of this, it should 
+        # be fairly unusual to call select with no timeout.
+        #
         # timeout=None blocks indefinately, timeout=0.0 polls and return immediately, potentially with three empty lists
-        #print('LOOP waiting for the next event', self.inputSockets, timeout)
+        #
+        #print('SELECT waiting for the next event', self.inputSockets, self.outputSockets, timeout)
         readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
         for s in readable:
             print("READABLE")
@@ -347,6 +356,10 @@ class SocketWrapper(object):
             else:
                 self.disconnect()
                 raise
+
+    def SelectForever(self, MaxAllowableWriteLatency=0.01):
+        while True:
+            self.Select(timeout=MaxAllowableWriteLatency)
 
 class SocketWrapperServer(SocketWrapper):
     def __init__(self, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
@@ -451,19 +464,18 @@ class SocketWrapperClient(SocketWrapper):
                 time.sleep(0.01)
         return True
 
-    def loop_start(self):
-        self.thread = threading.Thread(target=self.loop_forever)
-        self.thread.start()
+    def SelectThreadStart(self):
+        if self.thread is None:
+            self.thread = threading.Thread(target=self.SelectForever)
+            self.thread.start()
+        else:
+            if not self.thread.is_alive():
+                self.thread.start()
 
-    def loop_stop(self, force=False):
-        # unused force parameter exists for mosquitto compatibility
+    def SelectThreadStop(self):
         if self.thread is not None:
             self.thread.stop()
             self.thread = None
-
-    def loop_forever(self):
-        while True:
-            self.Select(timeout=None)
 
     def BlockingWriteSocket(self, msg):
         # For clients that want to block while sending
@@ -659,8 +671,8 @@ class FastMqttServer(SocketWrapperServer):
 class FastMqttClient(SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.
     def __init__(self, Verbose=False):
+        Verbose = True
         super().__init__(IniSection="MqttBroker", Verbose=Verbose)
-        self.thread = None
         self.on_message = None
         self.on_connect = None
 
@@ -681,6 +693,19 @@ class FastMqttClient(SocketWrapperClient):
         else:
             mid = 0				# not sue if this matches Paho MQTT behavior
             return (mqtt.MQTT_ERR_NO_CONN, mid)
+
+    def loop(timeout):
+        self.Select(timeout=timeout)
+
+    def loop_forever(self):
+        self.SelectForever()
+
+    def loop_start(self):
+        self.SelectThreadStart()
+
+    def loop_stop(self, force=False):
+        # unused force parameter exists for mosquitto compatibility
+        self.SelectThreadStop()
 
     def publish(self, topic, msg, qos=0):
         self.QueueMessageZ(['publish', topic, msg])
@@ -808,13 +833,13 @@ class Counters(object):
 #		is non-blocking, DoLoop() needs to check self.mqttcConnected.
 #
 class mqtt_node(object):
-    def __init__(self, SourceName=None, Subscriptions=[], Readers=[], Blocking=False, BlockingTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+    def __init__(self, SourceName=None, Subscriptions=[], Readers=[], SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
         self.vnavs_pid = int(time.time())		# non-repeating with ~ 1 second
         self.vnavs_mid = 0				# Publish() sequence
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
-        self.blocking_mode = Blocking
-        self.blocking_timeout = BlockingTimeoutSecs
+        self.single_threaded = SingleThreaded
+        self.select_timeout = SelectTimeoutSecs
         self.readers = Readers
         self.subscriptions = Subscriptions
         self.handlers = {}
@@ -844,7 +869,7 @@ class mqtt_node(object):
         self.streamer = None
         if Streamer:
             self.streamer = socket_xfer()
-        if self.blocking_mode:
+        if self.single_threaded:
             print("Blocking Mode")
         else:
             print("Non-Blocking Mode")
@@ -852,7 +877,7 @@ class mqtt_node(object):
     def Connect(self, timeout=0):
         if self.mqttc.connected:
             return
-        if self.blocking_mode:
+        if self.single_threaded:
             timeout = None			# if blocking, always block till connected
         # Assign event callbacks
         self.mqttc.on_message = self.on_message
@@ -877,8 +902,8 @@ class mqtt_node(object):
                 elif (time.time() - connect_time) >= timeout:
                     return False
                 time.sleep(10)
-        if self.blocking_mode:
-            if self.blocking_timeout is None:
+        if self.single_threaded:
+            if self.select_timeout is None:
                 self.mqttc.loop_forever()
                 return True
             else:
@@ -896,7 +921,7 @@ class mqtt_node(object):
          # may seem like an oxymoron.
          #
          try:
-             self.mqttc.loop(timeout=self.blocking_timeout)
+             self.mqttc.loop(timeout=self.select_timeout)
          except socket.error:
             # THIS IS WRONG
             # connected will be handled by mqttc client object.
@@ -907,18 +932,24 @@ class mqtt_node(object):
             self.mqttc.connected = False
 
     def Disconnect(self):
-        if not self.blocking_mode:
+        if not self.single_threaded:
             self.mqttc.loop_stop(force=False)
         self.mqttc.disconnect()
 
     def Loop(self):
         try:
             while True:
+                print("LOOP", self.mqttc.connected)
+                if self.mqttc.thread is None:
+                    print("THREAD NO")
+                else:
+                    print("THREAD", self.mqttc.thread.is_alive())
+                time.sleep(1)
                 if not self.mqttc.connected:
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
                     self.Connect()
-                if self.blocking_mode:
+                if self.single_threaded:
                     self.CheckMqtt()
                 self.DoLoop()
                 if self.CheckExceptions():
