@@ -90,13 +90,13 @@ def Streamer(q, q_len, host_ip, host_socket):
 #
 class socket_xfer(object):
     def __init__(self):
-        self.server_ip = "192.168.8.11"
-        self.server_socket = 3050
+        self.os_socket_ip = "192.168.8.11"
+        self.os_socket_socket = 3050
         self.capture_ct = 0
         self.start = time.time()
         self.queue = multiprocessing.Queue()
         self.q_len = multiprocessing.Value('i', 0)
-        self.streamer = multiprocessing.Process(target=Streamer, args=(self.queue, self.q_len, self.server_ip, self.server_socket))
+        self.streamer = multiprocessing.Process(target=Streamer, args=(self.queue, self.q_len, self.os_socket_ip, self.os_socket_socket))
         self.streamer.daemon = True		# causes child process to terminate with its parent
         self.streamer.start()
         self.timer_ct = 0
@@ -129,17 +129,59 @@ class socket_xfer(object):
             self.timer_skip_ct = 0
             self.timer_start = timer_stop
 
-class SelectServer(object):
-    def __init__(self, IniSection=None, IsServer=True, IsZeroOneProtocol=True, Verbose=False):
+#
+# SocketWrapperServer() SocketWrapperClient()
+#
+# These objects enccapsulates Python low level socket services with a number of idioms that
+# I found necessary to make typical example code run reliably for VNAVS.
+# At this point I am not positive that I wouldn't have been better off using a higher level
+# object instead of writing this.
+#
+# Possible advantages of this object:
+#     - confirms to VNAVS coding style
+#     - explicit comments / handling of return states and error codes
+#     - explicit python state variables
+#     - optionally supports zero/one message protocol
+#
+# There are at least two levels of "blocking" that are often not clearly
+# distinguished in socket / protocol documentation.
+# Including here, until just now.
+#
+# Socket blocking refers to whether the OS should complete an operation before returning
+# to the calling thread.
+#
+# Process blocking refers to whether communications should occur in the same thread as
+# the main operation of the client.
+#
+# Non-trivial client applications wll usually be process non-blocking. The network communication
+# is executed in its own thread so the main application loop stays responsive to the keyboard or
+# other external events. In this case, socket operations will often be blocking. Since the
+# communications thread is talking to a single server and the process is often sequential, there is
+# no harm in letting the OS suspend the thread until each operation is completed. That is
+# probably the most efficentient way to serialize network processes. There is probably no reason
+# for a process non-blocking client to use socket non-blocking functions.
+#
+# Server applications will usually be process blocking because all they do is deal with socket
+# communications. They don't need to be responsive to a keyboard, etc. A small level of responsiveness
+# can be provided via OS signals. Server socket operations will alsmost always be non-blocking
+# so the server can have communications with multiple clients in-process simultaneously. 
+# These parallel sockets are coordinated through select(). A single threaded server is likely
+# getting some benefit from multiple cores via threading inside the OS. It is possible for a server
+# to utilize seperate threaads or even separate processes per client socket or group of client sockets
+# but that is not supported by this object.
+
+class SocketWrapper(object):
+    def __init__(self, IniSection=None, IsServer=False, IsSocketBlocking=False, IsZeroOneProtocol=True,
+					Verbose=False):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
-        self.broker_host = None
-        self.broker_port = None
+        self.socket_host = None
+        self.socket_port = None
         if IniSection is not None:
-            self.broker_host = self.config.get(IniSection, "Host")
-            self.broker_port = int(self.config.get(IniSection, "Port"))	# 1883
+            self.socket_host = self.config.get(IniSection, "Host")
+            self.socket_port = int(self.config.get(IniSection, "Port"))
 
-        # This can be a server or client. Either way self.server is the primary socket
+        # This can be a server or client. Either way self.os_socket is the primary socket
         #
         # Socket communications between OSX and RPI can be painfully slow, as in minutes.
         # TCP_NODELAY solved the problem. As a test, I commented it out and it remained
@@ -149,63 +191,31 @@ class SelectServer(object):
         # with try this / try that suggestions. This one made the most sense to me.
         # I could imaging Apple not caring much about custom socket protocols but
         # but  being concerned about hogging hte network with lots of small packets
-        # whihc might slow other applications. This problem was never exhibited on
+        # which might slow other applications. This problem was never exhibited on
         # the RPI side of the communications (RPI <-> RPI) only (RPI <-> OSX).
         #
         self.isServer = IsServer
         self.isZeroOneProtocol = IsZeroOneProtocol
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.server.setblocking(0)
+        self.os_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.os_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.is_socket_blocking = IsSocketBlocking
+        if self.is_socket_blocking:
+            self.os_socket.setblocking(0)
+        else:
+            self.os_socket.setblocking(1)
         self.verbose = Verbose
-        self.InitData()
+        self.InitSelectData()
 
-    def InitData(self):
-        self.inputSockets = [ self.server ]
+    def InitSelectData(self):
+        self.inputSockets = [ self.os_socket ]
         self.outputSockets = [ ]
         self.outputQueues = {}
         self.fragments = {}
-        self.connected = False
-
-    def connect(self, host=None, port=None, keepalive=60, bind_address=""):
-        if host is not None:
-            self.broker_host = host
-        if port is not None:
-            self.broker_port = port
-        if self.isServer:
-            self.server.bind((self.broker_host, self.broker_port))
-            self.server.listen(5)
-            if self.broker_host == '':
-                displayHost = 'INADDR_ANY'
-            else:
-                displayHost = self.broker_host
-            print("Server listening on host %s, port %s." % (displayHost, self.broker_port))
-            print("Server listening on port %s." % (`self.server.getsockname()`))
-            self.connected = True
-        else:
-            try:
-                self.server.connect((self.broker_host, self.broker_port))
-                self.connected = True
-            except socket.error as e:
-                if e.errno in [36, 56]:
-                    # At least under OSX, succesful connections raises 36
-                    # and repeated attemps raises 56 without disturbing connection.
-                    # socket.error: [Errno 36] Operation now in progress
-                    # socket error: [Errno 56] Socket is already connected
-                    # 115?
-                    # is not really an error
-                    print("SOFT", e)
-                    if e.errno == 56:
-                        self.connected = True
-                else:
-                    raise
-
-    def disconnect(self):
-        self.server.close()
-        self.connected = False
-        self.InitData()
 
     def CloseClientConnection(self, s):
+        # This closes the connection to one of a server's clients.
+        # This takes care of client clean-up for servers that are using
+        # select() and ouytput queues to handle multuple clients in one thread.
         if s in self.outputSockets:
             self.outputSockets.remove(s)
         if s in self.inputSockets:
@@ -216,7 +226,22 @@ class SelectServer(object):
             del self.fragments[s]
         s.close()
 
-    def ProcessData(self, s, data):
+    def Disconnect(self):
+        self.os_socket.close()
+        self.InitSelectData()
+
+    def PrintError(self, e):
+        print("Socket error ", e.errno)
+
+    def ProcessReceivedPacket(self, s, data):
+        # This colates messages using zero/one protocol.
+        # It concatenates TCP packets until a complete messsage is available.
+        # Messages are identified by a final \x01 character.
+        # Messages are delivered to the application ProcessMessage()
+        # method with a list of fields values. Fields are separated
+        # by \x00 characters.
+        # This is completely safe only for ASCII protocols, but may work
+        # work with UTF-8 since Python hides lots of that (but not verified).
         if s in self.fragments:
             data = self.fragments[s] + data
             del self.fragments[s]
@@ -235,24 +260,25 @@ class SelectServer(object):
             print("RCV", parts)
             self.ProcessMessage(s, parts)
 
-    def loop_start(self):
-        self.thread = threading.Thread(target=self.loop_forever)
-        self.thread.start()
+    def QueueMessage(self, message, s=None):
+        if s is None:				# This should only be true if self.isServer is False
+            s = self.os_socket
+        if not s in self.outputQueues:
+            self.outputQueues[s] = Queue.Queue()
+        self.outputQueues[s].put(message)
+        self.message_out_ct += 1
+        if s not in self.outputSockets:
+            self.outputSockets.append(s)
 
-    def loop_stop(self, force=False):
-        # unused force parameter exists for mosquitto compatibility
-        if self.thread is not None:
-            self.thread.stop()
-            self.thread = None
+    def QueueMessageZ(self, parts, s=None):
+        msg_parts = []
+        for this in parts:
+            msg_parts.append(this)
+            msg_parts.append('\x00')
+        msg_parts.append('\x01')
+        self.QueueMessage(''.join(msg_parts), s=s)
 
-    def loop_forever(self):
-        while True:
-            self.loop(timeout=None)
-
-    def PrintError(self, e):
-        print("Socket error ", e.errno)
-
-    def loop(self, timeout=1.0):
+    def Select(self, timeout=1.0):
         # If this is a server and the client connection fails, we want to clean up that connection and
         # continue serving. Potentially could want to nofify someone.
         # If this is a client, we want to neaten things up but re-raise the exception because the
@@ -262,7 +288,7 @@ class SelectServer(object):
         #print('LOOP waiting for the next event', self.inputSockets, timeout)
         readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
         for s in readable:
-            if self.isServer and (s is self.server):
+            if self.isServer and (s is self.os_socket):
                 # A "readable" server socket is ready to accept a connection
                 connection, client_address = s.accept()
                 connection.setblocking(0)
@@ -276,7 +302,7 @@ class SelectServer(object):
                     # I have seen e.errno = 54 and 104 as] "Connection reset by peer"
                     self.PrintError(e)
                     if self.isServer:
-                        if s is self.server:
+                        if s is self.os_socket:
                             self.disconnect()
                             return
                         else:
@@ -287,7 +313,7 @@ class SelectServer(object):
                         raise
                 if data:
                     if self.isZeroOneProtocol:
-                        self.ProcessData(s, data)
+                        self.ProcessReceivedPacket(s, data)
                     else:
                         self.RecvData(s, data)
                 else:
@@ -319,12 +345,124 @@ class SelectServer(object):
                 self.disconnect()
                 raise
 
+class SocketWrapperServer(SocketWrapper):
+    def __init__(self, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
+        super().__init__(IniSection=IniSection, IsZeroProtocol=IsZeroProtocol, IsServer=True, IsSocketBlocking=False, Verbose=Verbose)
+        self.InitServerData()
+
+    def serve(self, host=None, port=None):
+        if host is not None:
+            self.socket_host = host
+        if port is not None:
+            self.socket_port = port
+        self.os_socket.bind((self.socket_host, self.socket_port))
+        self.os_socket.listen(5)
+        if self.socket_host == '':
+            displayHost = 'INADDR_ANY'
+        else:
+            displayHost = self.socket_host
+        print("Server listening on host %s, port %s." % (displayHost, self.socket_port))
+        print("Server listening on port %s." % (`self.os_socket.getsockname()`))
+        while True:
+            self.Select(timeout=None)
+
+class SocketWrapperClient(SocketWrapper):
+    def __init__(self, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
+        super().__init__(IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsSocketBlocking=False, Verbose=Verbose)
+        self.connected = False
+        self.connect_in_progress = False
+        self.thread = None
+        self.verbose = Verbose
+
+    # connect()
+    #
+    # Operation of connect in non-blocking mode is a bit surprising:
+    #
+    # If the connection cannot be established immediately and O_NONBLOCK is set for the file descriptor
+    # for the socket, connect() shall fail and set errno to [EINPROGRESS], but the connection request 
+    # shall not be aborted, and the connection shall be established asynchronously. Subsequent calls 
+    # to connect() for the same socket, before the connection is established, shall fail and set 
+    # errno to [EALREADY].
+    #
+    # The above applies to both OSX and Rapbian, but the specific error numbers are different.
+    #
+    # Connect may be called redundently due to the asynchronous nature of socket communication
+    # in multiple application and OS threads. Once connected, don't do anything here,
+    # assuming this is some sort of race condition.
+    #
+    # As this has eveolved, clients are now always socket i/o blocking. I have left some
+    # of the non-blocking code in place because it is hard-won knowledge that may be useful
+    # again. Client socket operations are almost always sequential, so they might as well be
+    # blocking. This client supports threading so the main applicaion loop runs even when
+    # socket functions are blocked.
+    #
+    def ConnectAsync(self, host=None, port=None, keepalive=60):
+        try:
+            self.os_socket.connect((self.socket_host, self.socket_port))
+            self.connected = True
+            return True
+        except socket.error as e:
+            if e.errno in [36, 56, 115]:
+                # Succesful non-blocking connection innitiaion
+                # raises 36 under OSX or 115 under Raspbian.
+                # Repeated attemps raises same error without disturbing connection.
+                # Error 56 signifies success, its not an error.
+                # Otherwise, we could check for completion with poll or select
+                # or maybe poll2 or select2. I saw comment about these but haven't tested.
+                # socket.error: [Errno 36] Operation now in progress
+                # socket error: [Errno 56] Socket is already connected
+                # socket.error: [Errno 115] Operation now in progress
+                if e.errno == 56:
+                    self.connected = True
+                    self.connect_in_progress = False
+                    return True
+                else:
+                    self.connected = False
+                    self.connect_in_progress = True
+                    return False				# not connected but not a hard failure
+            else:
+                raise
+
+    def Connect(self, host=None, port=None, keepalive=60, timeout=None):
+        # This is a blocking connect()
+        # It is safe to call this redundantly after connect_async() starts
+        # the process but the application has no other work to do.
+        # Fast LAN connect times seem to be a few tens of miliseconds, a few seconds
+        # is not that unusual talking to busy servers over slow connections.
+        # The logic of blocking / non-blocking socket i/o is a bit different for
+        # connect than data transfers. The original connect happens before the
+        # new process thread is started. connect_async() allows the application to 
+        # remain respomsive during start-up.
+        start_time = time.time()
+        while not self.connected:
+            self.ConnectAsync(host=host, port=port, keepalive=keepalive)
+            if not self.connected:
+                if timeout is not None:
+                    if (time.time() - start_time) > timeout:
+                        return False
+                time.sleep(0.01)
+        return True
+
+    def loop_start(self):
+        self.thread = threading.Thread(target=self.loop_forever)
+        self.thread.start()
+
+    def loop_stop(self, force=False):
+        # unused force parameter exists for mosquitto compatibility
+        if self.thread is not None:
+            self.thread.stop()
+            self.thread = None
+
+    def loop_forever(self):
+        while True:
+            self.select(timeout=None)
+
     def BlockingWriteSocket(self, msg):
         # For clients that want to block while sending
         retry_ct = 0
         while retry_ct < 10:
             try:
-                self.server.sendall(msg)
+                self.os_socket.sendall(msg)
                 return True
             except socket.error as e:
                 print("BLOCKING", e)
@@ -333,7 +471,7 @@ class SelectServer(object):
                 retry_ct += 1
         return False
 
-class FileServer(SelectServer):
+class FileServer(SocketWrapperServer):
     def __init__(self, Verbose=True):
         super().__init__(IniSection="FileServer", Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
@@ -345,18 +483,11 @@ class FileServer(SelectServer):
         f = open(fp, 'rb')
         c = f.read()
         f.close()
-        message = "{}\x00{}\x01".format(len(c), c)
-        # Need to think about this. Should queueu creation be here
-        # and in FastMqtt or in SelectServer?
-        if not s in self.outputQueues:
-            self.outputQueues[s] = Queue.Queue()
-        self.outputQueues[s].put(message)
-        if s not in self.outputSockets:
-            self.outputSockets.append(s)
+        self.QueueMessageZ([len(c), c], s=s)
 
-class FileClient(SelectServer):
+class FileClient(SocketWrapperClient):
     def __init__(self, Verbose=False):
-        super().__init__(IniSection="FileClient", IsServer=False, IsZeroOneProtocol=False, Verbose=Verbose)
+        super().__init__(IniSection="FileClient", IsZeroOneProtocol=False, Verbose=Verbose)
         self.Init()
 
     def Init(self):
@@ -378,7 +509,7 @@ class FileClient(SelectServer):
             # So some patience is needed. Somewhere there is some latency or
             # inconsistency of block / no block. Or one of hte OSes trying to be polite.
             time.sleep(1)
-            print("FC TRY CONNECT", self.broker_host, self.broker_port)
+            print("FC TRY CONNECT", self.socket_host, self.socket_port)
             self.connect()
         print("FC CONNECTED")
         self.file_name = filename
@@ -398,7 +529,7 @@ class FileClient(SelectServer):
 
     def Reader(self):
         try:
-            d = self.server.recv(1024)
+            d = self.os_socket.recv(1024)
         except socket.error as e:
             if e.errno == 35:
                 # resource temporarily unavailble
@@ -462,7 +593,7 @@ class MessageArchiver(object):
 # There is only one queue per client, so be careful about subscribing to high
 # volume topics for time sensitive processes.
 #
-class FastMqttServer(SelectServer):
+class FastMqttServer(SocketWrapperServer):
     def __init__(self, Verbose=False):
         super().__init__(IniSection="MqttFastServer", Verbose=Verbose)
         self.mqttPayloads = {}
@@ -513,28 +644,18 @@ class FastMqttServer(SelectServer):
                 self.subscriptions[topic] = [s]
 
     def SendMessage(self, s, topic):
-        if not s in self.outputQueues:
-            self.outputQueues[s] = Queue.Queue()
-        if topic in self.mqttPayloads:
-            mid, payload = self.mqttPayloads[topic]
-        else:
-            mid = 0
-            payload = ''
-        message = "message\x00%s\x00%d\x00%s\x01" % (topic, mid, payload)
-        self.outputQueues[s].put(message)
-        self.message_out_ct += 1
-        if s not in self.outputSockets:
-            self.outputSockets.append(s)
+        self.QueueMessageZ(['message', topic, mid, payload], s=s)
 
-class FastMqttClient(SelectServer):
-    def __init__(self):
-        super().__init__(IniSection="MqttBroker", IsServer=False)
+class FastMqttClient(SocketWrapperClient):
+    # Many of these function names are lower case to be consistent with paho.mqtt.client.
+    def __init__(self, Verbose=False):
+        super().__init__(IniSection="MqttBroker", Verbose=Verbose)
         self.thread = None
         self.on_message = None
         self.on_connect = None
 
     def connect(self, **kwargs):
-        super().connect(**kwargs)
+        super().Connect(**kwargs)
         if self.on_connect is not None:
             client = None			# not implemented
             userdata = None			# not implemented
@@ -560,8 +681,21 @@ class FastMqttClient(SelectServer):
         message = "read\x00%s\x01" % (topic)
         return self.BlockingWriteSocket(message)
 
-    def subscribe(self, topic, qos):
-        self.server.sendall("subscribe\x00%s\x01" % (topic))
+    def subscribe(self, topic, qos, timeout=1.0):
+        packet_sent = False
+        start_time = time.time()
+        while not packet_sent:
+            try:
+                print("SUBSCRIBE", topic)
+                self.os_socket.sendall("subscribe\x00%s\x01" % (topic))
+                packet_sent = False
+            except socket.error as e:
+                # socket.error: [Errno 11] Resource temporarily unavailable
+                if e.errno == 11:
+                    return
+                if (e.errno == 11) and ((time.time() - start_time) < timeout):
+                    continue
+                raise
 
     def ProcessMessage(self, s, message):
         if message[0] == '':
@@ -658,8 +792,8 @@ class mqtt_node(object):
             iniSection = 'MqttBroker'		# Mosquitto
         else:
             iniSection = 'MqttFast'
-        self.broker_host = self.config.get(iniSection, "Host")
-        self.broker_port = int(self.config.get(iniSection, "Port"))	# 1883
+        self.socket_host = self.config.get(iniSection, "Host")
+        self.socket_port = int(self.config.get(iniSection, "Port"))	# 1883
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
@@ -684,6 +818,8 @@ class mqtt_node(object):
             print("Non-Blocking Mode")
 
     def Connect(self, timeout=0):
+        if self.mqttcConnected:
+            return
         if self.blocking_mode:
             timeout = None			# if blocking, always block till connected
         if self.broker_type == "M":
@@ -694,21 +830,24 @@ class mqtt_node(object):
         self.mqttc.on_message = self.on_message
         self.mqttc.on_connect = self.on_connect
         # Connect
-        self.mqttcConnected = False
         connect_time = time.time()
         while not self.mqttcConnected:
-            try:
-                self.mqttc.connect(host=self.broker_host, port=self.broker_port)
+            print("AAA")
+            #try:
+            self.mqttc.connect(host=self.socket_host, port=self.socket_port)
+            if self.broker_type == "M":
                 self.mqttcConnected = True
-            except socket.error as e:
-                self.lastSocketError = e.errno
-                print ("vnavs_mqtt: unable to connect to broker error %d @ %s:%s" % (e.errno, self.broker_host, self.broker_port))
+            else:
+                self.mqttcConnected = self.mqttc.connected
+            #except socket.error as e:
+            #    self.lastSocketError = e.errno
+            #    print ("vnavs_mqtt: unable to connect to broker error %d @ %s:%s" % (e.errno, self.socket_host, self.socket_port))
             if not self.mqttcConnected:
                 if timeout is None:
                     pass			# block forever till connected
                 elif (time.time() - connect_time) >= timeout:
                     return False
-                time.sleep(1)
+                time.sleep(10)
         if self.blocking_mode:
             if self.blocking_timeout is None:
                 self.mqttc.loop_forever()
@@ -720,9 +859,6 @@ class mqtt_node(object):
             # this starts a separate thread which is handy, but tkinter and others don't support threads
             self.mqttc.loop_start()
             return True
-
-    def ConnectWait(self):
-        self.Connect(timeout=None)
 
     def CheckMqtt(self):
          # Blocking mode nodes with BlockingTimeoutSecs not None need

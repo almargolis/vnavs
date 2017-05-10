@@ -116,7 +116,7 @@ class NavStep(object):
         self.softTimeLimit = 0
 
 class navigator(vnavs_mqtt.mqtt_node):
-    def __init__(self, Verbose=False):
+    def __init__(self, Verbose=True):
         super().__init__(Subscriptions=['navigator/mode', 'navigator/service',
 					'engineer_1/gps', 'engineer_1/imu',
 					'cameraman/last'
