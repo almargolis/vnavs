@@ -196,13 +196,14 @@ class SocketWrapper(object):
         #
         self.isServer = IsServer
         self.isZeroOneProtocol = IsZeroOneProtocol
+        self.message_out_ct = 0
         self.os_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.os_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.is_socket_blocking = IsSocketBlocking
         if self.is_socket_blocking:
-            self.os_socket.setblocking(0)
-        else:
             self.os_socket.setblocking(1)
+        else:
+            self.os_socket.setblocking(0)
         self.verbose = Verbose
         self.InitSelectData()
 
@@ -230,8 +231,8 @@ class SocketWrapper(object):
         self.os_socket.close()
         self.InitSelectData()
 
-    def PrintError(self, e):
-        print("Socket error ", e.errno)
+    def PrintError(self, loc, e):
+        print("Socket Error @ %s [%s] %s" % (loc, e.errno, e.strerror))
 
     def ProcessReceivedPacket(self, s, data):
         # This colates messages using zero/one protocol.
@@ -288,6 +289,7 @@ class SocketWrapper(object):
         #print('LOOP waiting for the next event', self.inputSockets, timeout)
         readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
         for s in readable:
+            print("READABLE")
             if self.isServer and (s is self.os_socket):
                 # A "readable" server socket is ready to accept a connection
                 connection, client_address = s.accept()
@@ -300,7 +302,7 @@ class SocketWrapper(object):
                     data = s.recv(1024)
                 except socket.error as e:
                     # I have seen e.errno = 54 and 104 as] "Connection reset by peer"
-                    self.PrintError(e)
+                    self.PrintError('Select:readable', e)
                     if self.isServer:
                         if s is self.os_socket:
                             self.disconnect()
@@ -309,7 +311,7 @@ class SocketWrapper(object):
                             self.CloseClientConnection(s)
                         data = None
                     else:
-                        self.disconnect()
+                        self.Disconnect()
                         raise
                 if data:
                     if self.isZeroOneProtocol:
@@ -331,7 +333,8 @@ class SocketWrapper(object):
                     s.send(next_msg)
                     if self.verbose:
                         print("SEND", next_msg)
-                except socket.error:
+                except socket.error as e:
+                    self.PrintError('Select:writeable', e)
                     if self.isServer:
                         # socket.error: [Errno 104] Connection reset by peer (I ctrl-C client)
                         self.CloseClientConnection(s)
@@ -347,10 +350,9 @@ class SocketWrapper(object):
 
 class SocketWrapperServer(SocketWrapper):
     def __init__(self, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
-        super().__init__(IniSection=IniSection, IsZeroProtocol=IsZeroProtocol, IsServer=True, IsSocketBlocking=False, Verbose=Verbose)
-        self.InitServerData()
+        super().__init__(IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsServer=True, IsSocketBlocking=False, Verbose=Verbose)
 
-    def serve(self, host=None, port=None):
+    def Serve(self, host=None, port=None):
         if host is not None:
             self.socket_host = host
         if port is not None:
@@ -397,11 +399,17 @@ class SocketWrapperClient(SocketWrapper):
     # socket functions are blocked.
     #
     def ConnectAsync(self, host=None, port=None, keepalive=60):
+        if host is not None:
+            self.socket_host = host
+        if port is not None:
+            self.socket_port = port
         try:
             self.os_socket.connect((self.socket_host, self.socket_port))
             self.connected = True
+            print("ConnectAsync() DirectConnect")
             return True
         except socket.error as e:
+            print("ConnectAsync() Socket Err", e.errno)
             if e.errno in [36, 56, 115]:
                 # Succesful non-blocking connection innitiaion
                 # raises 36 under OSX or 115 under Raspbian.
@@ -455,7 +463,7 @@ class SocketWrapperClient(SocketWrapper):
 
     def loop_forever(self):
         while True:
-            self.select(timeout=None)
+            self.Select(timeout=None)
 
     def BlockingWriteSocket(self, msg):
         # For clients that want to block while sending
@@ -465,8 +473,9 @@ class SocketWrapperClient(SocketWrapper):
                 self.os_socket.sendall(msg)
                 return True
             except socket.error as e:
-                print("BLOCKING", e)
+                self.PrintError('BlockingWriteSocket', e)
                 # socket.error: [Errno 11] Resource temporarily unavailable
+                # socket.error: [Errno 32] Broken pipe
                 # need to check Errno - kept running even when server died
                 retry_ct += 1
         return False
@@ -595,6 +604,7 @@ class MessageArchiver(object):
 #
 class FastMqttServer(SocketWrapperServer):
     def __init__(self, Verbose=False):
+        Verbose = True
         super().__init__(IniSection="MqttFastServer", Verbose=Verbose)
         self.mqttPayloads = {}
         self.subscriptions = {}
@@ -673,13 +683,15 @@ class FastMqttClient(SocketWrapperClient):
             return (mqtt.MQTT_ERR_NO_CONN, mid)
 
     def publish(self, topic, msg, qos=0):
-        message = "publish\x00%s\x00%s\x01" % (topic, msg)
-        return self.BlockingWriteSocket(message)
+        self.QueueMessageZ(['publish', topic, msg])
+        mid = 0					# not implemented -- message id
+        return (mqtt.MQTT_ERR_SUCCESS, mid)
 
     def read(self, topic, qos=0):
         # This is a non-repeating request to get the latest message
-        message = "read\x00%s\x01" % (topic)
-        return self.BlockingWriteSocket(message)
+        self.QueueMessageZ(['read', topic])
+        mid = 0					# not implemented -- message id
+        return (mqtt.MQTT_ERR_SUCCESS, mid)
 
     def subscribe(self, topic, qos, timeout=1.0):
         packet_sent = False
@@ -687,8 +699,8 @@ class FastMqttClient(SocketWrapperClient):
         while not packet_sent:
             try:
                 print("SUBSCRIBE", topic)
-                self.os_socket.sendall("subscribe\x00%s\x01" % (topic))
-                packet_sent = False
+                self.QueueMessageZ(['subscribe', topic])
+                packet_sent = True
             except socket.error as e:
                 # socket.error: [Errno 11] Resource temporarily unavailable
                 if e.errno == 11:
@@ -709,6 +721,26 @@ class FastMqttClient(SocketWrapperClient):
                 client = None			# not implemented
                 userdata = None			# not implemented
                 self.on_message(client, userdata, mqtt_message)
+
+class PahoClient(mqtt.Client):
+    # This should be a very thin wrapper.
+    # FastMqttClient() should have as close to identical API as Paho client.
+    # This object reconiles any unavoidable differences so mqtt_node works
+    # with either server. 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.connected = False
+        self.connect_in_progress = False
+
+    def connect(self, *args, **kwargs):
+        super().connect(*args, **kwargs)
+        self.connected = True
+        self.connect_in_progress = False
+
+    def disconnect(self):
+        super().disconnect()
+        self.connected = False
+        self.connect_in_progress = False
 
 class FastMqttMessage(object):
     def __init__(self, topic, payload, qos=0, mid=0):
@@ -790,16 +822,16 @@ class mqtt_node(object):
         self.broker_type = BrokerType
         if self.broker_type == 'M':
             iniSection = 'MqttBroker'		# Mosquitto
+            self.mqttc = PahoClient()
         else:
             iniSection = 'MqttFast'
+            self.mqttc = FastMqttClient()
         self.socket_host = self.config.get(iniSection, "Host")
         self.socket_port = int(self.config.get(iniSection, "Port"))	# 1883
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
         self.loop_sleep = 0			# set if we don't want to slow loop frequency
-        self.mqttc = None
-        self.mqttcConnected = False
         self.lastSocketError = None
         self.pendingReads = {}
         self.arrivedReads = {}
@@ -818,31 +850,28 @@ class mqtt_node(object):
             print("Non-Blocking Mode")
 
     def Connect(self, timeout=0):
-        if self.mqttcConnected:
+        if self.mqttc.connected:
             return
         if self.blocking_mode:
             timeout = None			# if blocking, always block till connected
-        if self.broker_type == "M":
-            self.mqttc = mqtt.Client()
-        else:
-            self.mqttc = FastMqttClient()
         # Assign event callbacks
         self.mqttc.on_message = self.on_message
         self.mqttc.on_connect = self.on_connect
         # Connect
         connect_time = time.time()
-        while not self.mqttcConnected:
+        while not self.mqttc.connected:
             print("AAA")
             #try:
             self.mqttc.connect(host=self.socket_host, port=self.socket_port)
-            if self.broker_type == "M":
-                self.mqttcConnected = True
-            else:
-                self.mqttcConnected = self.mqttc.connected
+            #if self.broker_type == "M":
+            #else:
             #except socket.error as e:
             #    self.lastSocketError = e.errno
             #    print ("vnavs_mqtt: unable to connect to broker error %d @ %s:%s" % (e.errno, self.socket_host, self.socket_port))
-            if not self.mqttcConnected:
+            if self.mqttc.connected:
+                print("mqtt_node() connected")
+            else:
+                print("mqtt_node() NOT connected")
                 if timeout is None:
                     pass			# block forever till connected
                 elif (time.time() - connect_time) >= timeout:
@@ -869,18 +898,23 @@ class mqtt_node(object):
          try:
              self.mqttc.loop(timeout=self.blocking_timeout)
          except socket.error:
-            self.mqttcConnected = False
+            # THIS IS WRONG
+            # connected will be handled by mqttc client object.
+            # I need to figure out who to save data for logging and
+            # reconnect to server when possible.
+            # Maybe do an E-Stop sort of thing.i
+            # Helmsman stiops on e-stop. Other may change mode, signal operator, whtever
+            self.mqttc.connected = False
 
     def Disconnect(self):
         if not self.blocking_mode:
             self.mqttc.loop_stop(force=False)
         self.mqttc.disconnect()
-        self.mqttcConnected = False
 
     def Loop(self):
         try:
             while True:
-                if not self.mqttcConnected:
+                if not self.mqttc.connected:
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
                     self.Connect()
@@ -943,7 +977,7 @@ class mqtt_node(object):
     def Get(self, topic, source=None, timeout=1.0):
         # Get the most recent message without repeats and automatically request more.
         # Expect frequent None
-        if not self.mqttcConnected:
+        if not self.mqttc.connected:
             # for now, silently ignore publish errors. Need to do better
             return
         if source is None:
@@ -957,7 +991,7 @@ class mqtt_node(object):
         return None
 
     def Read(self, topic, source=None, timeout=1.0):
-        if not self.mqttcConnected:
+        if not self.mqttc.connected:
             # for now, silently ignore publish errors. Need to do better
             return
         if source is None:
@@ -975,7 +1009,7 @@ class mqtt_node(object):
 
     def Publish(self, topic, payload, source=None):
         # payload is a dict to be converted to JSON)
-        if not self.mqttcConnected:
+        if not self.mqttc.connected:
             # for now, silently ignore publish errors. Need to do better
             return
         if source is None:
@@ -1124,8 +1158,7 @@ if __name__ == "__main__":
         s.loop_forever()
     elif sys.argv[1] == 'm':
         s = FastMqttServer(Verbose=verbose)
-        s.connect()
-        s.loop_forever()
+        s.Serve()
     elif sys.argv[1] == 'fpub':
         s = FastMqttUtil()
         s.Connect()
