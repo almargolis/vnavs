@@ -642,8 +642,13 @@ class FastMqttServer(SocketWrapperServer):
                     if sendSocket in self.inputSockets:
                         # we get here for subscription by still-connected sockets
                         newSubscriptionList.append(sendSocket)
-                        self.SendMessage(sendSocket, topic)
+                        self.QueueMessageZ(['message', topic, `self.message_in_ct`, payload], s=sendSocket)
+                        print("PUBLISH", topic, "Queued")
+                    else:
+                        print("PUBLISH", topic, "Socket unknown")
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
+            else:
+                print("PUBLISH", topic, "No Subscribers")
             if topic == 'navigator/mode':
                 payload_dict = json.loads(payload)
                 mode = payload_dict['mode']
@@ -655,7 +660,12 @@ class FastMqttServer(SocketWrapperServer):
             self.archiver.Archive(self.message_in_ct, server_time, payload)
         elif action == 'read':
             topic = message[1]
-            self.SendMessage(s, topic)
+            if topic in self.mqttPayloads:
+                (mid, payload) = self.mqttPayloads[topic]
+            else:
+                mid = 0
+                payload = '{}'
+            self.QueueMessageZ(['message', topic, `mid`, payload], s=s)
             print("READ", topic)
         elif action == 'subscribe':
             topic = message[1]
@@ -664,9 +674,7 @@ class FastMqttServer(SocketWrapperServer):
                     self.subscriptions[topic].append(s)
             else:
                 self.subscriptions[topic] = [s]
-
-    def SendMessage(self, s, topic):
-        self.QueueMessageZ(['message', topic, mid, payload], s=s)
+            print("SUBSCRIPTIONS", topic, len(self.subscriptions[topic]))
 
 class FastMqttClient(SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.
