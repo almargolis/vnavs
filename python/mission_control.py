@@ -34,7 +34,8 @@ BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=['cameraman/last',
-						'engineer_1/status',
+						'engineer_1/gps',
+						'engineer_1/imu',
 						'helmsman/orders',
 						'MissionControl/notice',
 						'navigator/status'
@@ -42,7 +43,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 			Readers=[
 						'cameraman/pic_ready'
 						],
-						Blocking=True, BlockingTimeoutSecs=0.1,
+						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
 						Verbose=Verbose)
         self.lastfn = ""
