@@ -70,7 +70,7 @@ class process(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=['process/orders'],
 					Readers=[],
-					Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.process_specs = self.config.items("ProcessMonitor")
         self.startTime = time.time()

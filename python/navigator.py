@@ -122,7 +122,7 @@ class navigator(vnavs_mqtt.mqtt_node):
 					'cameraman/last'
 					],
 					Readers=[],
-					Blocking=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.missionDir = self.config.get("Pilot", "MissionDir")
         self.longitude = 0
@@ -390,7 +390,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         # Maybe only run when in paused or manual mode.
         self.ProcessServiceRequest()
         #
-        if not self.mqttcConnected:
+        if not self.mqttc.connected:
             return
         if (self.mode == 'G') and (len(self.mission.waypoints) > 0) and (self.mission.waypoints[self.mission.waypointIx][0] == "M"):
             #print("MAGIC")
