@@ -337,6 +337,9 @@ class SocketWrapper(object):
             except Queue.Empty:
                 # No messages waiting so stop checking for writability.
                 self.outputSockets.remove(s)
+            except KeyError:
+                # This happened to a client *mission_control.py). Apparently when FastMqtt crashed.
+                pass			# socket buffer available, but no messages to send
             else:
                 try:
                     s.send(next_msg)
@@ -702,7 +705,7 @@ class FastMqttClient(SocketWrapperClient):
             mid = 0				# not sue if this matches Paho MQTT behavior
             return (mqtt.MQTT_ERR_NO_CONN, mid)
 
-    def loop(timeout):
+    def loop(self, timeout=1.0):
         self.Select(timeout=timeout)
 
     def loop_forever(self):
@@ -929,6 +932,7 @@ class mqtt_node(object):
          # may seem like an oxymoron.
          #
          try:
+             print("TTT", self.select_timeout)
              self.mqttc.loop(timeout=self.select_timeout)
          except socket.error:
             # THIS IS WRONG
