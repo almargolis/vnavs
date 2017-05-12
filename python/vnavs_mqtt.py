@@ -298,7 +298,7 @@ class SocketWrapper(object):
         #print('SELECT waiting for the next event', self.inputSockets, self.outputSockets, timeout)
         readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
         for s in readable:
-            print("READABLE")
+            #print("READABLE")
             if self.isServer and (s is self.os_socket):
                 # A "readable" server socket is ready to accept a connection
                 connection, client_address = s.accept()
@@ -331,7 +331,7 @@ class SocketWrapper(object):
                     # Interpret empty result as closed connection
                     self.CloseClientConnection(s)
         for s in writable:
-            print("SOMETHING WRITABLE")
+            #print("SOMETHING WRITABLE")
             try:
                 next_msg = self.outputQueues[s].get_nowait()
             except Queue.Empty:
@@ -360,7 +360,7 @@ class SocketWrapper(object):
                 self.disconnect()
                 raise
 
-    def SelectForever(self, MaxAllowableWriteLatency=0.01):
+    def SelectForever(self, MaxAllowableWriteLatency=0.001):
         while True:
             self.Select(timeout=MaxAllowableWriteLatency)
 
@@ -951,12 +951,6 @@ class mqtt_node(object):
     def Loop(self):
         try:
             while True:
-                print("LOOP", self.mqttc.connected)
-                if self.mqttc.thread is None:
-                    print("THREAD NO")
-                else:
-                    print("THREAD", self.mqttc.thread.is_alive())
-                time.sleep(1)
                 if not self.mqttc.connected:
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
