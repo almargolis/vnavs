@@ -232,7 +232,7 @@ class SocketWrapper(object):
         self.InitSelectData()
 
     def PrintError(self, loc, e):
-        print("Socket Error @ %s [%s] %s" % (loc, e.errno, e.strerror))
+        print("Exception @ %s: %s [%s] %s" % (loc, e.__class__.__name__, e.errno, e.strerror))
 
     def ProcessReceivedPacket(self, s, data):
         # This colates messages using zero/one protocol.
@@ -425,16 +425,21 @@ class SocketWrapperClient(SocketWrapper):
             print("ConnectAsync() DirectConnect")
             return True
         except socket.error as e:
-            print("ConnectAsync() Socket Err", e.errno)
-            if e.errno in [36, 56, 115]:
+            self.PrintError("ConnectAsync()", e)
+            if e.errno in [36, 56, 111, 115]:
                 # Succesful non-blocking connection innitiaion
                 # raises 36 under OSX or 115 under Raspbian.
                 # Repeated attemps raises same error without disturbing connection.
+                # This is not an error. Just a non-blocking indication that the
+                # connection process has been started.
+                #
                 # Error 56 signifies success, its not an error.
                 # Otherwise, we could check for completion with poll or select
                 # or maybe poll2 or select2. I saw comment about these but haven't tested.
+                #
                 # socket.error: [Errno 36] Operation now in progress
                 # socket error: [Errno 56] Socket is already connected
+                # socket.error: [Errno 111] Connection refused
                 # socket.error: [Errno 115] Operation now in progress
                 if e.errno == 56:
                     self.connected = True
@@ -896,7 +901,6 @@ class mqtt_node(object):
         # Connect
         connect_time = time.time()
         while not self.mqttc.connected:
-            print("AAA")
             #try:
             self.mqttc.connect(host=self.socket_host, port=self.socket_port)
             #if self.broker_type == "M":
@@ -932,7 +936,6 @@ class mqtt_node(object):
          # may seem like an oxymoron.
          #
          try:
-             print("TTT", self.select_timeout)
              self.mqttc.loop(timeout=self.select_timeout)
          except socket.error:
             # THIS IS WRONG
