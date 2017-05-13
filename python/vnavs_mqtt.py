@@ -619,7 +619,6 @@ class MessageArchiver(object):
 #
 class FastMqttServer(SocketWrapperServer):
     def __init__(self, Verbose=False):
-        Verbose = True
         super().__init__(IniSection="MqttFastServer", Verbose=Verbose)
         self.mqttPayloads = {}
         self.subscriptions = {}
@@ -682,7 +681,6 @@ class FastMqttServer(SocketWrapperServer):
 class FastMqttClient(SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.
     def __init__(self, Verbose=False):
-        Verbose = True
         super().__init__(IniSection="MqttBroker", Verbose=Verbose)
         self.on_message = None
         self.on_connect = None
@@ -896,7 +894,6 @@ class mqtt_node(object):
         # Connect
         connect_time = time.time()
         while not self.mqttc.connected:
-            print("AAA")
             #try:
             self.mqttc.connect(host=self.socket_host, port=self.socket_port)
             #if self.broker_type == "M":

@@ -17,9 +17,9 @@ WAYPOINT_WINDOW_METERS = 2.0
 STEER_STRAIGHT_HEADING = 10.0
 STEER_SHARP_HEADING = 90.0
 FORWARD_VERY_SLOW = 6
-FORWARD_SLOW = 4		# too slow for court (maybe depends on battery)
 FORWARD_SLOW = 6		# OK slow for court 
 FORWARD_SLOW = 16		# this is what it took to move well on grass at robogames
+FORWARD_SLOW = 4		# too slow for court (maybe depends on battery)
 FORWARD_FAST = 10
 FORWARD_FAST = 14
 FORWARD_FAST = 8
@@ -122,19 +122,20 @@ class StepAccMotion(MissionStep):
 
     def Load(self, parts):
         self.direction = parts[1]
-        self.distance = parts[2]
+        self.distance = float(parts[2])
 
     def DoMissionStep(self, nav):
         step = NavStep()
         step.steering = 'A0'
         if self.direction == 'F':
             step.speed = FORWARD_SLOW
-            step.dist_max = nav.self.acc_dist_f + self.distance
+            step.dist_max = nav.acc_dist_f + self.distance
         else:
             step.speed = REVERSE_SLOW
-            step.dist_min = nav.self.acc_dist_f - self.distance
+            step.dist_min = nav.acc_dist_f - self.distance
         nav.nav = step
         nav.PublishNavigation()
+        return True
 
 class Mission(object):
     def __init__(self, MissionDir, MissionName=None):
@@ -183,6 +184,7 @@ class Mission(object):
         return waypoints
 
     def SaveMission(self, MissionName=None):
+        return
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
@@ -193,6 +195,7 @@ class Mission(object):
         f.close
 
     def SaveNavigation(self, MissionName=None):
+        return
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
@@ -228,7 +231,7 @@ class NavStep(object):
         self.softTimeLimit = 0
 
 class navigator(vnavs_mqtt.mqtt_node):
-    def __init__(self, Verbose=True):
+    def __init__(self, Verbose=False):
         super().__init__(Subscriptions=['navigator/mode', 'navigator/service',
 					'engineer_1/gps', 'engineer_1/imu',
 					'cameraman/last'
@@ -378,6 +381,7 @@ class navigator(vnavs_mqtt.mqtt_node):
             self.nav.softTimeLimit = time.time() + self.nav.softKeepSeconds
         if self.nav.hardKeepSeconds > 0:
             self.nav.hardTimeLimit = time.time() + self.nav.hardKeepSeconds
+        print("PublishNavigation", payload)
 
     def rmsg_cameraman_last(self, payload):
         self.imageFn = payload['filename']
@@ -412,12 +416,15 @@ class navigator(vnavs_mqtt.mqtt_node):
                 # Start a mission
                 mission_name = payload['missionName']
                 self.Init(MissionName=mission_name)
+                """
+                THIS NEEDS to be activated for GPS
                 self.nav.steering = 'A0'
                 self.nav.speed = FORWARD_SLOW
                 if self.mission.waypoints[self.mission.mission_step_ix][0] == "W":
                     self.nav.untrustedGpsUpdates = INITIAL_GPS_WAIT		# allow gps to settle
                     self.PublishNavigation() 
-            print("MISSION", self.mission.waypoints)
+                """
+            print("MISSION", self.mission.missionName, len(self.mission.mission_steps))
             if (mode == "M") and (self.mode == "G"):
                 # end of gps naviagion
                 self.nav.Init()
@@ -520,8 +527,8 @@ class navigator(vnavs_mqtt.mqtt_node):
         # If we have an active navigation steps, check if should be terminated.
         #
         if self.nav is not None:
-            if (self.nav.hardTimeLimit > 0) or self.gpsReadyForNavigation:
-                print("TL {} GPS Rdy: {}".format(self.nav.hardTimeLimit, self.gpsReadyForNavigation))
+            #if (self.nav.hardTimeLimit > 0) or self.gpsReadyForNavigation:
+            #    print("TL {} GPS Rdy: {}".format(self.nav.hardTimeLimit, self.gpsReadyForNavigation))
             if self.nav.hardTimeLimit > 0:
                 # if there is a time limit, just follow those orders until they expire.
                 # if there is an unexpired time limit, untrustedGpsUpdates is ignored, we don't get that far.
@@ -530,10 +537,17 @@ class navigator(vnavs_mqtt.mqtt_node):
                     if not self.CheckYawForCompletedManuever():
                         return				# not ended, continue timed order
             if self.nav.dist_max is not None:
-                if self.acc_dist_f < self.nav.dist_max:
+                if self.acc_dist_f > self.nav.dist_max:
+                    self.EStop()
+                    self.nav = None
+                else:
+                    print("FWD", self.acc_dist_f,  self.nav.dist_max, (self.nav.dist_max - self.acc_dist_f))
                     return
             if self.nav.dist_min is not None:
-                if self.acc_dist_f > self.nav.dist_max:
+                if self.acc_dist_f < self.nav.dist_max:
+                    self.EStop()
+                    self.nav = None
+                else:
                     return
         #
         # The previous navigation step has expired or ended by IMU yaw, check if there are any other
@@ -547,8 +561,9 @@ class navigator(vnavs_mqtt.mqtt_node):
         # See what the mission step wants to do
         # 
         if self.mission.mission_step_ix < len(self.mission.mission_steps):
-            step = self.mission.mission_steps[self.misssion.mission_step_ix]
-            mission_step_finis = step.DoMissionStep(nav)
+            print("DoLoop/DoMissionStep", self.mission.mission_step_ix)
+            step = self.mission.mission_steps[self.mission.mission_step_ix]
+            mission_step_finis = step.DoMissionStep(self)
             if mission_step_finis:
                 self.mission.mission_step_ix += 1
         else:
