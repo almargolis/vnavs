@@ -10,6 +10,7 @@ import select
 import socket
 import sys
 import threading
+import traceback
 import time
 
 import paho.mqtt.client as mqtt
@@ -197,15 +198,18 @@ class SocketWrapper(object):
         self.isServer = IsServer
         self.isZeroOneProtocol = IsZeroOneProtocol
         self.message_out_ct = 0
+        self.is_socket_blocking = IsSocketBlocking
+        self.InitSocket()
+        self.verbose = Verbose
+        self.InitSelectData()
+
+    def InitSocket(self):
         self.os_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.os_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.is_socket_blocking = IsSocketBlocking
         if self.is_socket_blocking:
             self.os_socket.setblocking(1)
         else:
             self.os_socket.setblocking(0)
-        self.verbose = Verbose
-        self.InitSelectData()
 
     def InitSelectData(self):
         self.inputSockets = [ self.os_socket ]
@@ -232,7 +236,7 @@ class SocketWrapper(object):
         self.InitSelectData()
 
     def PrintError(self, loc, e):
-        print("Socket Error @ %s [%s] %s" % (loc, e.errno, e.strerror))
+        print("Exception @ %s: %s [%s] %s" % (loc, e.__class__.__name__, e.errno, e.strerror))
 
     def ProcessReceivedPacket(self, s, data):
         # This colates messages using zero/one protocol.
@@ -361,6 +365,11 @@ class SocketWrapper(object):
                 raise
 
     def SelectForever(self, MaxAllowableWriteLatency=0.001):
+        # This error 9 occurs in the OS select call for a client if the server goes
+        # away. That kills the SocketWrapper thread but leaves the main thread 
+        # running but not communicating. This is now trapped in Loop() by checking
+        # thread.is_alive().
+        # error: [Errno 9] Bad file descriptor
         while True:
             self.Select(timeout=MaxAllowableWriteLatency)
 
@@ -425,22 +434,40 @@ class SocketWrapperClient(SocketWrapper):
             print("ConnectAsync() DirectConnect")
             return True
         except socket.error as e:
-            print("ConnectAsync() Socket Err", e.errno)
-            if e.errno in [36, 56, 115]:
+            self.PrintError("ConnectAsync()", e)
+            if e.errno in [22, 36, 37, 56, 61, 111, 115]:
                 # Succesful non-blocking connection innitiaion
                 # raises 36 under OSX or 115 under Raspbian.
-                # Repeated attemps raises same error without disturbing connection.
+                # Repeated attemps raises 37 under OSX or 115 under Raspbian 
+                # without disturbing connection.
+                # This is not an error. Just a non-blocking indication that the
+                # connection process has been started or is continuing.
+                #
                 # Error 56 signifies success, its not an error.
                 # Otherwise, we could check for completion with poll or select
                 # or maybe poll2 or select2. I saw comment about these but haven't tested.
+                #
+                # If server is down, OSX reports 36 then 61, then 22. Error 22 then
+                # repeats and the socket never connects, even when the server becomes available.
+                # In a long loop of failures waiting for the server to come up,
+                # OSX sometimes reports 37 after 36 instead of 61.
+                # Raspbian reports 111 and then 115 repeated and smoothly connects
+                # whenever the server becomes available.
+                #
+                # socket.error: [Errno 22] Invalid argument
                 # socket.error: [Errno 36] Operation now in progress
+                # socket.error: [Errno 37] Operation already in progress
                 # socket error: [Errno 56] Socket is already connected
+                # socket.error: [Errno 61] Connection refused
+                # socket.error: [Errno 111] Connection refused
                 # socket.error: [Errno 115] Operation now in progress
                 if e.errno == 56:
                     self.connected = True
                     self.connect_in_progress = False
                     return True
                 else:
+                    if e.errno == 22:
+                        self.InitSocket()
                     self.connected = False
                     self.connect_in_progress = True
                     return False				# not connected but not a hard failure
@@ -854,14 +881,7 @@ class mqtt_node(object):
         self.handlers = {}
         self.wildcardHandler = None
         self.broker_type = BrokerType
-        if self.broker_type == 'M':
-            iniSection = 'MqttBroker'		# Mosquitto
-            self.mqttc = PahoClient()
-        else:
-            iniSection = 'MqttFast'
-            self.mqttc = FastMqttClient()
-        self.socket_host = self.config.get(iniSection, "Host")
-        self.socket_port = int(self.config.get(iniSection, "Port"))	# 1883
+        self.InitMqttClient()
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
@@ -882,6 +902,16 @@ class mqtt_node(object):
             print("Blocking Mode")
         else:
             print("Non-Blocking Mode")
+
+    def InitMqttClient(self):
+        if self.broker_type == 'M':
+            iniSection = 'MqttBroker'		# Mosquitto
+            self.mqttc = PahoClient()
+        else:
+            iniSection = 'MqttFast'
+            self.mqttc = FastMqttClient()
+        self.socket_host = self.config.get(iniSection, "Host")
+        self.socket_port = int(self.config.get(iniSection, "Port"))	# 1883
 
     def Connect(self, timeout=0):
         if self.mqttc.connected:
@@ -929,7 +959,6 @@ class mqtt_node(object):
          # may seem like an oxymoron.
          #
          try:
-             print("TTT", self.select_timeout)
              self.mqttc.loop(timeout=self.select_timeout)
          except socket.error:
             # THIS IS WRONG
@@ -954,6 +983,20 @@ class mqtt_node(object):
                     self.Connect()
                 if self.single_threaded:
                     self.CheckMqtt()
+                if self.mqttc.connected:
+                    if self.mqttc.thread is not None:
+                        if not self.mqttc.thread.is_alive():
+                            # The thread has died. Probably due to an untrapped exception.
+                            # This should be logged and we should probably try to save
+                            # state information like queued messages and message counts
+                            # for the new connection. FUTURE WORK.
+                            # This has been tested as working in the event that a
+                            # thread dies in an unexpected way. I'm now going
+                            # to add exsception logic to the thread so this never
+                            # gets here again.
+                            print("THREAD DEAD")
+                            self.InitMqttClient()
+                            self.Connect()
                 self.DoLoop()
                 if self.CheckExceptions():
                     sys.exit(0)
