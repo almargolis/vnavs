@@ -41,7 +41,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.gps_differential = 'X'		# A=autonomous, D=differeential GPS
         self.gps_mode = '1'			# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites 
         self.timestamp = 0
-        self.newData = False
+        self.newGpsData = False
         self.gps_port= serial.Serial(
 					port = '/dev/ttyAMA0',
 					baudrate = 9600,
@@ -53,9 +53,10 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.sense = SenseHat()
         self.sense.set_imu_config(False, True, False)
         self.last_position_message_time = time.time()
-        self.speed_forward = 0
-        self.speed_sideways = 0
-        self.speed_last_time = None
+        self.acc_speed_forward = 0
+        self.acc_dist_forward = 0
+        self.acc_speed_sideways = 0
+        self.acc_speed_last_time = None
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
@@ -80,18 +81,19 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         #
         # Estimate speed using accelerometer
         #
-        if self.speed_last_time is None:
-            self.speed_last_time = time.time()
+        if self.acc_speed_last_time is None:
+            self.acc_speed_last_time = time.time()
         now = time.time()
-        interval = now - self.speed_last_time
-        self.speed_last_time = now
+        acc_interval = now - self.acc_speed_last_time
+        self.acc_speed_last_time = now
         if self.gps_speed < 0.03:
-            self.speed_forward = 0
-            self.speed_sideways = 0
+            self.acc_speed_forward = 0
+            self.acc_speed_sideways = 0
         else:
             accel = self.sense.get_accelerometer_raw()
-            self.speed_forward += (accel['x'] * interval)
-            self.speed_sideways += (accel['y'] * interval)
+            self.acc_speed_forward += (accel['x'] * acc_interval)
+            self.acc_speed_sideways += (accel['y'] * acc_interval)
+        self.acc_dist_forward += self.acc_speed_forward * acc_interval
         #
         if gps_parsed is not None:
             if gps_parsed.sentence_type == 'GSA':
@@ -147,7 +149,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                     except ValueError:
                         print("Invalid RMC heading", `heading_raw`)
                 self.gps_differential = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
-                self.newData = True
+                self.newGpsData = True
                 """
                 print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
 					self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude, 
@@ -156,40 +158,38 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 """
                 if self.goal_run:
                     self.PathToGoal(gps_parsed)
-        if self.newData:
-            # we have new GPS Data
-            #print(self.gps_speed, self.longitude, self.latitude)
+        if self.newGpsData or ((time.time() - self.last_position_message_time) > SEND_POSITION_PERIOD):
+            # always send accelerometer data
             self.orientation = self.sense.get_orientation_degrees()
             payload = {}
             payload['pitch'] = self.orientation['pitch']
             payload['roll'] = self.orientation['roll']
             payload['yaw'] = self.orientation['yaw']		# s/b ~ gps heading ??
-            payload['acc_speed_f'] = self.speed_forward
-            payload['acc_speed_s'] = self.speed_sideways
-            payload['gps_speed'] = self.gps_speed
-            payload['heading'] = self.heading
-            payload['quality'] = self.gps_quality
-            payload['longitude'] = self.longitude
-            payload['latitude'] = self.latitude
-            payload['gps_time'] = `self.timestamp`
-            payload['gps_mode'] = self.gps_mode
-            payload['gps_differential'] = self.gps_differential
-            self.Publish('gps', payload)
-            self.stats.Count('GpsMsg')
-            self.newData = False
+            payload['acc_speed_f'] = self.acc_speed_forward
+            payload['acc_speed_s'] = self.acc_speed_sideways
+            payload['acc_dist_f'] = self.acc_dist_forward
+            payload['acc_interval'] = acc_interval
+            if self.newGpsData:
+                # we have new GPS Data
+                #print(self.gps_speed, self.longitude, self.latitude)
+                payload['gps_speed'] = self.gps_speed
+                payload['heading'] = self.heading
+                payload['quality'] = self.gps_quality
+                payload['longitude'] = self.longitude
+                payload['latitude'] = self.latitude
+                payload['gps_time'] = `self.timestamp`
+                payload['gps_mode'] = self.gps_mode
+                payload['gps_differential'] = self.gps_differential
+                self.newGpsData = False
+                topic = 'gps'
+            else:
+                topic = 'imu'
+            self.Publish(topic, payload)
             self.last_position_message_time = time.time()
-        elif (time.time() - self.last_position_message_time) > SEND_POSITION_PERIOD:
-            # send only IMU Data if not GPS updates available
-            self.orientation = self.sense.get_orientation_degrees()
-            payload = {}
-            payload['yaw'] = self.orientation['yaw']
-            payload['acc_speed_f'] = self.speed_forward
-            payload['acc_speed_s'] = self.speed_sideways
-            self.Publish('imu', payload)
-            self.last_position_message_time = time.time()
-            self.stats.Count('ImuMsg')
-            #print("ACCC %+8.4f %+8.4f GPS: %+8.4f" % (self.speed_forward, self.speed_sideways, self.gps_speed))
+            self.stats.Count(topic + 'Msg')
+            #print("ACCC %+8.4f %+8.4f GPS: %+8.4f" % (self.acc_speed_forward, self.acc_speed_sideways, self.gps_speed))
         self.stats.Print('MSGS')
+        print("DIST", self.acc_dist_forward)
 
 def TestImu():
     sense = SenseHat()
@@ -218,9 +218,9 @@ def TestSensors():
         n['a'] = sense.get_accelerometer_raw()
         #
         now = time.time()
-        interval = now - prev_time
+        acc_interval = now - prev_time
         prev_time = now
-        speed += (n['a']['x'] + 0.062) * interval * 32.0
+        speed += (n['a']['x'] + 0.062) * acc_interval * 32.0
         if speed > max_speed:
             max_speed = speed
         #
