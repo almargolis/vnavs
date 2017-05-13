@@ -10,6 +10,7 @@ import select
 import socket
 import sys
 import threading
+import traceback
 import time
 
 import paho.mqtt.client as mqtt
@@ -364,6 +365,11 @@ class SocketWrapper(object):
                 raise
 
     def SelectForever(self, MaxAllowableWriteLatency=0.001):
+        # This error 9 occurs in the OS select call for a client if the server goes
+        # away. That kills the SocketWrapper thread but leaves the main thread 
+        # running but not communicating. This is now trapped in Loop() by checking
+        # thread.is_alive().
+        # error: [Errno 9] Bad file descriptor
         while True:
             self.Select(timeout=MaxAllowableWriteLatency)
 
@@ -877,14 +883,7 @@ class mqtt_node(object):
         self.handlers = {}
         self.wildcardHandler = None
         self.broker_type = BrokerType
-        if self.broker_type == 'M':
-            iniSection = 'MqttBroker'		# Mosquitto
-            self.mqttc = PahoClient()
-        else:
-            iniSection = 'MqttFast'
-            self.mqttc = FastMqttClient()
-        self.socket_host = self.config.get(iniSection, "Host")
-        self.socket_port = int(self.config.get(iniSection, "Port"))	# 1883
+        self.InitMqttClient()
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
@@ -905,6 +904,16 @@ class mqtt_node(object):
             print("Blocking Mode")
         else:
             print("Non-Blocking Mode")
+
+    def InitMqttClient(self):
+        if self.broker_type == 'M':
+            iniSection = 'MqttBroker'		# Mosquitto
+            self.mqttc = PahoClient()
+        else:
+            iniSection = 'MqttFast'
+            self.mqttc = FastMqttClient()
+        self.socket_host = self.config.get(iniSection, "Host")
+        self.socket_port = int(self.config.get(iniSection, "Port"))	# 1883
 
     def Connect(self, timeout=0):
         if self.mqttc.connected:
@@ -976,6 +985,20 @@ class mqtt_node(object):
                     self.Connect()
                 if self.single_threaded:
                     self.CheckMqtt()
+                if self.mqttc.connected:
+                    if self.mqttc.thread is not None:
+                        if not self.mqttc.thread.is_alive():
+                            # The thread has died. Probably due to an untrapped exception.
+                            # This should be logged and we should probably try to save
+                            # state information like queued messages and message counts
+                            # for the new connection. FUTURE WORK.
+                            # This has been tested as working in the event that a
+                            # thread dies in an unexpected way. I'm now going
+                            # to add exsception logic to the thread so this never
+                            # gets here again.
+                            print("THREAD DEAD")
+                            self.InitMqttClient()
+                            self.Connect()
                 self.DoLoop()
                 if self.CheckExceptions():
                     sys.exit(0)
