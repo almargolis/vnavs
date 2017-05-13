@@ -33,6 +33,109 @@ Y_TURN_LIMIT = 160
 INITIAL_GPS_WAIT = 3
 OVERSTEER_ADJUSTMENT = 0.5
 
+class MissionStep(object):
+    def __init__(self, mission):
+        self.mission = mission
+
+def StepGpsWaypoint(MissionStep):
+    def __init__(self, mission, waypoint):
+        super().__init__(mission)
+        self.waypoint = waypoint		(latitude, longitude)
+
+    def Load(self, parts):
+        self.waypoint = (float(parts[1]), float(parts[2]))
+
+    def DoMissionStep(self, nav):
+        check_yaw = True
+        if self.gpsReadyForNavigation:
+            if self.nav.untrustedGpsUpdates != 0:
+                # We are in a manuever where GPS hasn't caught up, like startup or reversing direction.
+                # We might be counting down to zero, or might have started negative, in
+                # which case we ignore GPS till reset.
+                # GPS values ARE being recorded, just not used for navigation.
+                self.nav.untrustedGpsUpdates -= 1
+                self.gpsReadyForNavigation = False
+        if self.gpsReadyForNavigation:
+            if (self.mode == 'G') and (len(self.mission.waypoints) > 0):
+                print("GPS")
+                check_yaw = False
+                self.stats.Count('GpsPrc')
+                distance = self.NavigateTowardWaypoint(self.mission.mission_step_ix)
+                if distance <= WAYPOINT_WINDOW_METERS:
+                    self.mission.mission_step_ix += 1
+                    if self.mission.mission_step_ix >= len(self.mission.waypoints):
+                        self.mission.mission_step_ix = 0
+                    distance = self.NavigateTowardWaypoint(self.mission.mission_step_ix)		# navigate toward new waypoint immediately
+            self.gpsReadyForNavigation = False
+        if check_yaw and self.CheckYawForCompletedManuever():
+            print("IMU")
+            self.nav.Init()
+            self.nav.speed = FORWARD_SLOW
+            self.PublishNavigation()
+
+def StepMagic(MissionStep):
+    def __init__(self, mission, waypoint):
+        super().__init__(mission)
+
+    def Load(self, parts):
+        self.magic = parts[1]
+
+    def DoMissionStep(self, nav):
+            if self.imageFn is None:
+                if (self.imageRequested is None) or ((time.time() - self.imageRequested) > 1.0):
+                    print("REQUEST IMAGE")
+                    self.Publish('ask_last', {}, source='cameraman')
+                    self.imageRequested = time.time()
+                return
+            fp = os.path.join(self.imageDir, self.imageFn)
+            print("image", fp)
+            im = cv2.imread(fp)
+            if im is None:
+                print("IM RETRY")
+                time.sleep(0.5)
+                im = cv2.imread(fp)
+                if im is None:
+                    return
+            r = OpticChiasm.Robogames(im, [OpticChiasm.HSV_MASK_YELLOW])
+            r.ProcessLines()
+            r.FilterLines()
+            r.SelectLines()
+            outFn = 'X' + self.imageFn[1:]
+            outFp = os.path.join(self.imageDir, outFn)
+            cv2.imwrite(outFp, r.annotated)
+            payload = {}
+            payload['filename'] = outFn
+            self.Publish('pic_ready', payload, source='cameraman')
+            if len(r.rectangles) > 0:
+                self.nav.speed = FORWARD_VERY_SLOW
+            else:
+                self.nav.speed = STOP_SPEED
+            self.PublishNavigation()
+            self.imageFn = None
+            self.imageRequested = False
+            return
+
+
+class StepAccMotion(MissionStep):
+    def __init__(self, mission):
+        super().__init__(mission)
+
+    def Load(self, parts):
+        self.direction = parts[1]
+        self.distance = parts[2]
+
+    def DoMissionStep(self, nav):
+        step = NavStep()
+        step.steering = 'A0'
+        if self.direction == 'F':
+            step.speed = FORWARD_SLOW
+            step.dist_max = nav.self.acc_dist_f + self.distance
+        else:
+            step.speed = REVERSE_SLOW
+            step.dist_min = nav.self.acc_dist_f - self.distance
+        nav.nav = step
+        nav.PublishNavigation()
+
 class Mission(object):
     def __init__(self, MissionDir, MissionName=None):
         self.missionDir = MissionDir
@@ -46,9 +149,8 @@ class Mission(object):
             self.missionName = MissionName
         if self.missionName is None:
             self.missionName = 'test'
-        self.waypoints = []
-        self.waypointIx = 0
-        self.navpoints = []
+        self.mission_steps = []
+        self.mission_step_ix = 0
         self.LoadMission()
 
     def LoadMission(self, MissionName=None):
@@ -61,15 +163,23 @@ class Mission(object):
         for this in f.readlines():
             parts = this.split(',')
             if parts[0] == 'W':
-                self.waypoints.append(('W', (float(parts[1]), float(parts[2]))))
-            elif parts[0] == 'M':			# Magic
-                    self.waypoints.append(('M', parts[1]))
+                s = StepGpWaypoint(self)
+            elif parts[0] == 'M':
+                s = StepMagic(self)
+            elif parts[0] == 'ACC':
+                s = StepAccMotion(self)
+            else:
+                s = None
+            if s is not None:
+                s.Load(parts)
+                self.mission_steps.append(s)
+                print("MISSION", len(self.mission_steps))
 
     def Waypoints(self):
         waypoints = []
-        for p in self.waypoints:
-            if p[0] == 'W':
-                waypoints.append(p[1])
+        for s in self.mission_steps:
+            if isinstance(s, StepGpsWaypoint):
+                waypoints.append(s.waypoint)
         return waypoints
 
     def SaveMission(self, MissionName=None):
@@ -109,6 +219,8 @@ class NavStep(object):
         self.speed = 0
         self.startingYaw = None
         self.deltaYawGoal = None
+        self.dist_max = None
+        self.dist_min = None
         self.untrustedGpsUpdates = 0
         self.hardKeepSeconds = 0
         self.softKeepSeconds = 0
@@ -143,7 +255,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.Init()
 
     def Init(self, MissionName=None):
-        self.nav = NavStep()
+        self.nav = None
         self.navSteps = []
         self.mode = "M"
         self.mission = Mission(self.missionDir, MissionName=MissionName)
@@ -246,9 +358,9 @@ class navigator(vnavs_mqtt.mqtt_node):
 
         self.PublishNavigation()
         self.mission.navpoints.append(((self.latitude, self.longitude), self.nav.steering))
-        print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.mission.waypoints[self.mission.waypointIx]))
+        print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.mission.waypoints[self.mission.mission_step_ix]))
         print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, hypotenuse,
-					deltaHeading, self.heading, waypointHeading, self.mission.waypointIx))
+					deltaHeading, self.heading, waypointHeading, self.mission.mission_step_ix))
         return hypotenuse
 
     def PublishNavigation(self):
@@ -302,7 +414,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.Init(MissionName=mission_name)
                 self.nav.steering = 'A0'
                 self.nav.speed = FORWARD_SLOW
-                if self.mission.waypoints[self.mission.waypointIx][0] == "W":
+                if self.mission.waypoints[self.mission.mission_step_ix][0] == "W":
                     self.nav.untrustedGpsUpdates = INITIAL_GPS_WAIT		# allow gps to settle
                     self.PublishNavigation() 
             print("MISSION", self.mission.waypoints)
@@ -362,6 +474,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.gps_speed = payload['gps_speed']
         self.heading = payload['heading']
         self.yaw = payload['yaw']
+        self.acc_dist_f = payload['acc_dist_f']
         #self.gpsRequested = False
         self.gpsReadyForNavigation = True
         self.stats.Count('GpsRcv')
@@ -376,6 +489,7 @@ class navigator(vnavs_mqtt.mqtt_node):
             return False
         self.new_imu_payload = None
         self.yaw = payload['yaw']
+        self.acc_dist_f = payload['acc_dist_f']
         self.stats.Count('ImuRcv')
 
     def DoLoop(self):
@@ -392,84 +506,64 @@ class navigator(vnavs_mqtt.mqtt_node):
         #
         if not self.mqttc.connected:
             return
-        if (self.mode == 'G') and (len(self.mission.waypoints) > 0) and (self.mission.waypoints[self.mission.waypointIx][0] == "M"):
-            #print("MAGIC")
-            if self.imageFn is None:
-                if (self.imageRequested is None) or ((time.time() - self.imageRequested) > 1.0):
-                    print("REQUEST IMAGE")
-                    self.Publish('ask_last', {}, source='cameraman')
-                    self.imageRequested = time.time()
-                return
-            fp = os.path.join(self.imageDir, self.imageFn)
-            print("image", fp)
-            im = cv2.imread(fp)
-            if im is None:
-                print("IM RETRY")
-                time.sleep(0.5)
-                im = cv2.imread(fp)
-                if im is None:
+        if self.mode != 'G':
+            return				# not in navigator control mode
+        #
+        # Navigation are scheduled movements of the robot. They can take a relatively long period of time
+        # compared to how often this DoLoop() is executed. Once started, they generally continue till
+        # completed. Completion can be determined by running to a fixed time, fixed sensor output or
+        # a mission step decision.
+        #
+        # Several navigation steps may be queued up in self.navSteps. These are often components of a
+        # manuever like a back-up Y turn.
+        #
+        # If we have an active navigation steps, check if should be terminated.
+        #
+        if self.nav is not None:
+            if (self.nav.hardTimeLimit > 0) or self.gpsReadyForNavigation:
+                print("TL {} GPS Rdy: {}".format(self.nav.hardTimeLimit, self.gpsReadyForNavigation))
+            if self.nav.hardTimeLimit > 0:
+                # if there is a time limit, just follow those orders until they expire.
+                # if there is an unexpired time limit, untrustedGpsUpdates is ignored, we don't get that far.
+                if  self.nav.hardTimeLimit > time.time():
+                    # we want to maintain the the current navigation orders until completed by yaw or time
+                    if not self.CheckYawForCompletedManuever():
+                        return				# not ended, continue timed order
+            if self.nav.dist_max is not None:
+                if self.acc_dist_f < self.nav.dist_max:
                     return
-            r = OpticChiasm.Robogames(im, [OpticChiasm.HSV_MASK_YELLOW])
-            r.ProcessLines()
-            r.FilterLines()
-            r.SelectLines()
-            outFn = 'X' + self.imageFn[1:]
-            outFp = os.path.join(self.imageDir, outFn)
-            cv2.imwrite(outFp, r.annotated)
-            payload = {}
-            payload['filename'] = outFn
-            self.Publish('pic_ready', payload, source='cameraman')
-            if len(r.rectangles) > 0:
-                self.nav.speed = FORWARD_VERY_SLOW
-            else:
-                self.nav.speed = STOP_SPEED
+            if self.nav.dist_min is not None:
+                if self.acc_dist_f > self.nav.dist_max:
+                    return
+        #
+        # The previous navigation step has expired or ended by IMU yaw, check if there are any other
+        # scheduled naviagation steps.
+        #
+        if len(self.navSteps) > 0:
+            self.nav = self.navSteps.pop(0)
             self.PublishNavigation()
-            self.imageFn = None
-            self.imageRequested = False
-            return
-        if (self.nav.hardTimeLimit > 0) or self.gpsReadyForNavigation:
-            print("TL {} GPS Rdy: {}".format(self.nav.hardTimeLimit, self.gpsReadyForNavigation))
-        if self.nav.hardTimeLimit > 0:
-            # if there is a time limit, just follow those orders until they expire.
-            # if there is an unexpired time limit, untrustedGpsUpdates is ignored, we don't get that far.
-            if  self.nav.hardTimeLimit > time.time():
-                # we want to maintain the the current navigation orders until completed by yaw or time
-                if not self.CheckYawForCompletedManuever():
-                    return				# not ended, continue timed order
-            # the current navigation has expired or ended by IMU yaw, deal with it.
-            if len(self.navSteps) > 0:
-                self.nav = self.navSteps.pop(0)
-                self.PublishNavigation()
-                return				# new orders came from stack
-            self.nav.hardTimeLimit = 0
-        check_yaw = True
-        if self.gpsReadyForNavigation:
-            if self.nav.untrustedGpsUpdates != 0:
-                # We are in a manuever where GPS hasn't caught up, like startup or reversing direction.
-                # We might be counting down to zero, or might have started negative, in
-                # which case we ignore GPS till reset.
-                # GPS values ARE being recorded, just not used for navigation.
-                self.nav.untrustedGpsUpdates -= 1
-                self.gpsReadyForNavigation = False
-        if self.gpsReadyForNavigation:
-            if (self.mode == 'G') and (len(self.mission.waypoints) > 0):
-                print("GPS")
-                check_yaw = False
-                self.stats.Count('GpsPrc')
-                distance = self.NavigateTowardWaypoint(self.mission.waypointIx)
-                if distance <= WAYPOINT_WINDOW_METERS:
-                    self.mission.waypointIx += 1
-                    if self.mission.waypointIx >= len(self.mission.waypoints):
-                        self.mission.waypointIx = 0
-                    distance = self.NavigateTowardWaypoint(self.mission.waypointIx)		# navigate toward new waypoint immediately
-            self.gpsReadyForNavigation = False
-        if check_yaw and self.CheckYawForCompletedManuever():
-            print("IMU")
-            self.nav.Init()
-            self.nav.speed = FORWARD_SLOW
-            self.PublishNavigation()
+            return				# new orders came from stack
+        #
+        # See what the mission step wants to do
+        # 
+        if self.mission.mission_step_ix < len(self.mission.mission_steps):
+            step = self.mission.mission_steps[self.misssion.mission_step_ix]
+            mission_step_finis = step.DoMissionStep(nav)
+            if mission_step_finis:
+                self.mission.mission_step_ix += 1
+        else:
+            if self.nav is None:
+                # If we are out of mission steps and the last navigation step has terminated
+                # come to a stop.
+                self.EStop()
         self.stats.Print("MSGS")
 
+    def EStop(self):
+        payload = {}
+        payload['heading'] = "A0"
+        payload['speed'] = 0
+        payload['timer'] = 6
+        self.Publish('orders', payload, source='helmsman')
 
     def CheckYawForCompletedManuever(self):
         ## ************** ##
