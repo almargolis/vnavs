@@ -55,7 +55,7 @@ def Streamer(q, q_len, host_ip, host_socket):
                 break			# the interprocess queue is empty
         if len(lifo) > 0:
             stream = lifo.pop()
-            print("SEND", len(lifo), len(stream))
+            #print("SEND", len(lifo), len(stream))
             q_len.value = len(lifo)
             s = socket.socket()
             try:
@@ -247,7 +247,7 @@ class SocketWrapper(object):
             data = self.fragments[s] + data
             del self.fragments[s]
         messages = data.split('\x01')
-        print("PRC", data, "**", messages)
+        #print("PRC", data, "**", messages)
         if data[-1] != '\x01':
             # the last message isn't complete, save the fragment
             fragment = messages.pop()
@@ -258,7 +258,7 @@ class SocketWrapper(object):
                 # split() always splits, so it creates an empty string at the end of the list.
                 continue
             parts = this_message.split('\x00')
-            print("RCV", parts)
+            #print("RCV", parts)
             self.ProcessMessage(s, parts)
 
     def QueueMessage(self, message, s=None):
