@@ -197,15 +197,18 @@ class SocketWrapper(object):
         self.isServer = IsServer
         self.isZeroOneProtocol = IsZeroOneProtocol
         self.message_out_ct = 0
+        self.is_socket_blocking = IsSocketBlocking
+        self.InitSocket()
+        self.verbose = Verbose
+        self.InitSelectData()
+
+    def InitSocket(self):
         self.os_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.os_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.is_socket_blocking = IsSocketBlocking
         if self.is_socket_blocking:
             self.os_socket.setblocking(1)
         else:
             self.os_socket.setblocking(0)
-        self.verbose = Verbose
-        self.InitSelectData()
 
     def InitSelectData(self):
         self.inputSockets = [ self.os_socket ]
@@ -426,19 +429,30 @@ class SocketWrapperClient(SocketWrapper):
             return True
         except socket.error as e:
             self.PrintError("ConnectAsync()", e)
-            if e.errno in [36, 56, 111, 115]:
+            if e.errno in [22, 36, 37, 56, 61, 111, 115]:
                 # Succesful non-blocking connection innitiaion
                 # raises 36 under OSX or 115 under Raspbian.
-                # Repeated attemps raises same error without disturbing connection.
+                # Repeated attemps raises 37 under OSX or 115 under Raspbian 
+                # without disturbing connection.
                 # This is not an error. Just a non-blocking indication that the
-                # connection process has been started.
+                # connection process has been started or is continuing.
                 #
                 # Error 56 signifies success, its not an error.
                 # Otherwise, we could check for completion with poll or select
                 # or maybe poll2 or select2. I saw comment about these but haven't tested.
                 #
+                # If server is down, OSX reports 36 then 61, then 22. Error 22 then
+                # repeats and the socket never connects, even when the server becomes available.
+                # In a long loop of failures waiting for the server to come up,
+                # OSX sometimes reports 37 after 36 instead of 61.
+                # Raspbian reports 111 and then 115 repeated and smoothly connects
+                # whenever the server becomes available.
+                #
+                # socket.error: [Errno 22] Invalid argument
                 # socket.error: [Errno 36] Operation now in progress
+                # socket.error: [Errno 37] Operation already in progress
                 # socket error: [Errno 56] Socket is already connected
+                # socket.error: [Errno 61] Connection refused
                 # socket.error: [Errno 111] Connection refused
                 # socket.error: [Errno 115] Operation now in progress
                 if e.errno == 56:
@@ -446,6 +460,8 @@ class SocketWrapperClient(SocketWrapper):
                     self.connect_in_progress = False
                     return True
                 else:
+                    if e.errno == 22:
+                        self.InitSocket()
                     self.connected = False
                     self.connect_in_progress = True
                     return False				# not connected but not a hard failure
