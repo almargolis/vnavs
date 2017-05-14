@@ -540,7 +540,7 @@ class FileServer(SocketWrapperServer):
         except IOError as e:
             # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
             if e.errno == 2:
-                self.QueueMessage(`0\x00', s=s)
+                self.QueueMessage('0\x00', s=s)
                 return
             else:
                 raise
