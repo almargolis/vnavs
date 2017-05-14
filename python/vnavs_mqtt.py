@@ -26,6 +26,9 @@ wildcard_method_name = handler_method_prefix + 'wildcard'
 
 stop_process = False
 
+TCPIP_STD_BUFLEN = 1024
+TCPIP_XFR_BUFLEN = 4096
+
 #
 # Streamer() is the socket_xfer writer function which runs in its own process.
 # It empties the FIFO system queue as quickly as it can and converts that to a
@@ -172,8 +175,9 @@ class socket_xfer(object):
 # but that is not supported by this object.
 
 class SocketWrapper(object):
-    def __init__(self, IniSection=None, IsServer=False, IsSocketBlocking=False, IsZeroOneProtocol=True,
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, IniSection=None, IsServer=False, IsSocketBlocking=False, IsZeroOneProtocol=True,
 					Verbose=False):
+        self.buffer_len = BufferLen
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
         self.socket_host = None
@@ -312,7 +316,7 @@ class SocketWrapper(object):
                     print('new connection from', client_address, 'total connections', len(self.inputSockets))
             else:
                 try:
-                    data = s.recv(1024)
+                    data = s.recv(self.buffer_len)
                 except socket.error as e:
                     # I have seen e.errno = 54 and 104 as] "Connection reset by peer"
                     self.PrintError('Select:readable', e)
@@ -376,8 +380,8 @@ class SocketWrapper(object):
             self.Select(timeout=MaxAllowableWriteLatency)
 
 class SocketWrapperServer(SocketWrapper):
-    def __init__(self, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
-        super().__init__(IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsServer=True, IsSocketBlocking=False, Verbose=Verbose)
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
+        super().__init__(BufferLen=BufferLen, IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsServer=True, IsSocketBlocking=False, Verbose=Verbose)
 
     def Serve(self, host=None, port=None):
         if host is not None:
@@ -396,8 +400,8 @@ class SocketWrapperServer(SocketWrapper):
             self.Select(timeout=None)
 
 class SocketWrapperClient(SocketWrapper):
-    def __init__(self, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
-        super().__init__(IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsSocketBlocking=False, Verbose=Verbose)
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
+        super().__init__(BufferLen=BufferLen, IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsSocketBlocking=False, Verbose=Verbose)
         self.connected = False
         self.connect_in_progress = False
         self.thread = None
@@ -526,7 +530,7 @@ class SocketWrapperClient(SocketWrapper):
 
 class FileServer(SocketWrapperServer):
     def __init__(self, Verbose=True):
-        super().__init__(IniSection="FileServer", Verbose=Verbose)
+        super().__init__(BufferLen=TCPIP_XFR_BUFLEN, IniSection="FileServer", Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
 
     def ProcessMessage(self, s, message):
@@ -547,15 +551,15 @@ class FileServer(SocketWrapperServer):
         print("SEND FILE", fp, len(c))
         ix = 0
         while ix < len(c):
-            rec = c[ix:ix+1024]
+            rec = c[ix:ix+self.buffer_len]
             if ix == 0:
                 rec = `len(c)` + '\x00' + rec
             self.QueueMessage(rec, s=s)
-            ix += 1024
+            ix += self.buffer_len
 
 class FileClient(SocketWrapperClient):
     def __init__(self, Verbose=False):
-        super().__init__(IniSection="FileClient", IsZeroOneProtocol=False, Verbose=Verbose)
+        super().__init__(BufferLen=TCPIP_XFR_BUFLEN, IniSection="FileClient", IsZeroOneProtocol=False, Verbose=Verbose)
         self.Init()
 
     def Init(self):
