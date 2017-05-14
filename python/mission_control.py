@@ -245,9 +245,10 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             print("NO PIC AVAILABLE")
             return
         if True:
+            start_time = time.time()
             fc = vnavs_mqtt.FileClient(Verbose=True)
             if fc.GetFile(self.pic_fn):
-                print("GOT", self.pic_fn)
+                print("GOT", self.pic_fn, time.time()-start_time)
                 path = self.pic_fn
             else:
                 print("NOT GOT", self.pic_fn)

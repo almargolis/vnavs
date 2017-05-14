@@ -585,9 +585,9 @@ class FileClient(SocketWrapperClient):
         if p > 0:
             file_len = int(self.buffer[:p])
             print("FILE LEN", file_len)
-            buf_len = p + file_len + 2
+            buf_len = p + file_len + 1
             if len(self.buffer) == buf_len:
-                self.file_out.write(self.buffer[p+1:-1])
+                self.file_out.write(self.buffer[p+1:])
                 self.file_out.close()
                 self.file_received = True
                 print("File Received")
