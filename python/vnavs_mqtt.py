@@ -531,10 +531,25 @@ class FileServer(SocketWrapperServer):
         fn = message[0]
         fp = os.path.join(self.imageDir, fn)
         print("FS", fn, fp, message)
-        f = open(fp, 'rb')
-        c = f.read()
-        f.close()
-        self.QueueMessageZ([len(c), c], s=s)
+        try:
+            f = open(fp, 'rb')
+            c = f.read()
+            f.close()
+        except IOError as e:
+            # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
+            if e.errno == 2:
+                self.QueueMessage(`0\x00', s=s)
+                return
+            else:
+                raise
+        print("SEND FILE", fp, len(c))
+        ix = 0
+        while ix < len(c):
+            rec = c[ix:ix+1024]
+            if ix == 0:
+                rec = `len(c)` + '\x00' + rec
+            self.QueueMessage(rec, s=s)
+            ix += 1024
 
 class FileClient(SocketWrapperClient):
     def __init__(self, Verbose=False):
@@ -1231,8 +1246,7 @@ if __name__ == "__main__":
         n.Connect()
     elif sys.argv[1] == 'f':
         s = FileServer(Verbose=verbose)
-        s.connect()
-        s.loop_forever()
+        s.Serve()
     elif sys.argv[1] == 'm':
         s = FastMqttServer(Verbose=verbose)
         s.Serve()
