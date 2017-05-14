@@ -46,6 +46,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
 						Verbose=Verbose)
+        self.file_client = vnavs_mqtt.FileClient(Verbose=True)
         self.lastfn = ""
         self.tk_root = Tkinter.Tk()
         self.tk_root.title("VNAVS Mission Control")
@@ -246,8 +247,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             return
         if True:
             start_time = time.time()
-            fc = vnavs_mqtt.FileClient(Verbose=True)
-            if fc.GetFile(self.pic_fn):
+            if self.file_client.GetFile(self.pic_fn):
                 print("GOT", self.pic_fn, time.time()-start_time)
                 path = self.pic_fn
             else:
