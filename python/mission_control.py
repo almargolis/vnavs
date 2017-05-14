@@ -33,7 +33,7 @@ BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['cameraman/last',
+        super().__init__(Subscriptions=['cameraman/pic_ready',
 						'engineer_1/gps',
 						'engineer_1/imu',
 						'helmsman/orders',
@@ -242,6 +242,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
     def ProcessImage(self):
         if self.pic_fn is None:
+            print("NO PIC AVAILABLE")
             return
         if True:
             fc = vnavs_mqtt.FileClient(Verbose=True)
