@@ -343,6 +343,7 @@ class SocketWrapper(object):
                 self.outputSockets.remove(s)
             except KeyError:
                 # This happened to a client *mission_control.py). Apparently when FastMqtt crashed.
+                print("WRITEABLE - no socket")
                 pass			# socket buffer available, but no messages to send
             else:
                 try:
@@ -358,6 +359,7 @@ class SocketWrapper(object):
                         self.disconnect()
                         raise
         for s in exceptional:
+            print("EXCEPTIONAL")
             if self.isServer:
                 self.CloseClientConnection(s)
             else:
@@ -561,41 +563,34 @@ class FileClient(SocketWrapperClient):
             # inconsistency of block / no block. Or one of hte OSes trying to be polite.
             time.sleep(1)
             print("FC TRY CONNECT", self.socket_host, self.socket_port)
-            self.connect()
+            self.Connect()
         print("FC CONNECTED")
         self.file_name = filename
         self.file_out = open(filename, "wb")
-        message = "{}\x01".format(filename)
-        msg_sent = self.BlockingWriteSocket(message)
-        if not msg_sent:
-            print("FC MSG NOT SENT")
-            return False
-        else:
-            print("FC MSG SENT")
+        self.buffer = bytearray()
+        self.buf_sum = 0
+        self.QueueMessageZ([filename])
         start_time = time.time()
         while (not self.file_received) and ((time.time() - start_time) < timeout):
-            self.Reader()
+            self.Select(timeout=0.1)
         self.file_out.close()
+        print("DONE", time.time() - start_time)
         return self.file_received
 
-    def Reader(self):
-        try:
-            d = self.os_socket.recv(1024)
-        except socket.error as e:
-            if e.errno == 35:
-                # resource temporarily unavailble
-                return
-            raise
-        self.buffer += d
+    def RecvData(self, s, data):
+        self.buffer += data
+        self.buf_sum += len(data)
         p = self.buffer.find('\x00')
-        print("RCV DATA", len(d), len(self.buffer))
+        print("RCV DATA", len(data), len(self.buffer), self.buf_sum)
         if p > 0:
             file_len = int(self.buffer[:p])
+            print("FILE LEN", file_len)
             buf_len = p + file_len + 2
             if len(self.buffer) == buf_len:
                 self.file_out.write(self.buffer[p+1:-1])
                 self.file_out.close()
                 self.file_received = True
+                print("File Received")
 
 class MessageArchiver(object):
     def __init__(self):
