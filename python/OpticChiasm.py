@@ -273,6 +273,13 @@ def ColorMask(im, colors=[0], threshold=50, wthreshold=50):
             result = cv2.bitwise_or(result, this_result)
     return result
 
+def ROI(img, x1, y1, x2, y2):
+    # extract a region of interest, accepting "normal order" coordinates
+    # (x1, y1) is the upper/left corner, (x2, y2) is the lower/right corner
+    # origin is upper/left of image
+    roi = img[y1:y2, x1:x2 ]
+    return roi
+
 def thinning(src):
 	dst = src.copy() / 255
 	prev = np.zeros(src.shape[:2], np.uint8)

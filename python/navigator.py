@@ -137,9 +137,16 @@ class StepAccMotion(MissionStep):
         nav.PublishNavigation()
         return True
 
+def MissionSetting(navigator, parts):
+    topic = parts[1]
+    source = parts[2]
+    payload = parts[3]
+    navigator.Publish(topic, payload, source=source)
+
 class Mission(object):
-    def __init__(self, MissionDir, MissionName=None):
-        self.missionDir = MissionDir
+    def __init__(self, navigator, MissionName=None):
+        self.navigator
+        self.missionDir = self.navigator.missionDir
         self.missionName = None
         self.Init(MissionName=MissionName)
 
@@ -162,15 +169,16 @@ class Mission(object):
         fp = os.path.join(self.missionDir, mission_name) + '.mis'
         f = open(fp, "r")
         for this in f.readlines():
+            s = None
             parts = this.split(',')
             if parts[0] == 'W':
                 s = StepGpWaypoint(self)
             elif parts[0] == 'M':
                 s = StepMagic(self)
+            elif parts[0] == 'SETTING':
+                MissionSetting(navigator, parts)
             elif parts[0] == 'ACC':
                 s = StepAccMotion(self)
-            else:
-                s = None
             if s is not None:
                 s.Load(parts)
                 self.mission_steps.append(s)
@@ -261,7 +269,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.nav = None
         self.navSteps = []
         self.mode = "M"
-        self.mission = Mission(self.missionDir, MissionName=MissionName)
+        self.mission = Mission(self, MissionName=MissionName)
 
     def NavigateTowardWaypoint(self, ix):
         # should be reworked using GeographicLib ??

@@ -47,14 +47,15 @@ class cameraman(vnavs_mqtt.mqtt_node):
 			{'key': 'loopPublish', 'values': ['file', 'stream'] },
 			{'key': 'captureMode', 'values': ['none', 'run', 'single'] },
 			{'key': 'captureFormat', 'values': ['bgr', 'jpeg'] },
-			{'key': 'capturePublish', 'values': ['file', 'mqtt', 'race', 'sample', 'stream'] },
+			{'key': 'capturePublish', 'values': ['file', 'mqtt', 'sample', 'stream'] },
 			{'key': 'run', 'type': 's' },
 			{'key': 'iso', 'type': 'i', 'min': 0, 'max': 800 },
 			{'key': 'shutterSpeed', 'type': 'i' }
     ]
 
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=['cameraman/orders', 'cameraman/ask_last'], SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=['cameraman/orders', 'cameraman/ask_last', 'cameraman/process'],
+							SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.burst_fps = 0			# capture speed of last burst
         self.camera_last_fn = None
         self.iso = 100
@@ -72,6 +73,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.captureMode = 'none'		# n=none, s=single, r=run
         self.captureFormat = 'jpeg'		# jpeg, bgr
         self.capturePublish = 'file'		# f=file system, m=mqtt, s=streamer
+        self.post_processes = []
         self.run = ''				# identifier to add to file names
         self.image_ct = 0			# ct of images captured since __init__
         time.sleep(2)				# camera setling time, needed?
@@ -79,6 +81,12 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.last_fn = ''
         self.last_format = ''
         self.imageDir = self.config.get("Cameraman", "ImageDir")
+
+    def rmsg_cameraman_process(self, payload):
+        if payload['type'] = 'clear':
+            self.post_processes = []
+        else:
+            self.post_processes.append(payload)
 
     def rmsg_cameraman_ask_last(self, payload):
         payload = {}
@@ -124,7 +132,8 @@ class cameraman(vnavs_mqtt.mqtt_node):
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
         self.ImageBurst()
 
-    def Race(self, burst_dest, im_fn):
+    def PostProcess(self, process, burst_dest, im_fn):
+        roi = OpticChiasm.ROI(burst_dest, process['x1'], process['y1'], process['x2'], process['y2'])
         d = OpticChiasm.Race(burst_dest.array.copy())
         d.ProcessLines()
         fpx = im_fn[:-4]
@@ -248,23 +257,9 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     if time.time() - last_time > 2:
                         self.Publish('pic_ready', payload)
                         last_time = time.time()
-                if capturePublish == 'race':
-                    assert burst_loopPublish == 'stream'
-                    assert burst_loopFormat == 'bgr'
-                    self.Race(burst_dest, im_fn)
+                for this in self.post_processes:
+                    self.PostProcess(this)
                 """
-                if burst_publish == 'm':
-                    self.Race(burst_dest, im_fn)
-                    #buffer = pickle.dumps(burst_dest.array)
-                    payload = {}
-                    payload['filename'] = im_fn
-                    payload['format'] = burst_format
-                    payload['publish'] = burst_publish
-                    #payload['buflen'] = len(buffer)
-                    #payload['imageBGRpk'] = buffer
-                    #(res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
-                    #if res != mqtt.MQTT_ERR_SUCCESS:
-                    #    print("MQTT Publish Error")
                 if burst_publish == 's':
                     #buffer = burst_dest.getvalue()
                     buffer = burst_dest.array

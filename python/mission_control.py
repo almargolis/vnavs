@@ -1,11 +1,6 @@
 from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
-#from tkinter import *		# python 3
-#from tkinter import ttk	# python 3
-
-import Tkinter
-import ttk			# python 2.7
 
 import json
 import sys
@@ -18,6 +13,8 @@ import time
 import cv2
 import numpy
 
+import easytk
+from easytk import SAME_ROW, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
 import OpticChiasm
 import vnavs_mqtt
 import paho.mqtt.client as mqtt
@@ -48,8 +45,13 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						Verbose=Verbose)
         self.file_client = vnavs_mqtt.FileClient(Verbose=True)
         self.lastfn = ""
-        self.tk_root = Tkinter.Tk()
-        self.tk_root.title("VNAVS Mission Control")
+
+        self.tk = easytk.EasyTk(debug=True)
+        self.tk.tkw.title("VNAVS Mission Control")
+        self.statusFrame = self.tk.AddLabelFrame('Status', row=1)
+        self.thumbnailFrame = self.tk.AddLabelFrame('Thumbnails', row=2)
+        self.notebook = self.tk.AddNotebook(row=3)
+
         self.image = OpticChiasm.ImageAnalyzer()
         self.image.img_crop=(300,200)
         self.image.img_crop=(250,450)
@@ -67,78 +69,21 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.pic_requested = False
         self.pic_request_time = 0
 
-        mainframe = self.tk_root
-
-        #
-        this_row = 0
-        self.f1_helmsman_status = Tkinter.StringVar()
-        self.f1_helmsman_status.set('')
-        ttk.Label(mainframe, text='Helmsman').grid(column=0, row=this_row, sticky=Tkinter.W)
-        self.f1_helmsman_entry = ttk.Entry(mainframe, width=75, textvariable=self.f1_helmsman_status)
-        self.f1_helmsman_entry.grid(column=1, row=this_row, sticky=(Tkinter.W, Tkinter.E))
-
-        #
-        this_row += 1
-        self.f1_engineer_1_status = Tkinter.StringVar()
-        self.f1_engineer_1_status.set('')
-        ttk.Label(mainframe, text='Engineer_1').grid(column=0, row=this_row, sticky=Tkinter.W)
-        self.f1_engineer_1_entry = ttk.Entry(mainframe, width=75, textvariable=self.f1_engineer_1_status)
-        self.f1_engineer_1_entry.grid(column=1, row=this_row, sticky=(Tkinter.W, Tkinter.E))
-
-        #
-        this_row += 1
-        f = ttk.Frame(mainframe)
-        f.grid(row=this_row, column=0, columnspan=2)
-        self.mission_name = Tkinter.StringVar()
-        self.mission_name.set('test')
-        self.mission_name_entry = ttk.Entry(mainframe, width=15, textvariable=self.mission_name)
-        self.mission_name_entry.grid(row=0, column=0, sticky=(Tkinter.W, Tkinter.E))
-        b = ttk.Button(f, text='Start', command=self.StartNav)
-        b.grid(row=0, column=1)
-        b = ttk.Button(f, text='Stop', command=self.StopNav)
-        b.grid(row=0, column=2)
-        b = ttk.Button(f, text='Snap', command=self.SnapPic)
-        b.grid(row=0, column=3)
-        b = ttk.Button(f, text='Clear Waypoints', command=self.ClearWaypoints)
-        b.grid(row=0, column=4)
-        b = ttk.Button(f, text='Mark Waypoint', command=self.MarkWaypoint)
-        b.grid(row=0, column=5)
-        b = ttk.Button(f, text='Save Waypoints', command=self.SaveWaypoints)
-        b.grid(row=0, column=6)
-        b = ttk.Button(f, text='Map Waypoints', command=self.MapWaypoints)
-        b.grid(row=0, column=7)
-
-        #
-        this_row += 1
-        ttk.Label(mainframe, text='Steering').grid(column=0, row=this_row, sticky=Tkinter.W)
-        self.f1_steering_control = Tkinter.Scale(mainframe, from_=0, to=100, orient="horizontal")
-        self.f1_steering_control.grid(column=1, row=this_row)
-        self.f1_steering_display = ttk.Label(mainframe, text='0')
-        self.f1_steering_display.grid(column=2, row=this_row, sticky=Tkinter.W)
-
-        #
-        this_row += 1
-        self.f1_fname = Tkinter.StringVar()
-        self.f1_fname.set('fname')
-        self.f1_label1 = ttk.Label(mainframe, textvariable=self.f1_fname)
-        self.f1_label1.grid(columnspan=2, row=this_row, sticky=Tkinter.W)
-
-        #
-        this_row += 1
-        fn = "bgr.jpeg"
-        #path = os.path.join(self.imageDir, fn)
-        self.f1_img1 = ttk.Label(mainframe)
-        path = fn
-        #self.img1_pil = self.ImagePillow(path)
-        self.img1_pil = None
-        if self.img1_pil is None:
-            self.img1_tk = None
-        else:
-            self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
-            self.f1_img1.configure(image = self.img1_tk)
-        self.f1_img1.grid(column=0, columnspan=2, row=this_row, sticky=Tkinter.W)
-
-        self.f1_helmsman_entry.focus()
+        mainframe = self.notebook.AddTab('Mission')
+        self.f1_helmsman_entry = mainframe.AddEntryField('Helmsman', width=75)
+        self.f1_engineer_1_entry = mainframe.AddEntryField('Engineer_1', width=75)
+        self.mission_name_entry = mainframe.AddEntryField('Mission', width=15, value='test')
+        buttonframe = mainframe.AddFrame(colspan=COL_SPAN_ALL)
+        buttonframe.AddButton('Start', command=self.StartNav, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Stop', command=self.StopNav, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Snap', command=self.SnapPic, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
+        self.f1_fname = mainframe.AddLabel('fname')
+        self.f1_img1 = mainframe.AddLabelImage()
+        self.f1_helmsman_entry.Focus()
 
     def ImageCv2(self, path):
         im = cv2.imread(path)
@@ -160,7 +105,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         return im
 
     def rmsg_wildcard(self, topic, payload):
-        self.f1_helmsman_status.set(payload)
+        self.f1_helmsman_entry.UpdateEntryField(value=payload)
 
     def rmsg_cameraman_pic_ready(self, payload):
         self.rmsg_cameraman_last(payload)
@@ -256,21 +201,8 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         else:
             # This is code to get file file system including AFP)
             path = os.path.join(self.imageDir, self.pic_fn)
-        self.img1_pil = self.ImagePillow(path)
-        if self.img1_pil is None:
-            self.img1_tk = None
-        else:
-            try:
-                self.img1_tk = ImageTk.PhotoImage(self.img1_pil)
-            except IOError:
-                # This exception had additional info of file truncated.
-                # I am guessing that this is happening because messages are getting
-                # sent faster than they get written to SD. 
-                self.img1_tk = None
-                self.img1_pil = None
-        if self.img1_tk is not None:
-            self.f1_img1.configure(image = self.img1_tk)
-        self.f1_fname.set(self.pic_fn)
+        self.f1_img1.UpdateImage(fn=path)
+        self.f1_fname.UpdateLabel(self.pic_fn)
         self.pic_fn = None
         self.pic_processed = True
         self.pic_requested = False
@@ -296,7 +228,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         #    #self.mqttc.publish('cameraman/ask_last', '')
         #    self.pic_requested = True
         #    self.pic_request_time = time.time()
-        self.tk_root.update()
+        self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
 m = MissionControl()
