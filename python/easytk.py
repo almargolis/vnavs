@@ -6,7 +6,7 @@ from builtins import (bytes, str, open, super, range,
 #from Tkinter import *		# python 2.7
 #from tkinter import ttk	# python 3
 #from tkinter import Canvas
-#import tkFileDialog
+import tkFileDialog
 import Tkinter			# python 2.7
 import ttk			# python 2.7 - Tk themed widget set
 from PIL import ImageTk, Image
@@ -56,14 +56,14 @@ class TkWidgetDef(object):
             self.debug_this = TkWidgetDef.debug_all
         else:
             self.debug_this = debug
-        self.file_opt = options = {}
-        options['defaultextension'] = '.txt'
+        self.file_opt = {}
+        self.file_opt['defaultextension'] = '.txt'
         #specifying file types on OSX seems limit what can be selected
         # osx doesn't have an option to select the file categories
-        #options['filetypes'] = [('all files', '.*'), ('text files', '.txt')]
-        options['initialdir'] = 'C:\\'
-        options['initialfile'] = 'myfile.txt'
-        options['title'] = 'This is a title'
+        #self.file_opt['filetypes'] = [('all files', '.*'), ('text files', '.txt')]
+        self.file_opt['initialdir'] = 'C:\\'
+        self.file_opt['initialfile'] = 'myfile.txt'
+        self.file_opt['title'] = 'This is a title'
 
     def ReprPos(self):
        res = "(%s,%s) Span(%s,%s) Ext(%s,%s) Last(%s,%s)" % (self.row, self.col,
@@ -72,8 +72,10 @@ class TkWidgetDef(object):
 								self.last_used_row, self.last_used_col)
        return res
 
-    def DoFileNameDialog(self):
+    def DoFileNameDialog(self, Dir=None):
         self.file_opt['parent'] = self.tkw
+        if Dir is not None:
+            self.file_opt['initialdir'] = Dir
         return tkFileDialog.askopenfilename(**self.file_opt)
 
     def DoFileOpenDialog(self):
@@ -332,7 +334,7 @@ class TkWidgetDef(object):
                 imHeight = img_pil.height
                 height = int((self.canvasWidth / imWidth) * imHeight)
                 img_pil = img_pil.resize((self.canvasWidth, height))
-                print("RESIZE", self.canvasWidth, height)
+                #print("RESIZE", self.canvasWidth, height)
             img_tk = ImageTk.PhotoImage(img_pil)
         self.tkd = img_tk
         if img_tk is not None:

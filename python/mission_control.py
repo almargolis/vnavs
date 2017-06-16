@@ -43,7 +43,8 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
 						Verbose=Verbose)
-        self.file_client = vnavs_mqtt.FileClient(Verbose=True)
+        self.scriptsDir = self.config.get("MissionControl", "Scripts")
+        self.file_client = vnavs_mqtt.FileClient(Verbose=False)
         self.lastfn = ""
 
         self.tk = easytk.EasyTk(debug=True)
@@ -69,11 +70,11 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.pic_requested = False
         self.pic_request_time = 0
 
-        mainframe = self.notebook.AddTab('Mission')
-        self.f1_helmsman_entry = mainframe.AddEntryField('Helmsman', width=75)
-        self.f1_engineer_1_entry = mainframe.AddEntryField('Engineer_1', width=75)
-        self.mission_name_entry = mainframe.AddEntryField('Mission', width=15, value='test')
-        buttonframe = mainframe.AddFrame(colspan=COL_SPAN_ALL)
+        mission_tab = self.notebook.AddTab('Mission')
+        self.f1_helmsman_entry = mission_tab.AddEntryField('Helmsman', width=75)
+        self.f1_engineer_1_entry = mission_tab.AddEntryField('Engineer_1', width=75)
+        self.mission_name_entry = mission_tab.AddEntryField('Mission', width=15, value='test')
+        buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         buttonframe.AddButton('Start', command=self.StartNav, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Stop', command=self.StopNav, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Snap', command=self.SnapPic, row=SAME_ROW, col=NEXT_COL)
@@ -81,9 +82,19 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
-        self.f1_fname = mainframe.AddLabel('fname')
-        self.f1_img1 = mainframe.AddLabelImage()
+        self.f1_fname = mission_tab.AddLabel('fname')
+        self.f1_img1 = mission_tab.AddLabelImage()
+
+        self.message_tab = self.notebook.AddTab('Message')
+        self.mt_file_name = self.message_tab.AddEntryField('Script File', width=25)
+        self.message_tab.AddButton('Open', command=self.OpenScriptFile, row=SAME_ROW, col=NEXT_COL)
+        self.message_tab.AddButton('Send Message', command=self.MapWaypoints, row=NEXT_ROW, col=NEXT_COL)
+
         self.f1_helmsman_entry.Focus()
+
+    def OpenScriptFile(self):
+        fn = self.message_tab.DoFileNameDialog(Dir=self.scriptsDir)
+        self.mt_file_name.UpdateEntryField(value=fn)
 
     def ImageCv2(self, path):
         im = cv2.imread(path)
@@ -113,7 +124,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
     def rmsg_cameraman_last(self, payload):
         self.pic_fn = payload['filename']
         self.pic_processed = False
-        print("PIC", self.pic_fn)
+        #print("PIC", self.pic_fn)
 
     def rmsg_navigator_status(self, payload):
         print("NAV STAT", payload)
@@ -193,10 +204,10 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         if True:
             start_time = time.time()
             if self.file_client.GetFile(self.pic_fn):
-                print("GOT", self.pic_fn, time.time()-start_time)
+                #print("GOT", self.pic_fn, time.time()-start_time)
                 path = self.pic_fn
             else:
-                print("NOT GOT", self.pic_fn)
+                #print("NOT GOT", self.pic_fn)
                 return
         else:
             # This is code to get file file system including AFP)
