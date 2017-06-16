@@ -583,7 +583,7 @@ class FileClient(SocketWrapperClient):
             time.sleep(1)
             print("FC TRY CONNECT", self.socket_host, self.socket_port)
             self.Connect()
-        print("FC CONNECTED")
+        #print("FC CONNECTED")
         self.file_name = filename
         self.file_out = open(filename, "wb")
         self.buffer = bytearray()
@@ -593,23 +593,23 @@ class FileClient(SocketWrapperClient):
         while (not self.file_received) and ((time.time() - start_time) < timeout):
             self.Select(timeout=0.1)
         self.file_out.close()
-        print("DONE", time.time() - start_time)
+        #print("DONE", time.time() - start_time)
         return self.file_received
 
     def RecvData(self, s, data):
         self.buffer += data
         self.buf_sum += len(data)
         p = self.buffer.find('\x00')
-        print("RCV DATA", len(data), len(self.buffer), self.buf_sum)
+        #print("RCV DATA", len(data), len(self.buffer), self.buf_sum)
         if p > 0:
             file_len = int(self.buffer[:p])
-            print("FILE LEN", file_len)
+            #print("FILE LEN", file_len)
             buf_len = p + file_len + 1
             if len(self.buffer) == buf_len:
                 self.file_out.write(self.buffer[p+1:])
                 self.file_out.close()
                 self.file_received = True
-                print("File Received")
+                #print("File Received")
 
 class MessageArchiver(object):
     def __init__(self):
