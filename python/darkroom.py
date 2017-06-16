@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 
 import easytk
+from easytk import SAME_ROW, NEXT_ROW, NEXT_COL
 import OpticChiasm
 import vnavs_mqtt
 
@@ -114,14 +115,14 @@ class ProcessStep(object):
         #
         self.filter_selection = self.input_panel.AddListbox('Filters', self.filter_labels, Selection=cv_filter, Command=self.NewFilter, rowspan=4)
         self.parmEntries = []
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=-3))
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL))
         self.parmEntries.append(self.input_panel.AddEntryField('Parm2'))
         self.parmEntries.append(self.input_panel.AddEntryField('Parm3'))
         self.parmEntries.append(self.input_panel.AddEntryField('Parm4'))
         #
         self.image = self.output_panel.AddCanvas()
         self.deposition = self.output_panel.AddLabel(col=2)
-        self.thumbnail = self.app.thumbnailFrame.AddLabelImage(thumbnailof=self.image, row=0, col=-3)
+        self.thumbnail = self.app.thumbnailFrame.AddLabelImage(thumbnailof=self.image, row=0, col=NEXT_COL)
         self.thumbnail.tkw.bind("<Button-1>", self.SelectTab)
         self.opencv = None			# captured image
         self.colorspace = None
@@ -378,7 +379,7 @@ class ProcessStep(object):
 class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
         super().__init__(Subscriptions=['cameraman/last'],
-					Blocking=True, BrokerType='F', BlockingTimeoutSecs=0.1,
+					SingleThreaded=True, BrokerType='F', SelectTimeoutSecs=0.1,
 					Verbose=True)
         self.tk_is_initialized = False
         self.imageDir = self.config.get("Cameraman", "ImageDir")
@@ -398,13 +399,13 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.statusFrame = self.tk.AddLabelFrame('Status', row=1)
         self.thumbnailFrame = self.tk.AddLabelFrame('Thumbnails', row=2)
         self.notebook = self.tk.AddNotebook(row=3)
-        self.camera_iso = self.statusFrame.AddEntryField('ISO', Value=800)
-        self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', Value=10000, row=-1, col=-3)
+        self.camera_iso = self.statusFrame.AddEntryField('ISO', value=800)
+        self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', value=10000, row=SAME_ROW, col=NEXT_COL)
         self.camera_snap = False
         self.camera_last_filename = ''
         self.camera_last_processed = True
-        self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=-1, col=-3)
-        self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=-1, col=-3)
+        self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
+        self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=SAME_ROW, col=NEXT_COL)
 
         ProcessStep.app = self
         #ProcessStep('None')
@@ -478,7 +479,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
                 ProcessStep.steps[0].filter = 'FileImage'
                 ProcessStep.steps[0].UpdateAll()
                 self.camera_last_processed = True
-        self.tk.tkw.update()
+        self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
 if __name__ == '__main__':
