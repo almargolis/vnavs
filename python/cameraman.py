@@ -42,10 +42,9 @@ RACE_STEERING_2 = 0.1
 
 class cameraman(vnavs_mqtt.mqtt_node):
     orders_parms = [
-			{'key': 'loopMode', 'values': ['pause', 'run', 'single'] },
+			{'key': 'loopMode', 'values': ['idle', 'pause', 'run', 'single'] },
 			{'key': 'loopFormat', 'values': ['bgr', 'jpeg', 'yuv'] },
 			{'key': 'loopPublish', 'values': ['file', 'stream'] },
-			{'key': 'captureMode', 'values': ['none', 'run', 'single'] },
 			{'key': 'captureFormat', 'values': ['bgr', 'jpeg'] },
 			{'key': 'capturePublish', 'values': ['file', 'mqtt', 'race', 'sample', 'stream'] },
 			{'key': 'run', 'type': 's' },
@@ -59,17 +58,20 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.camera_last_fn = None
         self.iso = 100
         self.shutterSpeed = 0
-        self.camera_resolution = (720, 480)
-        self.camera = picamera.PiCamera()
+        self.camera_resolution = (320, 240)
+        self.camera_resolution = (160, 120)
+        self.camera_resolution = (640, 480)
+        self.camera = picamera.PiCamera(resolution=self.camera_resolution)
         self.camera.vflip = True
         self.camera.hflip = True
         self.camera.iso = self.iso
+        self.idle_image_id = 0
+        self.idle_image_id_max = 20
         self.iso = self.camera.iso
         self.camera.shutter_speed = self.shutterSpeed
-        self.loopMode = 'pause'			# single, run, pause
+        self.loopMode = 'idle'			# idle, single, run, pause
         self.loopFormat = 'jpeg'		# jpeg, bgr
         self.loopPublish = 'file'
-        self.captureMode = 'none'		# n=none, s=single, r=run
         self.captureFormat = 'jpeg'		# jpeg, bgr
         self.capturePublish = 'file'		# f=file system, m=mqtt, s=streamer
         self.run = ''				# identifier to add to file names
@@ -188,6 +190,13 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 burst_dest = io.BytesIO()
         else:
             assert burst_loopFormat == 'jpeg'
+            if burst_loopMode == 'idle':
+                # Rotate through a long-ish series of names to avoid race conditions
+                # due to latencies.
+                if self.idle_image_id >= self.idle_image_id_max:
+                    self.idle_image_id = 0
+                fn = "Idle_%d.jpeg" % (self.idle_image_id)
+                self.idle_image_id += 1
             burst_dest = os.path.join(self.imageDir, fn)
         #
         # Capture some pictures. This might be a single image or a long run of them.
@@ -200,84 +209,83 @@ class cameraman(vnavs_mqtt.mqtt_node):
             self.image_ct += 1
             burst_ct += 1
             # mqtt can change values asynchronously. copy so values are consistent during capture
-            captureMode = self.captureMode
             captureFormat = self.captureFormat
             capturePublish = self.capturePublish
-            if captureMode != 'none':
-                print("MODE", capturePublish)
-                if burst_loopPublish == 'stream':
-                    # Assign file name same as picamera.capture() to file
-                    im_fn = fn.format(counter=self.image_ct)
-                if capturePublish in ['file', 'sample']:
-                    if burst_loopPublish == 'file':
-                        # the file is already written, make sure its the correct format
-                        assert captureFormat == burst_loopFormat
-                        im_path = im_fn
-                        im_fn = os.path.split(im_path)[1]
-                    else:
+            print("MODE", capturePublish)
+            if burst_loopPublish == 'stream':
+                # Assign file name same as picamera.capture() to file
+                im_fn = fn.format(counter=self.image_ct)
+            if capturePublish in ['file', 'sample']:
+                if burst_loopPublish == 'file':
+                    # the file is already written, make sure its the correct format
+                    assert captureFormat == burst_loopFormat
+                    im_path = im_fn
+                    im_fn = os.path.split(im_path)[1]
+                else:
+                    if capturePublish == 'sample':
+                        im_publish_fn = 'sample.' + burst_loopFormat
+                        im_publish_path = os.path.join(self.imageDir, im_publish_fn)
+                        im_fn = 'temp.' + im_publish_fn
+                    if captureFormat == 'jpeg':
+                        im_fn = os.path.splitext(im_fn)[0] + '.' + captureFormat
+                        im_path = os.path.join(self.imageDir, im_fn)
+                        # to keep understandable, keep following if consistent with buffer creation if
+                        if burst_loopFormat == 'yuv': 
+                            cv2.imwrite(im_path, burst_dest.rgb_array)
+                        elif burst_loopFormat in ['rgb', 'bgr']:
+                            cv2.imwrite(im_path, burst_dest.array)
+                        else:
+                            f = open(im_fn, 'wb')
+                            f.write(burst_dest.getvalue())
+                            f.close()
                         if capturePublish == 'sample':
-                            im_publish_fn = 'sample.' + burst_loopFormat
-                            im_publish_path = os.path.join(self.imageDir, im_publish_fn)
-                            im_fn = 'temp.' + im_publish_fn
-                        if captureFormat == 'jpeg':
-                            im_fn = os.path.splitext(im_fn)[0] + '.' + captureFormat
-                            im_path = os.path.join(self.imageDir, im_fn)
-                            # to keep understandable, keep following if consistent with buffer creation if
-                            if burst_loopFormat == 'yuv': 
-                                cv2.imwrite(im_path, burst_dest.rgb_array)
-                            elif burst_loopFormat in ['rgb', 'bgr']:
-                                cv2.imwrite(im_path, burst_dest.array)
-                            else:
-                                f = open(im_fn, 'wb')
-                                f.write(burst_dest.getvalue())
-                                f.close()
-                            if capturePublish == 'sample':
-                                # mission_control.py was reading sample.jpeg while this was writing a new one.
-                                # even this fails frequently. maybe round-robin a few file names.
-                                # this would be a nice mode to have in order to observe images without
-                                # running out of disk space. there is a good amount of lag and no good
-                                # locking system with nfs/afp sharing path.
-                                os.rename(im_path, im_publish_path)
-                                im_fn = im_publish_fn
-                    self.last_fn = im_fn
-                    self.last_format = captureFormat
-                    payload = {}
-                    payload['filename'] = im_fn
-                    payload['captureFormat'] = captureFormat
-                    payload['capturePublish'] = capturePublish
-                    if time.time() - last_time > 2:
-                        self.Publish('pic_ready', payload)
-                        last_time = time.time()
-                if capturePublish == 'race':
-                    assert burst_loopPublish == 'stream'
-                    assert burst_loopFormat == 'bgr'
-                    self.Race(burst_dest, im_fn)
-                """
-                if burst_publish == 'm':
-                    self.Race(burst_dest, im_fn)
-                    #buffer = pickle.dumps(burst_dest.array)
-                    payload = {}
-                    payload['filename'] = im_fn
-                    payload['format'] = burst_format
-                    payload['publish'] = burst_publish
-                    #payload['buflen'] = len(buffer)
-                    #payload['imageBGRpk'] = buffer
-                    #(res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
-                    #if res != mqtt.MQTT_ERR_SUCCESS:
-                    #    print("MQTT Publish Error")
-                if burst_publish == 's':
-                    #buffer = burst_dest.getvalue()
-                    buffer = burst_dest.array
-                    #buffer = pickle.dumps(burst_dest.array)
-                    payload = {}
-                    payload['filename'] = im_fn
-                    payload['format'] = burst_format
-                    payload['publish'] = burst_publish
-                    payload['buflen'] = len(buffer)
-                    self.streamer.write(json.dumps(payload) + chr(26) + buffer)
-                """
-                if self.verbose:
-                    print("PIC", im_fn)
+                            # mission_control.py was reading sample.jpeg while this was writing a new one.
+                            # even this fails frequently. maybe round-robin a few file names.
+                            # this would be a nice mode to have in order to observe images without
+                            # running out of disk space. there is a good amount of lag and no good
+                            # locking system with nfs/afp sharing path.
+                            os.rename(im_path, im_publish_path)
+                            im_fn = im_publish_fn
+                self.last_fn = im_fn
+                self.last_format = captureFormat
+                payload = {}
+                payload['filename'] = im_fn
+                payload['captureFormat'] = captureFormat
+                payload['capturePublish'] = capturePublish
+                payload['exposure_speed'] = self.camera.exposure_speed
+                payload['exposure_iso'] = self.camera.iso
+                self.Publish('pic_ready', payload)
+                last_time = time.time()
+            if capturePublish == 'race':
+                assert burst_loopPublish == 'stream'
+                assert burst_loopFormat == 'bgr'
+                self.Race(burst_dest, im_fn)
+            """
+            if burst_publish == 'm':
+                self.Race(burst_dest, im_fn)
+                #buffer = pickle.dumps(burst_dest.array)
+                payload = {}
+                payload['filename'] = im_fn
+                payload['format'] = burst_format
+                payload['publish'] = burst_publish
+                #payload['buflen'] = len(buffer)
+                #payload['imageBGRpk'] = buffer
+                #(res, mid) = self.mqttc.publish('cameraman/pic_ready', json.dumps(payload))
+                #if res != mqtt.MQTT_ERR_SUCCESS:
+                #    print("MQTT Publish Error")
+            if burst_publish == 's':
+                #buffer = burst_dest.getvalue()
+                buffer = burst_dest.array
+                #buffer = pickle.dumps(burst_dest.array)
+                payload = {}
+                payload['filename'] = im_fn
+                payload['format'] = burst_format
+                payload['publish'] = burst_publish
+                payload['buflen'] = len(buffer)
+                self.streamer.write(json.dumps(payload) + chr(26) + buffer)
+            """
+            if self.verbose:
+                print("PIC", im_fn)
             if self.camera.iso != self.iso:
                 # The camera may not use the exact ISO specified. Save the corrected value in
                 # self.iso so we don't keep repeating the request.
@@ -289,8 +297,22 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 # prepare for next image. This is needed even when not published
                 burst_dest.truncate()
                 burst_dest.seek(0)   # ?? needed for io.Bytes?? Required for PiRGBArray for subsequent images
-            if self.captureMode == 'single':
-                self.captureMode = 'none'
+            if burst_loopMode == 'idle':
+                img = cv2.imread(im_path, 0)			# "0" loads image as grayscale
+                hist = cv2.calcHist([img], [0], None, [256], [0,256])
+                rows, cols = img.shape
+                hist_limit = (rows * cols) * 0.5
+                pixel_sum = 0
+                for ix, this in enumerate(hist):
+                    pixel_sum += this
+                    if pixel_sum > hist_limit:
+                        break
+                if ix < 100:
+                    self.iso += 100
+                if self.iso > 800:
+                    self.iso = 800
+                # idle takes one image per "burst". Mainly to control file names.
+                break
             if burst_loopMode == 'single':
                 # enter paused mode if we have taken our single picture
                 self.loopMode = 'pause'
