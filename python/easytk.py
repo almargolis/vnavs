@@ -8,6 +8,7 @@ from builtins import (bytes, str, open, super, range,
 #from tkinter import Canvas
 import tkFileDialog
 import Tkinter			# python 2.7
+import ScrolledText
 import ttk			# python 2.7 - Tk themed widget set
 from PIL import ImageTk, Image
 
@@ -38,8 +39,10 @@ class TkWidgetDef(object):
         self.col = None			# col where positioned (left side)
         self.right_col = 0		# furthest right colum used
         self.bottom_row = 0		# highest number row used
-        self.last_used_row = 0		# not necesarilly, highest used. for sequential positioning
-        self.last_used_col = 0		# not necesarilly highest used. for sequential positioning
+        self.last_used_row = -1 	# not necesarilly, highest used. for sequential positioning
+        self.last_used_rowspan = 1
+        self.last_used_col = -1		# not necesarilly highest used. for sequential positioning
+        self.last_used_colspan = 1
         self.row_span = 0		# height of this TkWidgetDef object (# of rows)
         self.col_span = 0		# width of this TkWidgetDef object (# of columns)
         self.thumbnail = None		# update this thumbnail if image is changed
@@ -84,7 +87,7 @@ class TkWidgetDef(object):
     def Focus(self):
         self.tkw.focus()
 
-    def Update(self):
+    def Update(self):			# Process Tkinter events
         self.tkw.update()
 
     def AddButton(self, caption, command, row=NEXT_ROW, col=SAME_COL):
@@ -115,12 +118,52 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def UpdateEntryField(self, value='', Caption=None):
-        self.tkd.set(value)
+    def ReplaceValue(self, value, Caption=None):
+        if isinstance(self.tkw, ScrolledText.ScrolledText):
+            self.tkw.delete("1.0", "end")
+            self.tkw.insert("1.0", value)
+        elif isinstance(self.tkw, ttk.Entry):
+            self.tkd.set(value)
+        elif isinstance(self.tkw, ttk.Label):
+            self.tkw.config(text=value)
         if Caption is not None:
             self.tkw_label.config(text=Caption)
 
+    def Value(self):
+        if isinstance(self.tkw, ScrolledText.ScrolledText):
+            return self.tkw.get("1.0", "end")
+        if isinstance(self.tkw, ttk.Entry):
+            v = self.tkd.get()
+            return v
+        if isinstance(self.tkw, Tkinter.Listbox):
+            # ix is a tuple like (2,). I assume the 2nd element would be the end of
+            # the range. Or maybe it a list of items for multi-selection.
+            # This works for now.
+            ix = self.tkw.curselection()
+            return self.tkw.get(ix)
+
+    def AddScrolledEntryField(self, caption, width=10, height=5, value='', row=NEXT_ROW, col=SAME_COL):
+        if self.debug_this:
+            print("AddScrolledEntryField", row, col, caption)
+        row, col = self.Position(row=row, col=col)
+        refname = caption.lower().replace(' ', '_')
+
+        tk_data = Tkinter.StringVar()
+        tk_data.set(value)
+        tk_label = ttk.Label(self.tkw, text=caption)
+        tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+        tk_entry = ScrolledText.ScrolledText(master=self.tkw, width=width, height=height, wrap=Tkinter.WORD)
+        tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
+        self.RememberPosition(frame, row, col, colspan=2, rowspan=height)
+        self.children.append(frame)
+        return frame
+
     def AddLabel(self, text='', width=10, value='', row=NEXT_ROW, col=SAME_COL):
+        # An alternate method would be to create a TK StringVar and when creating the label
+        # use the textvariable property instead of text. Visually this shouldn't be any different.
+        # The update process would be a bit different in some cases because the label would 
+        # be automagically updated if something changed the variable.
         refname = 'X'
         row, col = self.Position(row=row, col=col)
         tk_label = ttk.Label(self.tkw, text=text)
@@ -129,13 +172,6 @@ class TkWidgetDef(object):
         self.RememberPosition(frame, row, col)
         self.children.append(frame)
         return frame
-
-    def UpdateLabel(self, text):
-        # An alternate method would be to create a TK StringVar and when creating the label
-        # use the textvariable property instead of text. Visually this shouldn't be any different.
-        # The update process would be a bit different in some cases because the label would 
-        # be automagically updated if something changed the variable.
-        self.tkw.config(text=text)
 
     def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, height=5, rowspan=0, Command=None):
         row, col = self.Position(row=row, col=col)
@@ -173,18 +209,6 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def CurrentValue(self):
-        if isinstance(self.tkw, ttk.Entry):
-            v = self.tkd.get()
-            print("CurrentValue", v)
-            return v
-        if isinstance(self.tkw, Tkinter.Listbox):
-            # ix is a tuple like (2,). I assume the 2nd element would be the end of
-            # the range. Or maybe it a list of items for multi-selection.
-            # This works for now.
-            ix = self.tkw.curselection()
-            return self.tkw.get(ix)
-
     def MakeThumbnail(self, im, width):
         if im is None:
             return None
@@ -205,11 +229,16 @@ class TkWidgetDef(object):
         # not be sequential. The others are relative to the extents of component.
         # This is called in the context of a container for the component thas is about to be created.
         if row == SAME_ROW:
-            # same row as the previous item
+            # same row as the previous item, fixup initial value for first row.
+            if self.last_used_row < 0:
+                self.last_used_row = 0
             row = self.last_used_row
         elif row == NEXT_ROW:
             # next sequential row
-            row = self.last_used_row + 1
+            row = self.last_used_row + self.last_used_rowspan
+            self.last_used_rowspan = 1
+            self.last_used_col = -1		# initialize column for new row
+            self.last_used_colspan = 1
         elif row == BOTTOM_ROW:
             # row below everything else
             row = self.bottom_row
@@ -217,10 +246,12 @@ class TkWidgetDef(object):
             # row below everything else
             row = self.bottom_row + 1
         if col == SAME_COL:
-            # use current column -- consisten with row -2 for most common sequential position
+            # use current column, fixup initial value for first column.
+            if self.last_used_col < 0:
+                self.last_used_col = 0
             col = self.last_used_col
         elif col == NEXT_COL:
-            col = self.last_used_col + 1
+            col = self.last_used_col + self.last_used_colspan
         elif col == RIGHT_COL:
             col = self.right_col
         elif col == EXTEND_COL:
@@ -231,7 +262,10 @@ class TkWidgetDef(object):
 
     def RememberPosition(self, new_TkWidgetDef, row, col, colspan=1, rowspan=1):
         # Update the new widgets position info.
-        # Theses properties are relative to the container, ususally set by Position() 
+        # Theses properties are relative to the container, ususally set by Position().
+        # The last_used_XXX properties and corresponding NEXT_XXX position
+        # substitutions work only when doing a rectangular grid, layed out by 
+        # rows and left to right within each row.
         new_TkWidgetDef.row = row
         new_TkWidgetDef.col = col
         new_TkWidgetDef.col_span = colspan
@@ -241,7 +275,10 @@ class TkWidgetDef(object):
         new_widget_right_col = col + colspan - 1
         new_widget_bottom_row = row + rowspan - 1
         self.last_used_row = row
+        if rowspan > self.last_used_rowspan:
+            self.last_used_rowspan  = rowspan		# track deepest widget per row
         self.last_used_col = col
+        self.last_used_colspan = colspan
         if new_widget_bottom_row > self.bottom_row:
             self.bottom_row = new_widget_bottom_row
         if new_widget_right_col > self.right_col:

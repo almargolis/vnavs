@@ -31,6 +31,7 @@ BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=['cameraman/pic_ready',
+						'cameraman/abend',
 						'engineer_1/gps',
 						'engineer_1/imu',
 						'helmsman/orders',
@@ -88,13 +89,42 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.message_tab = self.notebook.AddTab('Message')
         self.mt_file_name = self.message_tab.AddEntryField('Script File', width=25)
         self.message_tab.AddButton('Open', command=self.OpenScriptFile, row=SAME_ROW, col=NEXT_COL)
-        self.message_tab.AddButton('Send Message', command=self.MapWaypoints, row=NEXT_ROW, col=NEXT_COL)
+        self.mt_script = self.message_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
+        self.message_tab.AddButton('Send Message', command=self.SendMessage, row=NEXT_ROW, col=NEXT_COL)
+
+        self.alert_tab = self.notebook.AddTab('Alerts')
+        self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
 
         self.f1_helmsman_entry.Focus()
 
     def OpenScriptFile(self):
         fn = self.message_tab.DoFileNameDialog(Dir=self.scriptsDir)
-        self.mt_file_name.UpdateEntryField(value=fn)
+        self.mt_file_name.ReplaceValue(fn)
+        s_f = open(fn, "r")
+        s = s_f.read()
+        s_f.close()
+        self.mt_script.ReplaceValue(s)
+
+    def SendMessage(self):
+        s = self.mt_script.Value()
+        lines = s.split('\n')
+        contents = {}
+        for this in lines:
+            if this == '':
+                continue
+            if this[0] == '[':
+                sec = this[1:-1]
+                sec_data = {}
+                contents[sec] = sec_data
+            else:
+                pos = this.find('=')
+                fname = this[:pos]
+                data = this[pos+1:]
+                sec_data[fname] = data
+        print(contents)
+        topic = contents['Head']['Topic']
+        source = contents['Head']['Source']
+        self.Publish(topic, contents['Payload'], source=source)
 
     def ImageCv2(self, path):
         im = cv2.imread(path)
@@ -116,13 +146,20 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         return im
 
     def rmsg_wildcard(self, topic, payload):
-        self.f1_helmsman_entry.UpdateEntryField(value=payload)
+        print(topic)
+        self.f1_helmsman_entry.ReplaceValue(payload)
+        if topic[-5:] == 'abend':
+          t = payload['traceback']
+          self.alert_text.ReplaceValue(t)
 
     def rmsg_cameraman_pic_ready(self, payload):
         self.rmsg_cameraman_last(payload)
 
     def rmsg_cameraman_last(self, payload):
-        self.pic_fn = payload['filename']
+        if 'annotated' in payload:
+            self.pic_fn = payload['annotated']
+        else:
+            self.pic_fn = payload['filename']
         self.pic_processed = False
         #print("PIC", self.pic_fn)
 
@@ -213,7 +250,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             # This is code to get file file system including AFP)
             path = os.path.join(self.imageDir, self.pic_fn)
         self.f1_img1.UpdateImage(fn=path)
-        self.f1_fname.UpdateLabel(self.pic_fn)
+        self.f1_fname.ReplaceValue(self.pic_fn)
         self.pic_fn = None
         self.pic_processed = True
         self.pic_requested = False

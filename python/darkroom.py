@@ -139,12 +139,12 @@ class ProcessStep(object):
         for ix, this_entry in enumerate(self.parmEntries):
             if this_entry.parm_id is not None:
                 # save prior value
-                self.parm_values[this_entry.parm_id] = this_entry.CurrentValue()
+                self.parm_values[this_entry.parm_id] = this_entry.Value()
 
     def NewFilter(self, *args):
         # TK callbacks seem to incude *args
         self.SaveParameters()
-        new_filter = self.filter_selection.CurrentValue()
+        new_filter = self.filter_selection.Value()
         print("NewFilter()", new_filter,  self.cv_filter)
         if new_filter != self.cv_filter:
             self.cv_filter = new_filter
@@ -431,11 +431,11 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.camera_snap = True
         payload = {}
         try:
-            payload['iso'] = int(self.camera_iso.CurrentValue())
+            payload['iso'] = int(self.camera_iso.Value())
         except TypeError:
             self.camera_iso.set(100)
         try:
-            payload['shutterSpeed'] = int(self.camera_shutter_speed.CurrentValue())
+            payload['shutterSpeed'] = int(self.camera_shutter_speed.Value())
         except TypeError:
             self.camera_shutter_speed.set(0)
         payload['loopMode'] = 'run'
