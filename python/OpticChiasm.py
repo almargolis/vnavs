@@ -510,53 +510,37 @@ def mean(numbers):
         return 0
     return sum(numbers) / len(numbers)
 
-class Race(object):
-    def __init__(self, image):
+class ReflexEntities(object):
+    def __init__(self, image, DoBlur=False, DoCanny=True):
         # im is an OpenCV BGR image object
         self.original = image
-        if (RACE_CROP_X is not None) or (RACE_CROP_Y is not None):
-            height, width, channels = image.shape
-            if RACE_CROP_X is None:
-                c_x = 0
-                c_w = width
-            else:
-                c_x = self.img_crop[0]
-                c_w = self.img_crop[1]
-            if RACE_CROP_Y is None:
-                c_y = 0
-            else:
-                c_y = height - RACE_CROP_Y
-            print("Crop: (%d, %d) start (%d, %d) width %d" % (width, height, c_x, c_y, c_w))
-            image = image[c_y:height, c_x:c_x+c_w]
-        self.annotated = image.copy()
-        #image = simplest_cb(self.original, 20)
-        image = ColorMask(image, colors=[HSV_MASK_WHITE, HSV_MASK_RED, HSV_MASK_YELLOW], threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
-        #bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        #bw_image = cv2.blur(bw_image.copy(), (5,5))
-        if RACE_BLUR:
-            image = cv2.GaussianBlur(image.copy(), (5,5), 0)
-        if RACE_CANNY:
-            image = auto_canny(image, 0.33)
-        #(imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        self.h_lines = cv2.HoughLinesP(image, 1, np.pi/180, 15, minLineLength=50, maxLineGap=10)
+        self.image = ColorMask(image, colors=[HSV_MASK_WHITE, HSV_MASK_RED, HSV_MASK_YELLOW], threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
+        if DoBlur:
+            self.image = cv2.GaussianBlur(self.image.copy(), (5,5), 0)
+        if DoCanny:
+            self.image = auto_canny(self.image, 0.33)
+        self.h_lines = cv2.HoughLinesP(self.image, 1, np.pi/180, 15, minLineLength=50, maxLineGap=10)
         self.map_lines = []
         self.avg_slope = 0
 
     def ProcessLines(self):
         VERTICAL_SLOPE = 9999
         h_color = (0, 0, 255)				# blue
-        a_color = (0, 255, 0)				# green
         h_width = 1
-        a_width = 2
         self.map_lines = []
         self.avg_slope = 0
         self.slope_ct = 0
-        h, w, c = self.annotated.shape
+        h = self.image.shape[0]
+        w = self.image.shape[1]
+        if len(self.image.shape) > 2:
+            c = self.image.shape[2]
+        else:
+            c = 1
         m = int(w/2)
         if self.h_lines is not None:
             for x in range(0, len(self.h_lines)):
                 for x1,y1,x2,y2 in self.h_lines[x]:
-                    cv2.line(self.annotated,(x1,y1),(x2,y2), h_color, h_width)
+                    #cv2.line(self.annotated,(x1,y1),(x2,y2), h_color, h_width)
                     #deposition += "%d. (%d,%d) (%d,%d)\n" % (x, x1, y1, x2, y2)
                     mx1 = x1 - m
                     mx2 = x2 - m
@@ -575,26 +559,39 @@ class Race(object):
                     if mdist < 300:
                         self.map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2)))
             self.map_lines.sort()
-            cum_slope = 0
-            ct_slope = 0
-            #print("MAP", h, m, w)
-            for this in self.map_lines[:1]:
-                cv2.line(self.annotated,this[5],this[6], a_color, a_width)
-                #print(this)
-                mlen = this[1]
-                mslope = this[2]
-                if (mslope < 0.5) and (mlen < 20):
-                    # this might be the front edge of a dash, go straight
-                    mslope = 999
-                ct_slope += 1
-                cum_slope += mslope
-            if ct_slope > 0:
-                avg_slope = cum_slope / ct_slope
-            else:
-                avg_slope = VERTICAL_SLOPE
-            print("MAP", avg_slope)
-            self.avg_slope = avg_slope
-            self.slope_ct = ct_slope
+            print("Map Lines", len(self.map_lines))
+
+    def AnnotateFullImage(self, image, linect=10, x1=0, y1=0, color=None):
+        if color is None:
+            color = (0, 255, 0)				# green
+        a_width = 2
+        for this in self.map_lines[:linect]:
+            p1 = (this[5][0]+x1, this[5][1]+y1)
+            p1 = (this[6][0]+x1, this[6][1]+y1)
+            cv2.line(self.annotated, p1, p2, color, a_width)
+
+    def AnalyzeLines(self):
+        cum_slope = 0
+        ct_slope = 0
+        if len(self.map_lines) < 1:
+            return
+        for this in self.map_lines[:1]:
+            cv2.line(self.annotated,this[5],this[6], a_color, a_width)
+            #print(this)
+            mlen = this[1]
+            mslope = this[2]
+            if (mslope < 0.5) and (mlen < 20):
+                # this might be the front edge of a dash, go straight
+                mslope = 999
+            ct_slope += 1
+            cum_slope += mslope
+        if ct_slope > 0:
+            avg_slope = cum_slope / ct_slope
+        else:
+            avg_slope = VERTICAL_SLOPE
+        print("MAP", avg_slope)
+        self.avg_slope = avg_slope
+        self.slope_ct = ct_slope
         cv2.imwrite('temp/ann.jpeg', self.annotated)
 
 

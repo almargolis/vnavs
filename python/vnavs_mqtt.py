@@ -899,6 +899,8 @@ class mqtt_node(object):
         self.broker_timeout = 60
         self.verbose = False
         self.debug = 0
+        self.exception_last_time = 0
+        self.exception_ct = 0
         self.loop_sleep = 0			# set if we don't want to slow loop frequency
         self.lastSocketError = None
         self.pendingReads = {}
@@ -989,8 +991,8 @@ class mqtt_node(object):
         self.mqttc.disconnect()
 
     def Loop(self):
-        try:
-            while True:
+        while True:
+            try:
                 if not self.mqttc.connected:
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
@@ -1016,13 +1018,23 @@ class mqtt_node(object):
                     sys.exit(0)
                 if self.loop_sleep > 0:
                     time.sleep(self.loop_sleep)
-        except KeyboardInterrupt:
-            self.CleanupLoop()
-            sys.exit(0)
-        else:
-            # we should log this and maybe try to continue / restart
-            traceback.print_exc()
-            self.CleanupLoop()
+            except KeyboardInterrupt:
+                self.CleanupLoop()
+                sys.exit(0)
+            except:
+                exception_time = time.clock()
+                payload = {}
+                payload['traceback'] = traceback.format_exc()
+                print(payload['traceback'])				# display in case we are running in console
+                self.Publish('abend', payload)
+                self.CleanupLoop()
+                if (exception_time - self.exception_last_time) < 60:
+                    if self.exception_ct > 10:
+                        sys.exit(0)
+                    self.exception_ct += 1
+                else:
+                    self.exception_ct = 0
+                self.exception_last_time = exception_time
 
     def CleanupLoop(self):
         pass					# override in client if cleanup needed

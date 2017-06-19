@@ -61,7 +61,11 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.camera_resolution = (320, 240)
         self.camera_resolution = (160, 120)
         self.camera_resolution = (640, 480)
-        self.camera = picamera.PiCamera(resolution=self.camera_resolution)
+        try:
+            self.camera = picamera.PiCamera(resolution=self.camera_resolution)
+        except picamera.exc.PiCameraMMALError:
+            print("Camera out of resources exception. Camera is probably in-use by another node.")
+            sys.exit(1)
         self.camera.vflip = True
         self.camera.hflip = True
         self.camera.iso = self.iso
@@ -84,7 +88,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.imageDir = self.config.get("Cameraman", "ImageDir")
 
     def rmsg_cameraman_process(self, payload):
-        if payload['type'] == 'clear':
+        if payload['Type'] == 'clear':
             self.post_processes = []
         else:
             self.post_processes.append(payload)
@@ -133,10 +137,30 @@ class cameraman(vnavs_mqtt.mqtt_node):
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
         self.ImageBurst()
 
-    def PostProcess(self, process, burst_dest, im_fn):
-        roi = OpticChiasm.ROI(burst_dest, process['x1'], process['y1'], process['x2'], process['y2'])
-        d = OpticChiasm.Race(burst_dest.array.copy())
+    def PostProcess(self, process, Im=None, An=None):
+        green = (0, 255, 0)
+        blue = (0, 0, 255)
+        r = Im.shape[0]
+        c = Im.shape[1]
+        x1 = int(process['x1'])
+        y1 = int(process['y1'])
+        x2 = int(process['x2'])
+        y2 = int(process['y2'])
+        if x1 < 0:
+            x1 += c
+        if y1 < 0:
+            y1 += r
+        if x2 < 0:
+            x2 += c
+        if y2 < 0:
+            y2 += r
+        roi = OpticChiasm.ROI(Im, x1, y1, x2, y2)
+        d = OpticChiasm.ReflexEntities(roi)
         d.ProcessLines()
+        if An is not None:
+            cv2.rectangle(An, (x1, y1), (x2, y2), green)
+            d.AnnotateFullImage(An, x1=x1, y1=y1, color=blue)
+        return
         fpx = im_fn[:-4]
         im_fn = fpx + '-A.jpeg'
         im_path = os.path.join(self.imageDir, im_fn)
@@ -226,11 +250,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 im_fn = fn.format(counter=self.image_ct)
                 # the file is already written, make sure its the correct format
                 assert captureFormat == burst_loopFormat
-                payload = {}
-                payload['filename'] = im_fn
-                payload['captureFormat'] = captureFormat
-                payload['capturePublish'] = capturePublish
-                self.Publish('pic_ready', payload)
             else:
                 print("CAPT", im_fn, self.imageDir)
                 im_fn = os.path.splitext(im_fn)[0] + '.' + captureFormat
@@ -253,8 +272,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     payload['capturePublish'] = capturePublish
                     self.Publish('pic_ready', payload)
                     last_time = time.time()
-                for this in self.post_processes:
-                    self.PostProcess(this)
                 """
                 if burst_publish == 's':
                     #buffer = burst_dest.getvalue()
@@ -269,6 +286,32 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 """
                 if self.verbose:
                     print("PIC", im_fn)
+            #
+            # At this point we have an image captured and in the requested format.
+            #
+            if (len(self.post_processes) > 0) or (burst_loopMode == 'idle'):
+                # we need an OpenCv image for post processing
+                if burst_loopPublish == 'file':
+                    img = cv2.imread(im_path)
+            if len(self.post_processes) > 0:
+                annotated = img.copy()
+                for this in self.post_processes:
+                    self.PostProcess(this, Im=img, An=annotated)
+                pos = im_fn.rfind('.')
+                an_fn = im_fn[:pos] + '-A' + im_fn[pos:]
+                an_path = os.path.join(self.imageDir, an_fn)
+                cv2.imwrite(an_path, annotated)
+            else:
+                annotated = None
+            payload = {}
+            payload['filename'] = im_fn
+            if annotated is not None:
+                payload['annotated'] = an_fn
+            payload['iso'] = self.camera.iso
+            payload['shutterSpeed'] = self.camera.exposure_speed
+            payload['captureFormat'] = captureFormat
+            payload['capturePublish'] = capturePublish
+            self.Publish('pic_ready', payload)
             if self.camera.iso != self.iso:
                 # The camera may not use the exact ISO specified. Save the corrected value in
                 # self.iso so we don't keep repeating the request.
@@ -281,10 +324,10 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 burst_dest.truncate()
                 burst_dest.seek(0)   # ?? needed for io.Bytes?? Required for PiRGBArray for subsequent images
             if burst_loopMode == 'idle':
-                print("AUTO", im_path)
-                img = cv2.imread(im_path, 0)			# "0" loads image as grayscale
-                hist = cv2.calcHist([img], [0], None, [256], [0,256])
-                rows, cols = img.shape
+                # need conitional to determin conversion paramter for different formats
+                bw = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                hist = cv2.calcHist([bw], [0], None, [256], [0,256])
+                rows, cols = bw.shape
                 hist_limit = (rows * cols) * 0.5
                 pixel_sum = 0
                 for ix, this in enumerate(hist):
