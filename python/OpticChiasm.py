@@ -30,6 +30,8 @@ def auto_canny(img_to_canny, auto_canny_sigma):
     img_to_canny_median = np.median(img_to_canny)
     lower_canny_thresh = int(max(0, (1 - auto_canny_sigma) * img_to_canny_median ))
     upper_canny_thresh = int(max(255, (1 + auto_canny_sigma) * img_to_canny_median ))
+    lower_canny_thresh = 100
+    upper_canny_thresh = 130
     return cv2.Canny(img_to_canny,lower_canny_thresh,upper_canny_thresh)
 
 #
@@ -564,11 +566,11 @@ class ReflexEntities(object):
     def AnnotateFullImage(self, image, linect=10, x1=0, y1=0, color=None):
         if color is None:
             color = (0, 255, 0)				# green
-        a_width = 2
+        a_width = 5
         for this in self.map_lines[:linect]:
             p1 = (this[5][0]+x1, this[5][1]+y1)
-            p1 = (this[6][0]+x1, this[6][1]+y1)
-            cv2.line(self.annotated, p1, p2, color, a_width)
+            p2 = (this[6][0]+x1, this[6][1]+y1)
+            cv2.line(image, p1, p2, color, a_width)
 
     def AnalyzeLines(self):
         cum_slope = 0

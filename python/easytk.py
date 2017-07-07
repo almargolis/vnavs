@@ -6,6 +6,7 @@ from builtins import (bytes, str, open, super, range,
 #from Tkinter import *		# python 2.7
 #from tkinter import ttk	# python 3
 #from tkinter import Canvas
+import cv2
 import tkFileDialog
 import Tkinter			# python 2.7
 import ScrolledText
@@ -120,7 +121,7 @@ class TkWidgetDef(object):
 
     def ReplaceValue(self, value, Caption=None):
         if isinstance(self.tkw, ScrolledText.ScrolledText):
-            self.tkw.delete("1.0", "end")
+            self.tkw.delete("1.0", Tkinter.END)
             self.tkw.insert("1.0", value)
         elif isinstance(self.tkw, ttk.Entry):
             self.tkd.set(value)
@@ -131,7 +132,7 @@ class TkWidgetDef(object):
 
     def Value(self):
         if isinstance(self.tkw, ScrolledText.ScrolledText):
-            return self.tkw.get("1.0", "end")
+            return self.tkw.get("1.0", Tkinter.END)
         if isinstance(self.tkw, ttk.Entry):
             v = self.tkd.get()
             return v
@@ -173,17 +174,28 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, height=5, rowspan=0, Command=None):
+    def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, Command=None, XSCROLL=False):
         row, col = self.Position(row=row, col=col)
         refname = caption.lower().replace(' ', '_')
 
-        #tk_data = Tkinter.StringVar()
-        #tk_data.set('')
-        tk_label = ttk.Label(self.tkw, text=caption).grid(column=0, row=self.last_used_row, sticky=Tkinter.W)
-        scrollbar = ttk.Scrollbar(self.tkw, orient=Tkinter.VERTICAL)
-        tk_entry = Tkinter.Listbox(self.tkw, yscrollcommand=scrollbar.set, exportselection=0)
-        tk_entry.config(height=height)
-        scrollbar.config(command=tk_entry.yview)
+        tk_label = ttk.Label(self.tkw, text=caption)
+        tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+
+        container = ttk.Frame(master=self.tkw, borderwidth=2, relief=Tkinter.SUNKEN)
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
+        container.grid(row=row, column=col+1)
+        if XSCROLL:
+            xscrollbar = ttk.Scrollbar(master=container, orient=Tkinter.HORIZONTAL)
+            xscrollbar.grid(row=1, column=0, sticky=Tkinter.E+Tkinter.W)
+        yscrollbar = ttk.Scrollbar(master=container, orient=Tkinter.VERTICAL)
+        yscrollbar.grid(row=0, column=1, sticky=Tkinter.N+Tkinter.S)
+        tk_entry = Tkinter.Listbox(master=container, borderwidth=0, yscrollcommand=yscrollbar.set, exportselection=0)
+        tk_entry.config(height=rowspan)
+        if XSCROLL:
+            tk_entry.config(xscrollcommand=xscrollbar.set)
+            xscrollbar.config(command=tk_entry.xview)
+        yscrollbar.config(command=tk_entry.yview)
         for this_item in s_items:
             tk_entry.insert(Tkinter.END, this_item)
         if Command is not None:
@@ -197,15 +209,13 @@ class TkWidgetDef(object):
                 active_index = 0
         tk_entry.selection_set(active_index)
         tk_entry.see(active_index)
-        parms = {'column': 1, 'row': self.last_used_row, 'sticky': (Tkinter.W, Tkinter.E) }
-        if rowspan > 0:
+        parms = {'column': col+1, 'row': row, 'sticky': (Tkinter.W, Tkinter.E) }
+        if rowspan > 1:
             parms['rowspan'] = rowspan
-        tk_entry.grid(**parms)
-        if self.col_span < 2:
-            self.col_span = 2
-        #frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
+        #tk_entry.grid(**parms)
+        tk_entry.grid(row=0, column=0, sticky=Tkinter.N+Tkinter.S+Tkinter.E+Tkinter.W)
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label)
-        self.RememberPosition(frame, row, col, colspan=2)
+        self.RememberPosition(frame, row, col, rowspan=rowspan, colspan=2)
         self.children.append(frame)
         return frame
 
@@ -377,7 +387,7 @@ class TkWidgetDef(object):
         if img_tk is not None:
             if isinstance(self.tkw, ttk.Label):
                 self.tkw.configure(image=img_tk)
-            elif isinstance(self.tkw, Canvas):
+            elif isinstance(self.tkw, Tkinter.Canvas):
                 if self.scrollableImage is None:
                     self.scrollableImage = self.tkw.create_image(0, 0, image=img_tk, anchor='nw')
                 else:

@@ -163,7 +163,7 @@ class ProcessStep(object):
                     parm_label = "Parm" + str(ix+1)
                     parm_value = ""
                     parm_id = None
-                this_entry.UpdateEntryField(parm_value, Caption=parm_label)
+                this_entry.ReplaceValue(parm_value, Caption=parm_label)
                 this_entry.parm_id = parm_label
         self.UpdateAll()
 
@@ -356,7 +356,7 @@ class ProcessStep(object):
             self.deposition.UpdateLabel(deposition)
         if trace is not None:
             deposition = trace + "\n\n" + deposition
-            self.deposition.UpdateLabel(deposition)
+            self.deposition.ReplaceValue(deposition)
         self.image.UpdateImage(opencv=self.im)
         if 'isbase' in flags:
             ProcessStep.annotation_base = self
@@ -378,12 +378,11 @@ class ProcessStep(object):
 
 class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=['cameraman/last'],
+        super().__init__(Subscriptions=['cameraman/pic_ready'],
 					SingleThreaded=True, BrokerType='F', SelectTimeoutSecs=0.1,
 					Verbose=True)
         self.tk_is_initialized = False
-        self.imageDir = self.config.get("Cameraman", "ImageDir")
-        self.lastfn = ""
+        self.file_client = vnavs_mqtt.FileClient(Verbose=False)
         self.image = OpticChiasm.ImageAnalyzer()
         self.image.img_crop=(300,200)
         self.image.img_crop=(250,450)
@@ -401,9 +400,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.notebook = self.tk.AddNotebook(row=3)
         self.camera_iso = self.statusFrame.AddEntryField('ISO', value=800)
         self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', value=10000, row=SAME_ROW, col=NEXT_COL)
-        self.camera_snap = False
         self.camera_last_filename = ''
-        self.camera_last_processed = True
+        self.last_pic_payload = None
+        self.xxx = None
         self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=SAME_ROW, col=NEXT_COL)
 
@@ -421,14 +420,12 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         # self.f1_run_name_entry.focus()
 
     def ChooseImageFile(self):
-        self.camera_snap = False
         fn = self.statusFrame.DoFileNameDialog()
         ProcessStep.steps[0].filter = 'FileImage'
         ProcessStep.steps[0].parm_values['opencvfn'] = fn
         ProcessStep.steps[0].UpdateAll()
 
     def CaptureImageFile(self):
-        self.camera_snap = True
         payload = {}
         try:
             payload['iso'] = int(self.camera_iso.Value())
@@ -449,36 +446,29 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         time.sleep(1)
         self.Publish('ask_last', {}, source='cameraman')
 
-    def rmsg_cameraman_last(self, payload):
+    def rmsg_cameraman_pic_ready(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
-        if not self.camera_snap:
-            return
-        self.camera_last_filename  = payload['filename']
-        self.camera_last_processed = False
-        print("LAST", ProcessStep.steps[0].parm_values)
+        self.last_pic_payload = payload
 
     def DoLoop(self):
-        if not self.camera_last_processed:
-            # There is a potential race condition with self.camera_last_processed being
-            # assigned from both mqtt and tk threads. That could be confusing or make the
-            # program fee unresponsive but shouldn't cause real harm.
-            # THIS ASSUMES capture to step zero, we should seatch for actual step.
-            fpath = os.path.join(self.imageDir, self.camera_last_filename)
-            im = None
-            retry_ct = 0
-            while (im is None) and (retry_ct < 10):
-                im = cv2.imread(fpath)
-                if (im is None):
-                    if retry_ct > 10:
-                        break
-                    retry_ct += 1
-                    time.sleep(0.1)
-            if im is not None:
-                ProcessStep.steps[0].parm_values['opencvfn'] = fpath
-                ProcessStep.steps[0].filter = 'FileImage'
-                ProcessStep.steps[0].UpdateAll()
-                self.camera_last_processed = True
+        if self.last_pic_payload is not None:
+            payload = self.last_pic_payload
+            fn = payload['filename']
+            print("PIC", fn)
+            if self.file_client.GetFile(fn):
+                fpath = os.path.join(self.imageDir, fn)
+                fpath = fn
+                print("GOT", fn, fpath)
+                if self.xxx is None:
+                    im = cv2.imread(fpath)
+                    self.xxx = im
+                else:
+                    im = self.xxx
+                if im is not None:
+                    ProcessStep.steps[0].parm_values['opencvfn'] = fpath
+                    ProcessStep.steps[0].filter = 'FileImage'
+                    ProcessStep.steps[0].UpdateAll()
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

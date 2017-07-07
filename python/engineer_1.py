@@ -26,7 +26,6 @@ METERS_PER_SECOND_PER_KNOT = 0.514444
 class engineer_1(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[], SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
-        self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.heading = 0
         self.longitude = 0
         self.latitude = 0

@@ -29,7 +29,6 @@ import vnavs_mqtt
 class RunViewer(vnavs_mqtt.mqtt_node):
     def __init__(self):
         super().__init__(Subscriptions=[], Blocking=True, BlockingTimeoutSecs=0.1)
-        self.imageDir = self.config.get("Cameraman", "ImageDir")
 
         self.tk = darkroom.TkWidgetDef('root', Tk())
         self.tk.tkw.title("VNAVS Run Viewer")

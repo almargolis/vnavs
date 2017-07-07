@@ -46,7 +46,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						Verbose=Verbose)
         self.scriptsDir = self.config.get("MissionControl", "Scripts")
         self.file_client = vnavs_mqtt.FileClient(Verbose=False)
-        self.lastfn = ""
 
         self.tk = easytk.EasyTk(debug=True)
         self.tk.tkw.title("VNAVS Mission Control")
@@ -61,7 +60,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.image.img_crop=None
         self.image.img_cropped_height = 100
         self.image.img_fpath = 'opencv_6'
-        self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.image.img_source_dir = '/volumes/pi/projects/vnavs/temp'
         self.image.img_fname_suffix = ''
         self.image.do_save_snaps = False
@@ -70,6 +68,9 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.pic_processed = False
         self.pic_requested = False
         self.pic_request_time = 0
+        self.pic_get = True
+        if vnavs_mqtt.ARG_IMAGE_GET in self.args:
+            self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
 
         mission_tab = self.notebook.AddTab('Mission')
         self.f1_helmsman_entry = mission_tab.AddEntryField('Helmsman', width=75)
@@ -153,15 +154,11 @@ class MissionControl(vnavs_mqtt.mqtt_node):
           self.alert_text.ReplaceValue(t)
 
     def rmsg_cameraman_pic_ready(self, payload):
-        self.rmsg_cameraman_last(payload)
-
-    def rmsg_cameraman_last(self, payload):
         if 'annotated' in payload:
             self.pic_fn = payload['annotated']
         else:
             self.pic_fn = payload['filename']
         self.pic_processed = False
-        #print("PIC", self.pic_fn)
 
     def rmsg_navigator_status(self, payload):
         print("NAV STAT", payload)
@@ -238,17 +235,11 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         if self.pic_fn is None:
             print("NO PIC AVAILABLE")
             return
-        if True:
-            start_time = time.time()
-            if self.file_client.GetFile(self.pic_fn):
-                #print("GOT", self.pic_fn, time.time()-start_time)
-                path = self.pic_fn
-            else:
-                #print("NOT GOT", self.pic_fn)
+        path = os.path.join(self.imageDir, self.pic_fn)
+        if self.pic_get:
+            if not self.file_client.GetFile(self.pic_fn, path=path):
+                print("Unable to fetch PIC", self.pic_fn)
                 return
-        else:
-            # This is code to get file file system including AFP)
-            path = os.path.join(self.imageDir, self.pic_fn)
         self.f1_img1.UpdateImage(fn=path)
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.pic_fn = None
@@ -261,23 +252,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         #self.f1_speed_display.configure(text=str(speed))
         if (time.time() - self.pic_last_time) > 1.0:
             self.ProcessImage()
-            #image_info = self.Get('pic_ready', source='cameraman')
-            #if image_info is not None:
-            #    if 'filename' in image_info:
-            #        print("PICPIC", image_info)
-            #        self.pic_fn = image_info['filename']
-            #        self.ProcessImage()
-        #if (self.pic_fn is None) or (self.pic_fn == '') or self.pic_processed:
-        #    pass
-        #else:
-        #    self.ProcessImage()
-        #if (not self.pic_requested) or ((time.time() - self.pic_request_time) > 1):
-        #    print("ASK LAST")
-        #    #self.mqttc.publish('cameraman/ask_last', '')
-        #    self.pic_requested = True
-        #    self.pic_request_time = time.time()
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
-m = MissionControl()
-m.Loop()
+vnavs_mqtt.LaunchNode(MissionControl)

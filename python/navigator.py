@@ -246,7 +246,6 @@ class navigator(vnavs_mqtt.mqtt_node):
 					],
 					Readers=[],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
-        self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.missionDir = self.config.get("Pilot", "MissionDir")
         self.longitude = 0
         self.gps_speed = None

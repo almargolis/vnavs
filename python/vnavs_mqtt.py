@@ -28,6 +28,17 @@ stop_process = False
 
 TCPIP_STD_BUFLEN = 1024
 TCPIP_XFR_BUFLEN = 4096
+FAST_MQTT_PORT = 4000
+DEFAULT_PORT = 3000
+HOST_LOCAL = '127.0.0.1'
+ARG_HOST = 'host'
+ARG_PORT = 'port'
+ARG_LOCAL = 'local'
+ARG_IMAGE_DIR = 'imagedir'
+ARG_IMAGE_GET = 'imageget'
+ARG_TRUE = 'true'
+ARG_FALSE = 'false'
+ARG_CWD = 'cwd'
 
 #
 # Streamer() is the socket_xfer writer function which runs in its own process.
@@ -175,16 +186,19 @@ class socket_xfer(object):
 # but that is not supported by this object.
 
 class SocketWrapper(object):
-    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, IniSection=None, IsServer=False, IsSocketBlocking=False, IsZeroOneProtocol=True,
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsServer=False, IsSocketBlocking=False, Port=DEFAULT_PORT, IsZeroOneProtocol=True,
 					Verbose=False):
         self.buffer_len = BufferLen
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
-        self.socket_host = None
-        self.socket_port = None
+        self.socket_host = Host
+        self.socket_port = Port
         if IniSection is not None:
-            self.socket_host = self.config.get(IniSection, "Host")
-            self.socket_port = int(self.config.get(IniSection, "Port"))
+            try:
+                self.socket_host = self.config.get(IniSection, "Host")
+                self.socket_port = int(self.config.get(IniSection, "Port"))
+            except ConfigParser.NoSectionError:
+                print("Ini section {} not found, using default host/port {}/{}".format(IniSection, Host, Port))
 
         # This can be a server or client. Either way self.os_socket is the primary socket
         #
@@ -195,7 +209,7 @@ class SocketWrapper(object):
         # slowness was a real problem, not transient. Google finds lots if discussion
         # with try this / try that suggestions. This one made the most sense to me.
         # I could imaging Apple not caring much about custom socket protocols but
-        # but  being concerned about hogging hte network with lots of small packets
+        # but  being concerned about hogging the network with lots of small packets
         # which might slow other applications. This problem was never exhibited on
         # the RPI side of the communications (RPI <-> RPI) only (RPI <-> OSX).
         #
@@ -380,8 +394,9 @@ class SocketWrapper(object):
             self.Select(timeout=MaxAllowableWriteLatency)
 
 class SocketWrapperServer(SocketWrapper):
-    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
-        super().__init__(BufferLen=BufferLen, IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsServer=True, IsSocketBlocking=False, Verbose=Verbose)
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsZeroOneProtocol=True, Port=DEFAULT_PORT, Verbose=False):
+        # if IniSection is specified, it is used. Else specify Host/Port. Host of '' binds to all avalable networks.
+        super().__init__(BufferLen=BufferLen, Host='', IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsServer=True, IsSocketBlocking=False, Port=Port, Verbose=Verbose)
 
     def Serve(self, host=None, port=None):
         if host is not None:
@@ -568,7 +583,7 @@ class FileClient(SocketWrapperClient):
         self.buffer = ""
         self.file_received = False
 
-    def GetFile(self, filename, timeout=30.0):
+    def GetFile(self, filename, path=None, timeout=30.0):
         self.Init()
         retry_ct = 0
         while (not self.connected) and (retry_ct < 5):
@@ -585,7 +600,11 @@ class FileClient(SocketWrapperClient):
             self.Connect()
         #print("FC CONNECTED")
         self.file_name = filename
-        self.file_out = open(filename, "wb")
+        if path is None:
+            self.file_path = filename
+        else:
+            self.file_path = path
+        self.file_out = open(self.file_path, "wb")
         self.buffer = bytearray()
         self.buf_sum = 0
         self.QueueMessageZ([filename])
@@ -660,7 +679,7 @@ class MessageArchiver(object):
 #
 class FastMqttServer(SocketWrapperServer):
     def __init__(self, Verbose=False):
-        super().__init__(IniSection="MqttFastServer", Verbose=Verbose)
+        super().__init__(IniSection="MqttFastServer", Port=FAST_MQTT_PORT, Verbose=Verbose)
         self.mqttPayloads = {}
         self.subscriptions = {}
         self.message_in_ct = 0
@@ -882,12 +901,38 @@ class Counters(object):
 #		connections and exceptions are handled properly. Since Loop()
 #		is non-blocking, DoLoop() needs to check self.mqttcConnected.
 #
+def LaunchNode(node_class):
+    n = node_class()
+    n.Loop()
+
 class mqtt_node(object):
     def __init__(self, SourceName=None, Subscriptions=[], Readers=[], SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+        self.args = {}
+        for this in sys.argv[1:]:
+            eq_pos = this.find('=')
+            if eq_pos >= 0:
+                key = this[:eq_pos]
+                val = this[eq_pos+1:]
+                if (key == ARG_HOST) and (val == ARG_LOCAL):
+                    val = HOST_LOCAL
+                elif (key == ARG_IMAGE_DIR) and (val == ARG_CWD):
+                    val = os.getcwd()
+                elif (key == ARG_IMAGE_GET) and (val == ARG_FALSE):
+                    val = False
+                elif (key == ARG_IMAGE_GET) and (val == ARG_TRUE):
+                    val = True
+                self.args[key] = val
+            else:
+                self.args[this] = True
         self.vnavs_pid = int(time.time())		# non-repeating with ~ 1 second
         self.vnavs_mid = 0				# Publish() sequence
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
+        if ARG_IMAGE_DIR in self.args:
+            self.imageDir = self.args[ARG_IMAGE_DIR]
+        else:
+            self.imageDir = self.config.get("Cameraman", "ImageDir")
+
         self.single_threaded = SingleThreaded
         self.select_timeout = SelectTimeoutSecs
         self.readers = Readers
@@ -926,8 +971,11 @@ class mqtt_node(object):
         else:
             iniSection = 'MqttFast'
             self.mqttc = FastMqttClient()
-        self.socket_host = self.config.get(iniSection, "Host")
-        self.socket_port = int(self.config.get(iniSection, "Port"))	# 1883
+        if ARG_HOST in self.args:
+            self.socket_host = self.args[ARG_HOST]
+        else:
+            self.socket_host = self.config.get(iniSection, "Host")
+        self.socket_port = int(self.config.get(iniSection, "Port"))
 
     def Connect(self, timeout=0):
         if self.mqttc.connected:
