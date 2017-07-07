@@ -932,7 +932,7 @@ class mqtt_node(object):
             self.imageDir = self.args[ARG_IMAGE_DIR]
         else:
             self.imageDir = self.config.get("Cameraman", "ImageDir")
-
+        self.imageDir = os.path.expanduser(self.imageDir)
         self.single_threaded = SingleThreaded
         self.select_timeout = SelectTimeoutSecs
         self.readers = Readers

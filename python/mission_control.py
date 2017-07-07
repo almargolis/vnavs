@@ -236,6 +236,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             print("NO PIC AVAILABLE")
             return
         path = os.path.join(self.imageDir, self.pic_fn)
+        print("ProcessImage()", self.pic_fn, path)
         if self.pic_get:
             if not self.file_client.GetFile(self.pic_fn, path=path):
                 print("Unable to fetch PIC", self.pic_fn)
