@@ -305,17 +305,15 @@ class cameraman(vnavs_mqtt.mqtt_node):
         burst_ct = 0
         print("READY", burst_loop_mode, burst_loop_format, burst_loop_publish, burst_dest)
         last_time = 0
-        for im_fn in self.camera.capture_continuous(burst_dest, format=burst_loop_format, use_video_port=True):
+        for im_path in self.camera.capture_continuous(burst_dest, format=burst_loop_format, use_video_port=True):
             self.image_ct += 1
             burst_ct += 1
             # mqtt can change values asynchronously. copy so values are consistent during capture
             capture_format = self.capture_format
             capture_publish = self.capture_publish
             print("MODE", capture_publish)
-            im_path = os.path.join(self.imageDir, im_fn)
             if burst_loop_publish == 'file':
-                # Assign file name same as picamera.capture() to file
-                #im_fn = fn.format(counter=self.image_ct)
+                im_fn = os.path.basename(im_path)
                 # the file is already written, make sure its the correct format
                 assert capture_format == burst_loop_format
             else:
