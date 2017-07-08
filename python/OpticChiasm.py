@@ -12,6 +12,9 @@ HSV_MASK_ORANGE = 12
 HSV_MASK_BLUE = 120
 HSV_MASK_RED = 178
 
+IM_BGR = 'bgr'
+IM_RGB = 'rgb'
+
 RACE_BLUR = False
 RACE_CANNY = False
 RACE_CANNY = True

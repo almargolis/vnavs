@@ -116,9 +116,10 @@ class ProcessStep(object):
         self.filter_selection = self.input_panel.AddListbox('Filters', self.filter_labels, Selection=cv_filter, Command=self.NewFilter, rowspan=4)
         self.parmEntries = []
         self.parmEntries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL))
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm2'))
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm3'))
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm4'))
+        parm_col = self.parmEntries[0].col
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm2', col=parm_col))
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm3', col=parm_col))
+        self.parmEntries.append(self.input_panel.AddEntryField('Parm4', col=parm_col))
         #
         self.image = self.output_panel.AddCanvas()
         self.deposition = self.output_panel.AddLabel(col=2)
@@ -353,7 +354,7 @@ class ProcessStep(object):
                 avg_slope = "NO :ONES"
             print("MAP", avg_slope)
             deposition += `map_lines`
-            self.deposition.UpdateLabel(deposition)
+            self.deposition.ReplaceValue(deposition[:20])
         if trace is not None:
             deposition = trace + "\n\n" + deposition
             self.deposition.ReplaceValue(deposition)
@@ -402,8 +403,15 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', value=10000, row=SAME_ROW, col=NEXT_COL)
         self.camera_last_filename = ''
         self.last_pic_payload = None
-        self.xxx = None
+        self.pic_needed = False
+        self.pic_continuous = True
+        self.pic_get = True
+        self.pic_fn = None
+        if vnavs_mqtt.ARG_IMAGE_GET in self.args:
+            self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
+
         self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
+        self.statusFrame.AddButton('Continuous', command=self.ContinuousImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=SAME_ROW, col=NEXT_COL)
 
         ProcessStep.app = self
@@ -425,7 +433,13 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         ProcessStep.steps[0].parm_values['opencvfn'] = fn
         ProcessStep.steps[0].UpdateAll()
 
+    def ContinuousImageFile(self):
+        self.pic_continuous = True
+
     def CaptureImageFile(self):
+        self.pic_needed = True
+        self.pic_continuous = False
+        return
         payload = {}
         try:
             payload['iso'] = int(self.camera_iso.Value())
@@ -452,23 +466,23 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.last_pic_payload = payload
 
     def DoLoop(self):
-        if self.last_pic_payload is not None:
-            payload = self.last_pic_payload
-            fn = payload['filename']
-            print("PIC", fn)
-            if self.file_client.GetFile(fn):
-                fpath = os.path.join(self.imageDir, fn)
-                fpath = fn
-                print("GOT", fn, fpath)
-                if self.xxx is None:
-                    im = cv2.imread(fpath)
-                    self.xxx = im
-                else:
-                    im = self.xxx
-                if im is not None:
-                    ProcessStep.steps[0].parm_values['opencvfn'] = fpath
-                    ProcessStep.steps[0].filter = 'FileImage'
-                    ProcessStep.steps[0].UpdateAll()
+        if (self.pic_continuous or self.pic_needed) and (self.last_pic_payload is not None):
+            if self.pic_needed:					# self.pic_needed is freeze frame mode
+                self.pic_needed = False				# don't process others until requested
+            payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
+            self.pic_fn = payload['filename']
+            print("PIC", self.pic_fn)
+            path = os.path.join(self.imageDir, self.pic_fn)
+            print("ProcessImage()", self.pic_fn, path)
+            if self.pic_get:
+                if not self.file_client.GetFile(self.pic_fn, path=path):
+                    print("Unable to fetch PIC", self.pic_fn)
+                    return
+            im = cv2.imread(path)
+            if im is not None:
+                ProcessStep.steps[0].parm_values['opencvfn'] = path
+                ProcessStep.steps[0].filter = 'FileImage'
+                ProcessStep.steps[0].UpdateAll()
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

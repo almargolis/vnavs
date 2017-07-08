@@ -85,7 +85,8 @@ class macbook_camera(object):
             ctr += 1
             if isinstance(output, basestring):
                 path = output.format(counter=ctr)
-                cv2.imwrite(path, frame)
+                rgb_image = OpticChiasm.BGR2RGB(frame)
+                cv2.imwrite(path, rgb_image)
                 print("MAC", output, path)
                 yield path
             else:
@@ -227,7 +228,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         d.ProcessLines()
         if An is not None:
             cv2.rectangle(An, (x1, y1), (x2, y2), green, thickness=2)
-            d.AnnotateFullImage(An, x1=x1, y1=y1, color=blue)
+            d.AnnotateFullImage(An, x1=x1, y1=y1, linect=100, color=blue)
         return
         fpx = im_fn[:-4]
         im_fn = fpx + '-A.jpeg'
@@ -284,7 +285,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         if burst_loop_publish == 'stream':
             if burst_loop_format == 'yuv':
                 burst_dest = picamera.array.PiYUVArray(self.camera)
-            elif burst_loop_format in ['rgb', 'bgr']:
+            elif burst_loop_format in [OpticChiasm.IM_RGB, OpticChiasm.IM_BGR]:
                 burst_dest = picamera.array.PiRGBArray(self.camera)
             else:				# jpeg
                 burst_dest = io.BytesIO()
@@ -324,7 +325,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     # to keep understandable, keep following if consistent with buffer creation if
                     if burst_loop_format == 'yuv':
                         cv2.imwrite(im_path, burst_dest.rgb_array)
-                    elif burst_loop_format in ['rgb', 'bgr']:
+                    elif burst_loop_format in [OpticChiasm.IM_RGB, OpticChiasm.IM_BGR]:
                         cv2.imwrite(im_path, burst_dest.array)
                     else:
                         f = open(im_fn, 'wb')

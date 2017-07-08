@@ -175,11 +175,37 @@ class TkWidgetDef(object):
         return frame
 
     def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, Command=None, XSCROLL=False):
-        row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
+        frame = self.AddScrolledWidget(Tkinter.Listbox, {'exportselection': 0, 'height': rowspan},
+						caption=caption, row=row, col=col, rowspan=rowspan, XSCROLL=XSCROLL)
+        for this_item in s_items:
+            frame.tkw.insert(Tkinter.END, this_item)
+        if Command is not None:
+            frame.tkw.bind("<Double-Button-1>", Command)
+        if Selection is None:
+            active_index = 0
+        else:
+            try:
+                active_index = s_items.index(Selection)
+            except ValueError:
+                active_index = 0
+        frame.tkw.selection_set(active_index)
+        frame.tkw.see(active_index)
+        return frame
 
-        tk_label = ttk.Label(self.tkw, text=caption)
-        tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+    def AddScrolledWidget(self, tk_widget_class, tk_widget_parms, caption=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, XSCROLL=False):
+        # Getting scrolled widgets right is verbose and fussy. I found this technique using a seperate frame and 
+        # explicit borderwidth and weight on StackOverflow somewhere.
+        # The goal is for this tmethod to create any widget that needs scroll bars.
+        #
+        row, col = self.Position(row=row, col=col)
+
+        if caption is None:
+            tk_label = None
+            refname = "ZXC"
+        else:
+            refname = caption.lower().replace(' ', '_')
+            tk_label = ttk.Label(self.tkw, text=caption)
+            tk_label.grid(column=col, row=row, sticky=Tkinter.W)
 
         container = ttk.Frame(master=self.tkw, borderwidth=2, relief=Tkinter.SUNKEN)
         container.grid_rowconfigure(0, weight=1)
@@ -188,33 +214,22 @@ class TkWidgetDef(object):
         if XSCROLL:
             xscrollbar = ttk.Scrollbar(master=container, orient=Tkinter.HORIZONTAL)
             xscrollbar.grid(row=1, column=0, sticky=Tkinter.E+Tkinter.W)
+        else:
+            xscrollbar = None
         yscrollbar = ttk.Scrollbar(master=container, orient=Tkinter.VERTICAL)
         yscrollbar.grid(row=0, column=1, sticky=Tkinter.N+Tkinter.S)
-        tk_entry = Tkinter.Listbox(master=container, borderwidth=0, yscrollcommand=yscrollbar.set, exportselection=0)
-        tk_entry.config(height=rowspan)
+        tkw = tk_widget_class(master=container, borderwidth=0, yscrollcommand=yscrollbar.set, **tk_widget_parms)
         if XSCROLL:
-            tk_entry.config(xscrollcommand=xscrollbar.set)
-            xscrollbar.config(command=tk_entry.xview)
-        yscrollbar.config(command=tk_entry.yview)
-        for this_item in s_items:
-            tk_entry.insert(Tkinter.END, this_item)
-        if Command is not None:
-            tk_entry.bind("<Double-Button-1>", Command)
-        if Selection is None:
-            active_index = 0
-        else:
-            try:
-                active_index = s_items.index(Selection)
-            except ValueError:
-                active_index = 0
-        tk_entry.selection_set(active_index)
-        tk_entry.see(active_index)
+            tkw.config(xscrollcommand=xscrollbar.set)
+            xscrollbar.config(command=tkw.xview)
+        yscrollbar.config(command=tkw.yview)
         parms = {'column': col+1, 'row': row, 'sticky': (Tkinter.W, Tkinter.E) }
         if rowspan > 1:
             parms['rowspan'] = rowspan
-        #tk_entry.grid(**parms)
-        tk_entry.grid(row=0, column=0, sticky=Tkinter.N+Tkinter.S+Tkinter.E+Tkinter.W)
-        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label)
+        tkw.grid(row=0, column=0, sticky=Tkinter.N+Tkinter.S+Tkinter.E+Tkinter.W)
+        frame = TkWidgetDef(refname, tkw, tkw_label=tk_label)
+        frame.hbar = xscrollbar
+        frame.vbar = yscrollbar
         self.RememberPosition(frame, row, col, rowspan=rowspan, colspan=2)
         self.children.append(frame)
         return frame
@@ -301,21 +316,11 @@ class TkWidgetDef(object):
 				thumbnailof=None, thumbnailwidth=100,
 				width=400, height=200,
 				row=NEXT_ROW, col=SAME_COL, colspan=1, rowspan=1):
-        row, col = self.Position(row=row, col=col)
-        canvas = Tkinter.Canvas(self.tkw, width=width, height=height)
-        frame = TkWidgetDef('', canvas)
-
-        # The scrollbars are TK properties of the same frame as as the canvas.
-        # We save the widget definitions with the canvas.
+        frame = self.AddScrolledWidget(Tkinter.Canvas, {'width': width, 'height': height},
+						row=row, col=col, rowspan=rowspan, XSCROLL=True)
         frame.scrollableImage = None
         frame.canvasWidth = width
         frame.canvasHeight = height
-        frame.hbar=ttk.Scrollbar(self.tkw, orient=Tkinter.HORIZONTAL)
-        frame.hbar.grid(row=row+1, column=col, sticky=Tkinter.E+Tkinter.W)
-        frame.vbar=ttk.Scrollbar(self.tkw, orient=Tkinter.VERTICAL)
-        frame.vbar.grid(row=row, column=col+1, sticky=Tkinter.N+Tkinter.S)
-        frame.tkw.config(width=frame.canvasWidth, height=frame.canvasHeight)
-        self.AttachScrollbars()
 
         if thumbnailof is None:
             frame.UpdateImage(fn=fn, opencv=opencv, opencvfn=opencvfn)
@@ -325,19 +330,7 @@ class TkWidgetDef(object):
             thumbnailof.thumbnail = frame
             thumbnailof.thumbnailwidth = thumbnailwidth
 
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
-        # colspan and rowspan need to be expanded to allow for scrollbars ???
-        self.RememberPosition(frame, row, col, colspan=colspan+1, rowspan=rowspan+1)
-        self.children.append(frame)
         return frame
-
-    def AttachScrollbars(self):
-        if self.hbar is not None:
-            self.hbar.config(command=self.tkw.xview)
-            self.tkw.config(xscrollcommand=self.hbar.set)
-        if self.vbar is not None:
-            self.vbar.config(command=self.tkw.yview)
-            self.tkw.config(yscrollcommand=self.vbar.set)
 
     def AddLabelImage(self, fn=None, opencv=None, opencvfn=None,
 				thumbnailof=None, thumbnailwidth=100,
@@ -404,7 +397,6 @@ class TkWidgetDef(object):
                 self.vbar.set(0.0, pctHeight)
             else:
                 raise TypeError("Unsupported image widget: " + self.tkw.__class__.__name__)
-        self.AttachScrollbars()
         if self.thumbnail:
             self.thumbnail.UpdateImage(opencv=self.MakeThumbnail(self.opencv_im, self.thumbnailwidth))
 
