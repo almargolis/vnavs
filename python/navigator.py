@@ -145,7 +145,7 @@ def MissionSetting(navigator, parts):
 
 class Mission(object):
     def __init__(self, navigator, MissionName=None):
-        self.navigator
+        self.navigator = navigator
         self.missionDir = self.navigator.missionDir
         self.missionName = None
         self.Init(MissionName=MissionName)
@@ -160,7 +160,7 @@ class Mission(object):
         self.mission_steps = []
         self.mission_step_ix = 0
         self.LoadMission()
-
+        
     def LoadMission(self, MissionName=None):
         print("LOAD", self.missionDir, self.missionName, MissionName)
         mission_name = self.missionName
@@ -191,7 +191,17 @@ class Mission(object):
                 waypoints.append(s.waypoint)
         return waypoints
 
-    def SaveMission(self, MissionName=None):
+    def StartMission(self):
+        payload = {}
+        payload['loop_mode'] = 'run'
+        self.navigator.Publish('orders', payload, source='cameraman')
+
+    def EndMission(self):
+        payload = {}
+        payload['loop_mode'] = 'idle'
+        self.navigator.Publish('orders', payload, source='cameraman')
+
+    def SaveWaypoints(self, MissionName=None):
         return
         mission_name = self.missionName
         if MissionName is not None:
@@ -397,11 +407,11 @@ class navigator(vnavs_mqtt.mqtt_node):
         print("LAST", payload)
 
     def rmsg_navigator_mode(self, payload):
+        print("MODE_MSG", payload)
         new_mode = payload['mode']
         if new_mode not in "GMPR":
             return 'invalid mode'
         self.new_mode_payload = payload
-        print("MODE_MSG", payload)
 
     def ChangeMode(self):
         payload = self.new_mode_payload
@@ -421,8 +431,10 @@ class navigator(vnavs_mqtt.mqtt_node):
         elif mode in 'MG':
             if (mode == "G") and (self.mode != "G"):
                 # Start a mission
+                print("START MISSION")
                 mission_name = payload['missionName']
                 self.Init(MissionName=mission_name)
+                self.mission.StartMission()
                 """
                 THIS NEEDS to be activated for GPS
                 self.nav.steering = 'A0'
@@ -433,10 +445,12 @@ class navigator(vnavs_mqtt.mqtt_node):
                 """
             print("MISSION", self.mission.missionName, len(self.mission.mission_steps))
             if (mode == "M") and (self.mode == "G"):
-                # end of gps naviagion
+                # end of mission
+                print("END MISSION")
                 self.nav.Init()
                 self.PublishNavigation()
                 self.mission.SaveNavigation()
+                self.mission.EndMission()
             self.mode = mode
             self.pausedMode = None
 
@@ -464,7 +478,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 mission_name = payload['MissionName']
             else:
                 mission_name = None
-            self.mission.SaveMission(MissionName=mission_name)
+            self.mission.SaveWaypoints(MissionName=mission_name)
         elif request == 'MakeWaypointMap':
             mission_map = MissionMap(waypoints=self.mission.Waypoints())
             map_fn = 'Map_%s_%s_%s.jpeg' % (payload['_sender'], payload['_sendPid'], payload['_sendSeq'])
@@ -548,7 +562,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                     self.EStop()
                     self.nav = None
                 else:
-                    print("FWD", self.acc_dist_f,  self.nav.dist_max, (self.nav.dist_max - self.acc_dist_f))
+                    #print("FWD", self.acc_dist_f,  self.nav.dist_max, (self.nav.dist_max - self.acc_dist_f))
                     return
             if self.nav.dist_min is not None:
                 if self.acc_dist_f < self.nav.dist_max:
@@ -862,15 +876,9 @@ def RunMap():
     m.PlotNavpoints()
     m.SaveMap('/exports/missions/Runmap.jpeg')
 
-def RunNode():
-    h = navigator()
-    h.Connect()
-    h.Loop()
-    h.Disconnect()
-
 if __name__ == '__main__':
     if sys.argv[1] == 'node':
-        RunNode()
+        vnavs_mqtt.LaunchNode(navigator)
     elif sys.argv[1] == 'map':
         RunMap()
     elif sys.argv[1] == 'test':

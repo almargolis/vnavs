@@ -423,6 +423,8 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 # enter paused mode if we have taken our single picture
                 self.loop_mode = 'pause'
                 break
+            if burst_loop_mode != self.loop_mode:
+                break
         if burst_ct >= 10:
             burst_time = time.time() - burst_start_time
             self.burst_fps = burst_ct / burst_time
