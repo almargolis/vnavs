@@ -113,7 +113,7 @@ class ProcessStep(object):
         self.input_panel = self.tab.AddLabelFrame('Input')
         self.output_panel = self.tab.AddLabelFrame('Output')
         #
-        self.filter_selection = self.input_panel.AddListbox('Filters', self.filter_labels, Selection=cv_filter, Command=self.NewFilter, rowspan=4)
+        self.filter_selection = self.input_panel.AddListbox('Filters', self.filter_labels, Selection=cv_filter, command=self.NewFilter, rowspan=4)
         self.parmEntries = []
         self.parmEntries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL))
         parm_col = self.parmEntries[0].col
@@ -378,11 +378,13 @@ class ProcessStep(object):
 
 
 class Darkroom(vnavs_mqtt.mqtt_node):
+    __slots__ = ('camera_iso', 'camera_last_filename', 'last_pic_payload', 'camera_shutter_speed', 'file_client', 'image',
+				'notebook', 'pic_continuous', 'pic_fn', 'pic_get', 'pic_needed', 'statusFrame', 'thumbnailFrame', 'tk')
     def __init__(self):
         super().__init__(Subscriptions=['cameraman/pic_ready'],
-					SingleThreaded=True, BrokerType='F', SelectTimeoutSecs=0.1,
+					SingleThreaded=True, BrokerType='F',
+					AutomaticallyConnect=False, BlockIfNotConnected=False, SelectTimeoutSecs=0.1,
 					Verbose=True)
-        self.tk_is_initialized = False
         self.file_client = vnavs_mqtt.FileClient(Verbose=False)
         self.image = OpticChiasm.ImageAnalyzer()
         self.image.img_crop=(300,200)
@@ -410,12 +412,12 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         if vnavs_mqtt.ARG_IMAGE_GET in self.args:
             self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
 
+        self.statusFrame.AddDropDown(s_items=['local', 'bot'], command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Continuous', command=self.ContinuousImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=SAME_ROW, col=NEXT_COL)
 
         ProcessStep.app = self
-        #ProcessStep('None')
         ProcessStep('FileImage', opencvfn=None)
         ProcessStep('ColorBalance')
         ProcessStep('Crop')
@@ -423,9 +425,6 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         ProcessStep('Blur')
         ProcessStep('CannyAuto')
         ProcessStep('Contours')
-        #ProcessStep('HoughLinesP')
-
-        # self.f1_run_name_entry.focus()
 
     def ChooseImageFile(self):
         fn = self.statusFrame.DoFileNameDialog()

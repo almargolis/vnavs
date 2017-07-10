@@ -202,7 +202,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
     def StartNav(self):
         payload = {}
-        payload['loopMode'] = 'run'
+        payload['loop_mode'] = 'run'
         payload['loopFormat'] = 'bgr'
         payload['loopPublish'] = 'stream'
         payload['captureMode'] = 'run'
@@ -218,7 +218,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
     def StopNav(self):
         payload = {}
-        payload['captureMode'] = 'none'
+        payload['loop_mode'] = 'idle'
         self.Publish('orders', payload, source='cameraman')
         #
         time.sleep(1)

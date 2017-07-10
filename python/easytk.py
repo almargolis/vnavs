@@ -174,13 +174,39 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, Command=None, XSCROLL=False):
+    def AddDropDown(self, caption=None, s_items=[], Selection=None, row=NEXT_ROW, col=SAME_COL, command=None):
+        if self.debug_this:
+            print("AddDropDown", row, col, caption)
+        row, col = self.Position(row=row, col=col)
+        if caption is None:
+            refname = "QWE"
+            tk_label = None
+            entry_col = col
+            remember_colspan = 1
+        else:
+            refname = caption.lower().replace(' ', '_')
+            tk_label = ttk.Label(self.tkw, text=caption)
+            tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+            entry_col = col + 1
+            remember_colspan = 2
+
+        tk_data = Tkinter.StringVar()
+        tk_data.set(Selection)
+        args = [self.tkw, tk_data] + s_items
+        tk_entry = Tkinter.OptionMenu(*args)
+        tk_entry.grid(column=entry_col, row=row, sticky=(Tkinter.W, Tkinter.E))
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
+        self.RememberPosition(frame, row, col, colspan=remember_colspan)
+        self.children.append(frame)
+        return frame
+
+    def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, command=None, XSCROLL=False):
         frame = self.AddScrolledWidget(Tkinter.Listbox, {'exportselection': 0, 'height': rowspan},
 						caption=caption, row=row, col=col, rowspan=rowspan, XSCROLL=XSCROLL)
         for this_item in s_items:
             frame.tkw.insert(Tkinter.END, this_item)
-        if Command is not None:
-            frame.tkw.bind("<Double-Button-1>", Command)
+        if command is not None:
+            frame.tkw.bind("<Double-Button-1>", command)
         if Selection is None:
             active_index = 0
         else:

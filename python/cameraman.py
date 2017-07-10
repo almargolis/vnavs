@@ -39,10 +39,10 @@ RACE_SPEED = 2
 RACE_STEERING_2 = 0.1
 
 class macbook_camera(object):
-    # This propertyer around OpenCv image capture that makes a macbbok
+    # This s a wrapper around OpenCv image capture that makes a macbbok
     # built-in camera work like a picamera as closely as I need to.
-    # This likely works on the pi too, but is probably slower becausse it
-    # probapropertyt captre as quickly as the pi burst read.
+    # This likely works on the pi too, but is probably slower because it
+    # doesn't take full advantage of the hardwre for continuous reads.
     __slots__ = ('device_id', 'hflip', '_iso', 'vflip',
                         'resolution', 'shutter_speed', 'source_fn',
                         '_video'
@@ -74,27 +74,38 @@ class macbook_camera(object):
     def iso(self, value):
         self._iso = value
 
-    def capture_continuous(self, output, format='jpeg', use_video_port=True):
+    def capture(self, output, format=None, use_video_port=False, resize=None, splitter_port=0, bayer=False, **options):
         assert isinstance(output, basestring)
         assert format == 'jpeg'
+        ret, frame = self._video.read()
+        if frame is None:
+            return False
+        if isinstance(output, basestring):
+            rgb_image = OpticChiasm.BGR2RGB(frame)
+            cv2.imwrite(output, rgb_image)
+            return True
+        else:
+            return False
+
+    def capture_continuous(self, output, format=None, use_video_port=False, resize=None, splitter_port=0, burst=False, bayer=False, **options):
+        kwargs = options
+        kwargs['format'] = format
+        kwargs['use_video_port'] = use_video_port
+        kwargs['resize'] = resize
+        kwargs['splitter_port'] = splitter_port
+        kwargs['bayer'] = bayer
         ctr = 0
         while True:
-            ret, frame = self._video.read()
-            if frame is None:
-                raise StopIteration
             ctr += 1
             if isinstance(output, basestring):
                 path = output.format(counter=ctr)
-                rgb_image = OpticChiasm.BGR2RGB(frame)
-                cv2.imwrite(path, rgb_image)
-                print("MAC", output, path)
-                yield path
+                if self.capture(path, **kwargs):
+                    yield path
+                else:
+                    raise StopIteration
             else:
-                output.write(frame)
-
-
-#
-# Streamer() is the socket_xfer writer function which runs in its own process.
+                self.capture(output, **kwargs)
+                yield 'buffer'
 
 class cameraman(vnavs_mqtt.mqtt_node):
     __slots__ = ('burst_fps',

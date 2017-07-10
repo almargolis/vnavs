@@ -906,7 +906,17 @@ def LaunchNode(node_class):
     n.Loop()
 
 class mqtt_node(object):
-    def __init__(self, SourceName=None, Subscriptions=[], Readers=[], SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+    __slots__ = ('args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
+					'config', 'debug', 'exception_ct', 'exception_last_time', 
+					'handlers', 'imageDir', 'lastSocketError', 'loop_sleep', 'pendingReads', 'arrivedReads',
+					'readers', 'select_timeout', 'single_threaded', 'sourceName', 'stats', 'streamer', 'subscriptions',
+					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
+    def __init__(self, SourceName=None, Subscriptions=[], Readers=[],
+				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+        # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
+        #	switch between cameras / bots manually.
+        # BlockIfNotConnected is for nodes that only need to run when connected to a message server. DoLoop() is what is blocked.
+        #	If set to false, the node to code around communications activities.
         self.args = {}
         for this in sys.argv[1:]:
             eq_pos = this.find('=')
@@ -926,13 +936,15 @@ class mqtt_node(object):
                 self.args[this] = True
         self.vnavs_pid = int(time.time())		# non-repeating with ~ 1 second
         self.vnavs_mid = 0				# Publish() sequence
+        self.block_if_not_connected = BlockIfNotConnected
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
+        self.automatically_connect = AutomaticallyConnect
         if ARG_IMAGE_DIR in self.args:
             self.imageDir = self.args[ARG_IMAGE_DIR]
         else:
             self.imageDir = self.config.get("Cameraman", "ImageDir")
-        self.imageDir = os.path.expanduser(self.imageDir)
+        self.imageDir = os.path.expanduser(self.imageDir)		# this expands tilde in path
         self.single_threaded = SingleThreaded
         self.select_timeout = SelectTimeoutSecs
         self.readers = Readers
@@ -942,7 +954,6 @@ class mqtt_node(object):
         self.broker_type = BrokerType
         self.InitMqttClient()
         self.broker_timeout = 60
-        self.verbose = False
         self.debug = 0
         self.exception_last_time = 0
         self.exception_ct = 0
@@ -971,39 +982,26 @@ class mqtt_node(object):
         else:
             iniSection = 'MqttFast'
             self.mqttc = FastMqttClient()
+        # Assign event callbacks
+        self.mqttc.on_message = self.on_message
+        self.mqttc.on_connect = self.on_connect
         if ARG_HOST in self.args:
             self.socket_host = self.args[ARG_HOST]
         else:
             self.socket_host = self.config.get(iniSection, "Host")
         self.socket_port = int(self.config.get(iniSection, "Port"))
 
-    def Connect(self, timeout=0):
+    def ConnectToMqttServer(self):
         if self.mqttc.connected:
             return
-        if self.single_threaded:
-            timeout = None			# if blocking, always block till connected
-        # Assign event callbacks
-        self.mqttc.on_message = self.on_message
-        self.mqttc.on_connect = self.on_connect
-        # Connect
-        connect_time = time.time()
-        while not self.mqttc.connected:
-            #try:
+        while True:
             self.mqttc.connect(host=self.socket_host, port=self.socket_port)
-            #if self.broker_type == "M":
-            #else:
-            #except socket.error as e:
-            #    self.lastSocketError = e.errno
-            #    print ("vnavs_mqtt: unable to connect to broker error %d @ %s:%s" % (e.errno, self.socket_host, self.socket_port))
             if self.mqttc.connected:
                 print("mqtt_node() connected")
+                break
             else:
                 print("mqtt_node() NOT connected")
-                if timeout is None:
-                    pass			# block forever till connected
-                elif (time.time() - connect_time) >= timeout:
-                    return False
-                time.sleep(10)
+                return False
         if self.single_threaded:
             if self.select_timeout is None:
                 self.mqttc.loop_forever()
@@ -1016,7 +1014,7 @@ class mqtt_node(object):
             self.mqttc.loop_start()
             return True
 
-    def CheckMqtt(self):
+    def CheckMqttPendingActivity(self):
          # Blocking mode nodes with BlockingTimeoutSecs not None need
          # to call this periodically or messages will never be seen.
          # Depending on how you think about it, calling these blocking
@@ -1041,12 +1039,10 @@ class mqtt_node(object):
     def Loop(self):
         while True:
             try:
-                if not self.mqttc.connected:
+                if self.automatically_connect and (not self.mqttc.connected):
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
-                    self.Connect()
-                if self.single_threaded:
-                    self.CheckMqtt()
+                    self.ConnectToMqttServer()
                 if self.mqttc.connected:
                     if self.mqttc.thread is not None:
                         if not self.mqttc.thread.is_alive():
@@ -1060,8 +1056,13 @@ class mqtt_node(object):
                             # gets here again.
                             print("THREAD DEAD")
                             self.InitMqttClient()
-                            self.Connect()
-                self.DoLoop()
+                            self.ConnectToMqttServer()
+                if self.mqttc.connected:
+                    if self.single_threaded:
+                        self.CheckMqttPendingActivity()
+                    self.DoLoop()
+                elif not self.block_if_not_connected:
+                    self.DoLoop()
                 if self.CheckExceptions():
                     sys.exit(0)
                 if self.loop_sleep > 0:
