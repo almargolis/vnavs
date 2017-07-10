@@ -383,7 +383,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
     def __init__(self):
         super().__init__(Subscriptions=['cameraman/pic_ready'],
 					SingleThreaded=True, BrokerType='F',
-					AutomaticallyConnect=False, BlockIfNotConnected=False, SelectTimeoutSecs=0.1,
+					AutomaticallyConnect=True, BlockIfNotConnected=False, SelectTimeoutSecs=0.1,
 					Verbose=True)
         self.file_client = vnavs_mqtt.FileClient(Verbose=False)
         self.image = OpticChiasm.ImageAnalyzer()
@@ -412,7 +412,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         if vnavs_mqtt.ARG_IMAGE_GET in self.args:
             self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
 
-        self.statusFrame.AddDropDown(s_items=['local', 'bot'], command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
+        self.statusFrame.AddDropDown(s_items=['local', 'bot'], command=self.SelectSource, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Continuous', command=self.ContinuousImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open File', command=self.ChooseImageFile, row=SAME_ROW, col=NEXT_COL)
@@ -434,6 +434,10 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
     def ContinuousImageFile(self):
         self.pic_continuous = True
+
+    def SelectSource(self):
+        print("** SELECT SOURCE **")
+        self.ConnectToMqttServer()
 
     def CaptureImageFile(self):
         self.pic_needed = True

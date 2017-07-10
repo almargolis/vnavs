@@ -196,6 +196,8 @@ class TkWidgetDef(object):
         tk_entry = Tkinter.OptionMenu(*args)
         tk_entry.grid(column=entry_col, row=row, sticky=(Tkinter.W, Tkinter.E))
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
+        if command is not None:
+            frame.tkw.bind("<Double-Button-1>", command)
         self.RememberPosition(frame, row, col, colspan=remember_colspan)
         self.children.append(frame)
         return frame

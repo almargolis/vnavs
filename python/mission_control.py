@@ -202,34 +202,20 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
     def StartNav(self):
         payload = {}
-        payload['loop_mode'] = 'run'
-        payload['loopFormat'] = 'bgr'
-        payload['loopPublish'] = 'stream'
-        payload['captureMode'] = 'run'
-        payload['captureFormat'] = 'jpeg'
-        payload['capturePublish'] = 'file'
-        self.Publish('orders', payload, source='cameraman')
-        #
-        payload = {}
         payload['mode'] = 'G'
-        payload['missionName'] = self.mission_name.get()
+        payload['missionName'] = self.mission_name_entry.Value()
         self.Publish('mode', payload, source='navigator')
         print("STARTNAV", payload)
 
     def StopNav(self):
         payload = {}
-        payload['loop_mode'] = 'idle'
-        self.Publish('orders', payload, source='cameraman')
+        payload['mode'] = 'M'
+        payload['missionName'] = self.mission_name_entry.Value()
+        self.Publish('mode', payload, source='navigator')
         #
-        time.sleep(1)
         payload = {}
         payload['speed'] = 0
         self.Publish('orders', payload, source='helmsman')
-        #
-        payload = {}
-        payload['mode'] = 'M'
-        payload['missionName'] = self.mission_name.get()
-        self.Publish('mode', payload, source='navigator')
 
     def ProcessImage(self):
         if self.pic_fn is None:
