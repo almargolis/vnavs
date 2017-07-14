@@ -17,6 +17,7 @@ import easytk
 from easytk import SAME_ROW, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
 import OpticChiasm
 import vnavs_mqtt
+import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
 BOT_1_MAP_TRANSPOSE = [
@@ -30,16 +31,13 @@ BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['cameraman/pic_ready',
-						'cameraman/abend',
-						'engineer_1/gps',
-						'engineer_1/imu',
-						'helmsman/orders',
-						'MissionControl/notice',
-						'navigator/status'
-						], 
-			Readers=[
-						'cameraman/pic_ready'
+        super().__init__(Subscriptions=[
+                        vconst.cameraman_pic_ready_topic,
+						vconst.engineer_1_gps_topic,
+						vconst.engineer_1_imu_topic,
+						vconst.helmsman_orders_topic,
+						'MissionControl/notice',      # this doesn't work - fix wildcard too - crash - ack, etc
+						vconst.navigator_service_ack_topic
 						],
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
@@ -124,8 +122,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
                 sec_data[fname] = data
         print(contents)
         topic = contents['Head']['Topic']
-        source = contents['Head']['Source']
-        self.Publish(topic, contents['Payload'], source=source)
+        self.Publish(topic, contents['Payload'])
 
     def ImageCv2(self, path):
         im = cv2.imread(path)
@@ -171,51 +168,49 @@ class MissionControl(vnavs_mqtt.mqtt_node):
     def ClearWaypoints(self):
         payload = {}
         payload['request'] = 'ClearWaypoints'
-        self.Publish('service', payload, source='navigator')
+        self.Publish(vconst.navigator_service_topic, payload)
 
     def MarkWaypoint(self):
         payload = {}
         payload['request'] = 'MarkWaypoint'
-        self.Publish('service', payload, source='navigator')
+        self.Publish(vconst.navigator_service_topic, payload)
 
     def SaveWaypoints(self):
         payload = {}
         payload['request'] = 'SaveWaypoints'
         payload['missionName'] = self.mission_name.get()
-        self.Publish('service', payload, source='navigator')
+        self.Publish(vconst.navigator_service_topic, payload)
 
     def MapWaypoints(self):
         payload = {}
         payload['request'] = 'MakeWaypointMap'
         payload['missionName'] = self.mission_name.get()
-        self.Publish('service', payload, source='navigator')
+        self.Publish(vconst.navigator_service_topic, payload)
 
     def SnapPic(self):
         payload = {}
-        payload['loopMode'] = 'run'
-        payload['loopFormat'] = 'bgr'
-        payload['loopPublish'] = 'stream'
-        payload['captureMode'] = 'run'
-        payload['captureFormat'] = 'jpeg'
-        payload['capturePublish'] = 'file'
-        self.Publish('orders', payload, source='cameraman')
+        payload['loop_mode'] = 'run'
+        payload['loop_format'] = 'bgr'
+        payload['loop_publish'] = 'stream'
+        payload['capture_mode'] = 'run'
+        payload['capture_format'] = 'jpeg'
+        payload['capture_publish'] = 'file'
+        self.Publish(vconst.cameraman_orders_topic, payload)
 
     def StartNav(self):
         payload = {}
-        payload['mode'] = 'G'
-        payload['missionName'] = self.mission_name_entry.Value()
-        self.Publish('mode', payload, source='navigator')
+        payload['mission_name'] = self.mission_name_entry.Value()
+        self.Publish(vconst.mission_begin_topic, payload)
         print("STARTNAV", payload)
 
     def StopNav(self):
         payload = {}
-        payload['mode'] = 'M'
-        payload['missionName'] = self.mission_name_entry.Value()
-        self.Publish('mode', payload, source='navigator')
+        payload['mission_name'] = self.mission_name_entry.Value()
+        self.Publish(vconst.mission_end_topic, payload)
         #
         payload = {}
         payload['speed'] = 0
-        self.Publish('orders', payload, source='helmsman')
+        self.Publish(vconst.helmsman_orders_topic, payload)
 
     def ProcessImage(self):
         if self.pic_fn is None:

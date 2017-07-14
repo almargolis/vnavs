@@ -12,6 +12,7 @@ import time
 import traceback
 
 import vnavs_mqtt
+import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
 class translate_mosquitto_to_fast(vnavs_mqtt.mqtt_node):
@@ -46,4 +47,3 @@ class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
 if __name__ == '__main__':
     if sys.argv[1] == 'node':
         vnavs_mqtt.LaunchNode(translate_fast_to_mosquitto)
-

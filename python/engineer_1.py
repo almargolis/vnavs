@@ -15,6 +15,7 @@ from sense_hat import SenseHat
 
 
 import vnavs_mqtt
+import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
 SEND_POSITION_PERIOD = 0.05
@@ -38,7 +39,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.gps_speed = 0
         self.gps_status = 'X'			# A=valid, V=invalid
         self.gps_differential = 'X'		# A=autonomous, D=differeential GPS
-        self.gps_mode = '1'			# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites 
+        self.gps_mode = '1'			# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites
         self.timestamp = 0
         self.newGpsData = False
         self.gps_port= serial.Serial(
@@ -104,7 +105,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 cksum_mark = gps_sentence.rfind('*')
                 gps_data = gps_sentence[:cksum_mark].split(',')
                 mode1 = gps_data[1]		# A(utomatic) or M(anual 2D/3D - s/b A
-                mode2 = gps_data[2]		# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites 
+                mode2 = gps_data[2]		# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites
                 satCt = 0
                 for ix in range(3,15):
                     if gps_data[ix] != '':
@@ -123,7 +124,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 else:
                     self.gps_quality = 'F'
                 self.gps_mode = mode2
-                        
+
             elif gps_parsed.sentence_type == 'RMC':
                 self.longitude = gps_parsed.longitude
                 self.latitude = gps_parsed.latitude
@@ -151,7 +152,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 self.newGpsData = True
                 """
                 print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
-					self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude, 
+					self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude,
 					gps_parsed.data[4], gps_parsed.data[5], self.longitude,
 					self.heading, self.gps_quality))
                 """
@@ -180,9 +181,9 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 payload['gps_mode'] = self.gps_mode
                 payload['gps_differential'] = self.gps_differential
                 self.newGpsData = False
-                topic = 'gps'
+                topic = vconst.engineer_1_gps_topic
             else:
-                topic = 'imu'
+                topic = vconst.engineer_1_imu_topic
             self.Publish(topic, payload)
             self.last_position_message_time = time.time()
             self.stats.Count(topic + 'Msg')
@@ -239,7 +240,7 @@ def TestSensors():
         for a in 'xyz':
             print("%s %s %+8.4f %+8.4f" % (s, a, v[s+a][0], v[s+a][1]))
     print("SPEED", speed, max_speed)
-    
+
 
 
 

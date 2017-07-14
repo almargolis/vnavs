@@ -19,6 +19,7 @@ import easytk
 from easytk import SAME_ROW, NEXT_ROW, NEXT_COL
 import OpticChiasm
 import vnavs_mqtt
+import vnavs_const as vconst
 
 BOT_1_MAP_TRANSPOSE = [
 
@@ -381,9 +382,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
     __slots__ = ('camera_iso', 'camera_last_filename', 'last_pic_payload', 'camera_shutter_speed', 'file_client', 'image',
 				'notebook', 'pic_continuous', 'pic_fn', 'pic_get', 'pic_needed', 'statusFrame', 'thumbnailFrame', 'tk')
     def __init__(self):
-        super().__init__(Subscriptions=['cameraman/pic_ready'],
+        super().__init__(Subscriptions=[vconst.cameraman_pic_ready_topic],
 					SingleThreaded=True, BrokerType='F',
-					AutomaticallyConnect=True, BlockIfNotConnected=False, SelectTimeoutSecs=0.1,
+					AutomaticallyConnect=False, BlockIfNotConnected=False, SelectTimeoutSecs=0.1,
 					Verbose=True)
         self.file_client = vnavs_mqtt.FileClient(Verbose=False)
         self.image = OpticChiasm.ImageAnalyzer()
@@ -435,7 +436,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
     def ContinuousImageFile(self):
         self.pic_continuous = True
 
-    def SelectSource(self):
+    def SelectSource(self, *args):
         print("** SELECT SOURCE **")
         self.ConnectToMqttServer()
 
@@ -452,16 +453,14 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             payload['shutterSpeed'] = int(self.camera_shutter_speed.Value())
         except TypeError:
             self.camera_shutter_speed.set(0)
-        payload['loopMode'] = 'run'
-        payload['loopFormat'] = 'bgr'
-        payload['loopPublish'] = 'stream'
-        payload['captureMode'] = 'single'
-        payload['captureFormat'] = 'jpeg'
-        payload['capturePublish'] = 'file'
+        payload['loop_mode'] = 'run'
+        payload['loop_format'] = 'bgr'
+        payload['loop_publish'] = 'stream'
+        payload['capture_mode'] = 'single'
+        payload['capture_format'] = 'jpeg'
+        payload['capture_publish'] = 'file'
         print("SNAP", payload)
-        self.Publish('orders', payload, source='cameraman')
-        time.sleep(1)
-        self.Publish('ask_last', {}, source='cameraman')
+        self.Publish(vconst.cameraman_orders_topic, payload)
 
     def rmsg_cameraman_pic_ready(self, payload):
         # Do as little as possible here in mqtt thread.

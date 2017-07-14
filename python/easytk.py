@@ -175,6 +175,12 @@ class TkWidgetDef(object):
         return frame
 
     def AddDropDown(self, caption=None, s_items=[], Selection=None, row=NEXT_ROW, col=SAME_COL, command=None):
+        # If command is specified, this uses variable trace to provide an on_change event.
+        # The callback supplies three paramters that are meaningful to tk but not useful to the application,
+        # so the callback declarations should be something like "def command(self, *args).
+        # I am leaving this as a required idiom when using easytk. There is something to be said for creating
+        # an OnChange event for easytk, but I would then have to track more tk internals in order to identify
+        # the control that changed.
         if self.debug_this:
             print("AddDropDown", row, col, caption)
         row, col = self.Position(row=row, col=col)
@@ -192,12 +198,12 @@ class TkWidgetDef(object):
 
         tk_data = Tkinter.StringVar()
         tk_data.set(Selection)
+        if command is not None:
+            tk_data.trace('w', command)
         args = [self.tkw, tk_data] + s_items
         tk_entry = Tkinter.OptionMenu(*args)
         tk_entry.grid(column=entry_col, row=row, sticky=(Tkinter.W, Tkinter.E))
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
-        if command is not None:
-            frame.tkw.bind("<Double-Button-1>", command)
         self.RememberPosition(frame, row, col, colspan=remember_colspan)
         self.children.append(frame)
         return frame

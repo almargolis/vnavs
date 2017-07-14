@@ -11,13 +11,14 @@ import sys
 import time
 
 import vnavs_mqtt
+import vnavs_const as vconst
 import OpticChiasm
 
 WAYPOINT_WINDOW_METERS = 2.0
 STEER_STRAIGHT_HEADING = 10.0
 STEER_SHARP_HEADING = 90.0
 FORWARD_VERY_SLOW = 6
-FORWARD_SLOW = 6		# OK slow for court 
+FORWARD_SLOW = 6		# OK slow for court
 FORWARD_SLOW = 16		# this is what it took to move well on grass at robogames
 FORWARD_SLOW = 4		# too slow for court (maybe depends on battery)
 FORWARD_FAST = 10
@@ -139,9 +140,8 @@ class StepAccMotion(MissionStep):
 
 def MissionSetting(navigator, parts):
     topic = parts[1]
-    source = parts[2]
     payload = parts[3]
-    navigator.Publish(topic, payload, source=source)
+    navigator.Publish(topic, payload)
 
 class Mission(object):
     def __init__(self, navigator, MissionName=None):
@@ -160,7 +160,7 @@ class Mission(object):
         self.mission_steps = []
         self.mission_step_ix = 0
         self.LoadMission()
-        
+
     def LoadMission(self, MissionName=None):
         print("LOAD", self.missionDir, self.missionName, MissionName)
         mission_name = self.missionName
@@ -194,12 +194,12 @@ class Mission(object):
     def StartMission(self):
         payload = {}
         payload['loop_mode'] = 'run'
-        self.navigator.Publish('orders', payload, source='cameraman')
+        self.navigator.Publish(vconst.cameraman_orders_topic, payload)
 
     def EndMission(self):
         payload = {}
         payload['loop_mode'] = 'idle'
-        self.navigator.Publish('orders', payload, source='cameraman')
+        self.navigator.Publish(vconst.cameraman_orders_topic, payload)
 
     def SaveWaypoints(self, MissionName=None):
         return
@@ -250,8 +250,8 @@ class NavStep(object):
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/mode', 'navigator/service',
-					'engineer_1/gps', 'engineer_1/imu',
+        super().__init__(Subscriptions=['navigator/mode', vconst.navigator_service_topic,
+					vconst.engineer_1_gps_topic, vconst.engineer_1_imu_topic,
 					'cameraman/last'
 					],
 					Readers=[],
@@ -345,7 +345,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 if abs(deltaHeading) > 45:
                     pass
                     #self.nav.untrustedGpsUpdates = 1		# give GPS time to settle after tight turn
-                self.nav.softKeepSeconds = 2 
+                self.nav.softKeepSeconds = 2
                 self.nav.speed = FORWARD_SLOW
                 self.nav.startingYaw = self.yaw
                 self.nav.deltaYawGoal = deltaHeading
@@ -388,7 +388,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         payload['heading'] = self.nav.steering
         payload['speed'] = self.nav.speed
         payload['timer'] = 6
-        self.Publish('orders', payload, source='helmsman')
+        self.Publish(vconst.helmsman_orders_topic, payload)
         if self.nav.untrustedGpsUpdates < 0:
             # this could be dangerous, skipping navigation indefinately
             if self.nav.hardKeepSeconds <= 0:
@@ -441,7 +441,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.nav.speed = FORWARD_SLOW
                 if self.mission.waypoints[self.mission.mission_step_ix][0] == "W":
                     self.nav.untrustedGpsUpdates = INITIAL_GPS_WAIT		# allow gps to settle
-                    self.PublishNavigation() 
+                    self.PublishNavigation()
                 """
             print("MISSION", self.mission.missionName, len(self.mission.mission_steps))
             if (mode == "M") and (self.mode == "G"):
@@ -487,7 +487,7 @@ class navigator(vnavs_mqtt.mqtt_node):
             payload['filename'] = map_fn
             payload['captureFormat'] = 'jpeg'
 
-        self.Publish('status', payload)
+        self.Publish(vconst.navigator_service_ack_topic, payload)
 
     def rmsg_engineer_1_gps(self, payload):
         self.new_gps_payload = payload
@@ -580,7 +580,7 @@ class navigator(vnavs_mqtt.mqtt_node):
             return				# new orders came from stack
         #
         # See what the mission step wants to do
-        # 
+        #
         if self.mission.mission_step_ix < len(self.mission.mission_steps):
             print("DoLoop/DoMissionStep", self.mission.mission_step_ix)
             step = self.mission.mission_steps[self.mission.mission_step_ix]
@@ -599,7 +599,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         payload['heading'] = "A0"
         payload['speed'] = 0
         payload['timer'] = 6
-        self.Publish('orders', payload, source='helmsman')
+        self.Publish(vconst.helmsman_orders_topic, payload)
 
     def CheckYawForCompletedManuever(self):
         ## ************** ##
@@ -794,7 +794,7 @@ def TestMap():
 		]
     m = MissionMap(waypoints)
     m.Save()
-            
+
 def TestNav():
     h = navigator()
     h.latitude = 37.6272
@@ -829,7 +829,7 @@ def TestNav2():
 			(-3, 1),			# north one, west three, heading 288.4349, quadrant IV
 			(0, 0)				# north three, west one, heading 341.5650, quadrant IV
 		]
-    headings = [0, 90, 180, 270, 
+    headings = [0, 90, 180, 270,
 		18.4349, 71.5650, 108.4349, 161.5650,
 		198.4349, 251.5650, 288.4349, 341.5650
 		]

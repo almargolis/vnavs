@@ -1,0 +1,28 @@
+#
+# From a user point of view, a mission is a sequence of operations to
+# accomplish a goal or set of goal. It may include both autonomous and
+# manual operations.
+#
+# Technically, the only absolute function of a mission is to log a sequence
+# of messages. Everything else about the mission is determined by the mission
+# file.
+#
+
+mission_begin_topic = 'mission/begin'
+mission_end_topic = 'mission/end'
+mission_e_stop_topic = 'mission/estop'
+
+system_abend_topic = 'system/abend'
+system_message_error_topic = 'system/nak'
+
+cameraman_orders_topic = 'cameraman/orders'
+cameraman_pic_ready_topic = 'cameraman/pic_ready'
+cameraman_process_topic = 'cameraman/process'
+
+engineer_1_gps_topic = 'engineer_1/gps'
+engineer_1_imu_topic = 'engineer_1/imu'
+
+helmsman_orders_topic = 'helmsman/orders'
+
+navigator_service_topic = 'navigator/service'
+navigator_service_ack_topic = 'navigator_service_ack'

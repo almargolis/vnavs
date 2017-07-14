@@ -15,6 +15,8 @@ import time
 
 import paho.mqtt.client as mqtt
 
+import vnavs_const as vconst
+
 if sys.version_info[0] < 3:
     import ConfigParser
 else:
@@ -179,7 +181,7 @@ class socket_xfer(object):
 # Server applications will usually be process blocking because all they do is deal with socket
 # communications. They don't need to be responsive to a keyboard, etc. A small level of responsiveness
 # can be provided via OS signals. Server socket operations will alsmost always be non-blocking
-# so the server can have communications with multiple clients in-process simultaneously. 
+# so the server can have communications with multiple clients in-process simultaneously.
 # These parallel sockets are coordinated through select(). A single threaded server is likely
 # getting some benefit from multiple cores via threading inside the OS. It is possible for a server
 # to utilize seperate threaads or even separate processes per client socket or group of client sockets
@@ -312,7 +314,7 @@ class SocketWrapper(object):
         # in the output list, select returns immediately because it is writable. Therefore, output sockets should
         # only be in hte list when you actually have something to write.n If you are a no-timeout select when that
         # socket gets added to the output list, nothing happens immediatly because the OS doesn't know about it.
-        # The new output message will languish until something else releases the select. Because of this, it should 
+        # The new output message will languish until something else releases the select. Because of this, it should
         # be fairly unusual to call select with no timeout.
         #
         # timeout=None blocks indefinately, timeout=0.0 polls and return immediately, potentially with three empty lists
@@ -386,7 +388,7 @@ class SocketWrapper(object):
 
     def SelectForever(self, MaxAllowableWriteLatency=0.001):
         # This error 9 occurs in the OS select call for a client if the server goes
-        # away. That kills the SocketWrapper thread but leaves the main thread 
+        # away. That kills the SocketWrapper thread but leaves the main thread
         # running but not communicating. This is now trapped in Loop() by checking
         # thread.is_alive().
         # error: [Errno 9] Bad file descriptor
@@ -427,9 +429,9 @@ class SocketWrapperClient(SocketWrapper):
     # Operation of connect in non-blocking mode is a bit surprising:
     #
     # If the connection cannot be established immediately and O_NONBLOCK is set for the file descriptor
-    # for the socket, connect() shall fail and set errno to [EINPROGRESS], but the connection request 
-    # shall not be aborted, and the connection shall be established asynchronously. Subsequent calls 
-    # to connect() for the same socket, before the connection is established, shall fail and set 
+    # for the socket, connect() shall fail and set errno to [EINPROGRESS], but the connection request
+    # shall not be aborted, and the connection shall be established asynchronously. Subsequent calls
+    # to connect() for the same socket, before the connection is established, shall fail and set
     # errno to [EALREADY].
     #
     # The above applies to both OSX and Rapbian, but the specific error numbers are different.
@@ -459,7 +461,7 @@ class SocketWrapperClient(SocketWrapper):
             if e.errno in [22, 36, 37, 56, 61, 111, 115]:
                 # Succesful non-blocking connection innitiaion
                 # raises 36 under OSX or 115 under Raspbian.
-                # Repeated attemps raises 37 under OSX or 115 under Raspbian 
+                # Repeated attemps raises 37 under OSX or 115 under Raspbian
                 # without disturbing connection.
                 # This is not an error. Just a non-blocking indication that the
                 # connection process has been started or is continuing.
@@ -503,7 +505,7 @@ class SocketWrapperClient(SocketWrapper):
         # is not that unusual talking to busy servers over slow connections.
         # The logic of blocking / non-blocking socket i/o is a bit different for
         # connect than data transfers. The original connect happens before the
-        # new process thread is started. connect_async() allows the application to 
+        # new process thread is started. connect_async() allows the application to
         # remain respomsive during start-up.
         start_time = time.time()
         while not self.connected:
@@ -648,7 +650,7 @@ class MessageArchiver(object):
         self.WriteBuffer()
         self.archive_file.close()
         self.archive_file = None
-        
+
     def Archive(self, mid, ptime, payload):
         # message id, server publish time, json string payload
         if self.archive_file is None:
@@ -711,14 +713,13 @@ class FastMqttServer(SocketWrapperServer):
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
             else:
                 print("PUBLISH", topic, "No Subscribers")
-            if topic == 'navigator/mode':
+            if topic == vconst.mission_begin_topic:
                 payload_dict = json.loads(payload)
                 mode = payload_dict['mode']
-                if (mode == 'G') and (self.archiver.archive_file is None):
-                    mission_name = payload_dict['missionName']
-                    self.archiver.Open(mission_name)
-                elif (mode == 'M') and (self.archiver.archive_file is not None):
-                    self.archiver.Close()
+                mission_name = payload_dict['mission_name']
+                self.archiver.Open(mission_name)
+            if topic == vconst.mission_end_topic:
+                self.archiver.Close()
             self.archiver.Archive(self.message_in_ct, server_time, payload)
         elif action == 'read':
             topic = message[1]
@@ -820,7 +821,7 @@ class PahoClient(mqtt.Client):
     # This should be a very thin wrapper.
     # FastMqttClient() should have as close to identical API as Paho client.
     # This object reconiles any unavoidable differences so mqtt_node works
-    # with either server. 
+    # with either server.
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.connected = False
@@ -907,11 +908,11 @@ def LaunchNode(node_class):
 
 class mqtt_node(object):
     __slots__ = ('args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
-					'config', 'debug', 'exception_ct', 'exception_last_time', 
+					'config', 'debug', 'exception_ct', 'exception_last_time',
 					'handlers', 'imageDir', 'lastSocketError', 'loop_sleep', 'pendingReads', 'arrivedReads',
-					'readers', 'select_timeout', 'single_threaded', 'sourceName', 'stats', 'streamer', 'subscriptions',
+					'readers', 'select_timeout', 'single_threaded', 'node_name', 'stats', 'streamer', 'subscriptions',
 					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
-    def __init__(self, SourceName=None, Subscriptions=[], Readers=[],
+    def __init__(self, node_name=None, Subscriptions=[], Readers=[],
 				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         #	switch between cameras / bots manually.
@@ -961,10 +962,10 @@ class mqtt_node(object):
         self.lastSocketError = None
         self.pendingReads = {}
         self.arrivedReads = {}
-        if SourceName is None:
-            self.sourceName = self.__class__.__name__
+        if node_name is None:
+            self.node_name = self.__class__.__name__
         else:
-            self.sourceName = SourceName
+            self.node_name = node_name
         self.stats = Counters()
         self.verbose = Verbose
         self.streamer = None
@@ -1073,9 +1074,11 @@ class mqtt_node(object):
             except:
                 exception_time = time.clock()
                 payload = {}
+                payload['node_class'] = self.__class__.__name__
+                payload['node_module'] = self.__module__
                 payload['traceback'] = traceback.format_exc()
                 print(payload['traceback'])				# display in case we are running in console
-                self.Publish('abend', payload)
+                self.Publish(vconst.system_abend_topic, payload)
                 self.CleanupLoop()
                 if (exception_time - self.exception_last_time) < 60:
                     if self.exception_ct > 10:
@@ -1126,55 +1129,47 @@ class mqtt_node(object):
             if this_topic in self.subscriptions:
                 self.mqttc.subscribe(this_topic, 0)
 
-    def Get(self, topic, source=None, timeout=1.0):
+    def Get(self, topic, timeout=1.0):
         # Get the most recent message without repeats and automatically request more.
         # Expect frequent None
         if not self.mqttc.connected:
             # for now, silently ignore publish errors. Need to do better
             return
-        if source is None:
-            source = self.sourceName
-        fqnTopic = source + '/' + topic
-        if fqnTopic in self.arrivedReads:
-            payload = self.arrivedReads[fqnTopic]
-            del self.arrivedReads[fqnTopic]
+        if topic in self.arrivedReads:
+            payload = self.arrivedReads[topic]
+            del self.arrivedReads[topic]
             return payload
-        self.Read(topic, source=source)
+        self.Read(topic)
         return None
 
-    def Read(self, topic, source=None, timeout=1.0):
+    def Read(self, topic, timeout=1.0):
         if not self.mqttc.connected:
             # for now, silently ignore publish errors. Need to do better
             return
-        if source is None:
-            source = self.sourceName
-        fqnTopic = source + '/' + topic
         # maybe check if its in subscription / reader list
-        if fqnTopic in self.pendingReads:
-            t = self.pendingReads[fqnTopic]
+        if topic in self.pendingReads:
+            t = self.pendingReads[topic]
             if (time.time() - t) < timeout:
                 return					# read still reasonably pending
-            print("TIMEOUT", fqnTopic)
-        self.mqttc.read(fqnTopic)
+            print("TIMEOUT", topic)
+        self.mqttc.read(topic)
         # error messages ???
-        self.pendingReads[fqnTopic] = time.time()
+        self.pendingReads[topic] = time.time()
 
-    def Publish(self, topic, payload, source=None):
+    def Publish(self, topic, payload, Ack_Topic=None):
         # payload is a dict to be converted to JSON)
         if not self.mqttc.connected:
             # for now, silently ignore publish errors. Need to do better
             return
-        if source is None:
-            source = self.sourceName
-        fqnTopic = source + '/' + topic
         payload['_topic'] = topic
-        payload['_source'] = source
-        payload['_sender'] = self.sourceName
+        payload['_sender'] = self.node_name
         payload['_sendTime'] = time.time()
         payload['_sendPid'] = self.vnavs_pid
+        if Ack_Topic is not None:
+            payload['_ack'] = Ack_Topic
         self.vnavs_mid += 1
         payload['_sendSeq'] = self.vnavs_mid
-        res, mid = self.mqttc.publish(fqnTopic, json.dumps(payload))
+        res, mid = self.mqttc.publish(topic, json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
 
@@ -1184,9 +1179,9 @@ class mqtt_node(object):
         # so it knows request is completed and where to continue its process.
         # Info about original message is always there thanks to Publish()
         sourceTopic = payload['_topic']
-        sourceSource = payload['_source']
+        sourceSender = payload['_sender']
         payload['_ackSourceTopic'] = sourceTopic
-        payload['_ackSourceSource'] = sourceSource
+        payload['_ackSourceSender'] = sourceSender
         if '_sendPid' in payload:
             payload['_ackPid'] = payload['_sendPid']
         if '_sendSeq' in payload:
@@ -1202,17 +1197,15 @@ class mqtt_node(object):
             if error is None:
                 return
             payload['_ackStatus'] = error
-            self.Publish('notice', payload, source=sender)
+            self.Publish(vconst.system_message_error_topic, payload)
             return
         # An ack was requested
-        parts = payload['_ack'].split('/')
-        topic = parts[0]
-        source = parts[1]
+        topic = payload['_ack']
         if error is None:
             error = 'ack'
         payload['_ackStatus'] = error
         del payload['_ack']				# ack not needed, avoids ack-ing ack loops
-        self.Publish(topic, Payload=Payload, source=source)
+        self.Publish(topic, payload)
 
     def on_connect(self, client, userdata, flags, rc):
         print("on_connect() rc: " + str(rc))

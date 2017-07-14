@@ -12,6 +12,7 @@ import time
 from pyfirmata import Arduino, util
 
 import vnavs_mqtt
+import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
 TICK_PATTERNS = [
@@ -258,7 +259,7 @@ class vehicle(object):
 
 class helmsman(vnavs_mqtt.mqtt_node):
     def __init__(self):
-        super().__init__(Subscriptions=['helmsman/orders'], SingleThreaded=False, BrokerType='F')
+        super().__init__(Subscriptions=[vconst.helmsman_orders_topic], SingleThreaded=False, BrokerType='F')
         self.v = vehicle()
         self.speed_goal = 0		# (int) mm/sec
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)

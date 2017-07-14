@@ -22,6 +22,7 @@ except:
     picamera = None
 
 import vnavs_mqtt
+import vnavs_const as vconst
 
 import OpticChiasm
 
@@ -131,7 +132,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
     ]
 
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=['cameraman/orders', 'cameraman/ask_last', 'cameraman/process'],
+        super().__init__(Subscriptions=[vconst.cameraman_orders_topic, vconst.cameraman_process_topic],
 							SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.burst_fps = 0			# capture speed of last burst
         self.iso = 100
@@ -172,13 +173,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
             self.post_processes = []
         else:
             self.post_processes.append(payload)
-
-    def rmsg_cameraman_ask_last(self, payload):
-        payload = {}
-        payload['filename'] = self.last_fn
-        payload['capture_format'] = self.last_format
-        self.Publish('last', payload)
-        print("ASK LAST")
 
     def ValidateMessage(self, specs, payload):
         for this_spec in specs:
@@ -265,7 +259,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 directions['heading'] = 'RR-' + steering_angle
             else:
                 directions['heading'] = 'RL+' + steering_angle
-        self.Publish('orders', directions, source='helmsman')
+        self.Publish(vconst.helmsman_orders_topic, directions)
         #
         self.last_fn = annotated_fn
         self.last_format = 'jpeg'
@@ -348,7 +342,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     payload['filename'] = im_fn
                     payload['capture_format'] = capture_format
                     payload['capture_publish'] = capture_publish
-                    self.Publish('pic_ready', payload)
+                    self.Publish(vconst.cameraman_pic_ready_topic, payload)
                     last_time = time.time()
                 """
                 if burst_publish == 's':
@@ -389,7 +383,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             payload['shutter_speed'] = self.camera.exposure_speed
             payload['capture_format'] = capture_format
             payload['capture_publish'] = capture_publish
-            self.Publish('pic_ready', payload)
+            self.Publish(vconst.cameraman_pic_ready_topic, payload)
             if self.camera.iso != self.iso:
                 # The camera may not use the exact ISO specified. Save the corrected value in
                 # self.iso so we don't keep repeating the request.

@@ -68,7 +68,7 @@ def PiShutdown():
 
 class process(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['process/orders'],
+        super().__init__(Subscriptions=[],
 					Readers=[],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.process_specs = self.config.items("ProcessMonitor")
