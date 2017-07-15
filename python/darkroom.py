@@ -220,7 +220,9 @@ class ProcessStep(object):
                 adj = int(e[1:])
                 e = str(int(v1 / 2) + adj)
             else:
-                e = str(int(s))
+                e = int(e)
+                if e < 0:
+                    e = v1 + e
             d[parm_name] = "%s:%s" % (s, e)
             return
         if parm_type == 'p':

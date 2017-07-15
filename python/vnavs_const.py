@@ -9,6 +9,7 @@
 #
 
 mission_begin_topic = 'mission/begin'
+mission_cancel_topic = 'mission/cancel'
 mission_end_topic = 'mission/end'
 mission_e_stop_topic = 'mission/estop'
 
