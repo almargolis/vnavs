@@ -24,7 +24,7 @@ class translate_mosquitto_to_fast(vnavs_mqtt.mqtt_node):
     def rmsg_wildcard(self, topic, payload):
         print("Send {} to fast {}".format(topic, payload))
         parts = topic.split('/')
-        self.fastBroker.Publish(parts[1], payload, source=parts[0])
+        self.fastBroker.Publish(topic, payload)
 
 class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=True):
@@ -35,8 +35,7 @@ class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
 
     def rmsg_wildcard(self, topic, payload):
         print("Send {} to fast {}".format(topic, payload))
-        parts = topic.split('/')
-        self.mosquitto.Publish(parts[1], payload, source=parts[0])
+        self.mosquitto.Publish(topic, payload)
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which hands exceptions and propper shutdown.

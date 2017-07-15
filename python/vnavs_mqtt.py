@@ -715,7 +715,6 @@ class FastMqttServer(SocketWrapperServer):
                 print("PUBLISH", topic, "No Subscribers")
             if topic == vconst.mission_begin_topic:
                 payload_dict = json.loads(payload)
-                mode = payload_dict['mode']
                 mission_name = payload_dict['mission_name']
                 self.archiver.Open(mission_name)
             if topic == vconst.mission_end_topic:
