@@ -229,11 +229,11 @@ class cameraman(vnavs_mqtt.mqtt_node):
         if y2 < 0:
             y2 += r
         roi = OpticChiasm.ROI(Im, x1, y1, x2, y2)
-        d = OpticChiasm.ReflexEntities(roi)
+        d = OpticChiasm.ReflexEntities(roi, process=process['process'], colors=process['colors'])
         d.ProcessLines()
         if An is not None:
             cv2.rectangle(An, (x1, y1), (x2, y2), green, thickness=2)
-            d.AnnotateFullImage(An, x1=x1, y1=y1, linect=100, color=blue)
+            d.AnnotateFullImage(An, x1=x1, y1=y1, linect=1, color=blue)
         return
         fpx = im_fn[:-4]
         im_fn = fpx + '-A.jpeg'
@@ -283,10 +283,18 @@ class cameraman(vnavs_mqtt.mqtt_node):
         burst_loop_format = self.loop_format
         burst_loop_publish = self.loop_publish
         burst_run = self.run
-        fn = 'R' + self.timestamp
-        if self.run != '':
-            fn += '_' + self.run
-        fn += '_%d_{counter:04d}.%s' % (self.image_ct, burst_loop_format)
+        if burst_loop_mode == 'idle':
+            # Rotate through a long-ish series of names to avoid race conditions
+            # due to latencies.
+            if self.idle_image_id >= self.idle_image_id_max:
+                self.idle_image_id = 0
+            image_file_name_format = "Idle_%d.jpeg" % (self.idle_image_id)
+            self.idle_image_id += 1
+        else:
+            image_file_name_format = 'R' + self.timestamp
+            if self.run != '':
+                image_file_name_format += '_' + self.run
+            image_file_name_format += '_%d_{counter:04d}.%s' % (self.image_ct, burst_loop_format)
         if burst_loop_publish == 'stream':
             if burst_loop_format == 'yuv':
                 burst_dest = picamera.array.PiYUVArray(self.camera)
@@ -296,14 +304,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 burst_dest = io.BytesIO()
         else:
             assert burst_loop_format == 'jpeg'
-            if burst_loop_mode == 'idle':
-                # Rotate through a long-ish series of names to avoid race conditions
-                # due to latencies.
-                if self.idle_image_id >= self.idle_image_id_max:
-                    self.idle_image_id = 0
-                fn = "Idle_%d.jpeg" % (self.idle_image_id)
-                self.idle_image_id += 1
-            burst_dest = os.path.join(self.imageDir, fn)
+            burst_dest = os.path.join(self.imageDir, image_file_name_format)
         #
         # Capture some pictures. This might be a single image or a long run of them.
         #
@@ -323,8 +324,9 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 # the file is already written, make sure its the correct format
                 assert capture_format == burst_loop_format
             else:
+                # capture_continuous returns burst_dest if it is a buffer
+                im_fn = image_file_name_format.format(counter=self.image_ct)
                 print("CAPT", im_fn, self.imageDir)
-                im_fn = os.path.splitext(im_fn)[0] + '.' + capture_format
                 im_path = os.path.join(self.imageDir, im_fn)
                 if capture_format == 'jpeg':
                     # to keep understandable, keep following if consistent with buffer creation if

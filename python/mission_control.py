@@ -75,8 +75,8 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.f1_engineer_1_entry = mission_tab.AddEntryField('Engineer_1', width=75)
         self.mission_name_entry = mission_tab.AddEntryField('Mission', width=15, value='test')
         buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        buttonframe.AddButton('Start', command=self.StartNav, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Stop', command=self.StopNav, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Start', command=self.StartMission, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Cancel', command=self.CancelMission, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Snap', command=self.SnapPic, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
@@ -197,16 +197,22 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         payload['capture_publish'] = 'file'
         self.Publish(vconst.cameraman_orders_topic, payload)
 
-    def StartNav(self):
+    def StartMission(self):
+        mission_name = self.mission_name_entry.Value()
+        fp = mission_name + '.mis'
+        f = open(fp, 'r')
+        mission_script = f.read()
+        f.close()
         payload = {}
-        payload['mission_name'] = self.mission_name_entry.Value()
+        payload['mission_name'] = mission_name
+        payload['mission_script'] = mission_script
         self.Publish(vconst.mission_begin_topic, payload)
         print("STARTNAV", payload)
 
-    def StopNav(self):
+    def CancelMission(self):
         payload = {}
         payload['mission_name'] = self.mission_name_entry.Value()
-        self.Publish(vconst.mission_end_topic, payload)
+        self.Publish(vconst.mission_cancel_topic, payload)
         #
         payload = {}
         payload['speed'] = 0
