@@ -516,15 +516,37 @@ def mean(numbers):
     return sum(numbers) / len(numbers)
 
 class ReflexEntities(object):
-    def __init__(self, image, DoBlur=False, DoCanny=True):
+    def __init__(self, image, process="CY", colors="WRY"):
+        color_list = []
+        for this in colors:
+            if this == "W":
+                color_list.append(HSV_MASK_WHITE)
+            elif this == "R":
+                color_list.append(HSV_MASK_RED)
+            elif this == "Y":
+                color_list.append(HSV_MASK_YELLOW)
+            elif this == "B":
+                color_list.append(HSV_MASK_BLUE)
         # im is an OpenCV BGR image object
         self.original = image
-        self.image = ColorMask(image, colors=[HSV_MASK_WHITE, HSV_MASK_RED, HSV_MASK_YELLOW], threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
-        if DoBlur:
-            self.image = cv2.GaussianBlur(self.image.copy(), (5,5), 0)
-        if DoCanny:
-            self.image = auto_canny(self.image, 0.33)
-        self.h_lines = cv2.HoughLinesP(self.image, 1, np.pi/180, 15, minLineLength=50, maxLineGap=10)
+        self.image = image
+        for this in process:
+            if this == 'B':
+                print("simplest_cb")
+                self.image = simplest_cb(self.image.copy(), 20)
+            elif this == 'C':
+                print("ColorMask", color_list)
+                self.image = ColorMask(self.image.copy(), colors=color_list, threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
+            elif this == 'G':
+                self.image = cv2.GaussianBlur(self.image.copy(), (5,5), 0)
+            elif this == 'Y':
+                print("Canny")
+                self.image = auto_canny(self.image.copy(), 0.33)
+        self.h_lines = cv2.HoughLinesP(self.image, 1, np.pi/180, 15, minLineLength=30, maxLineGap=10)
+        if self.h_lines is None:
+            print("LINES -- NONE")
+        else:
+            print("LINES", len(self.h_lines))
         self.map_lines = []
         self.avg_slope = 0
 

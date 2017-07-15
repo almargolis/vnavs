@@ -35,8 +35,10 @@ INITIAL_GPS_WAIT = 3
 OVERSTEER_ADJUSTMENT = 0.5
 
 class MissionStep(object):
-    def __init__(self, mission):
+    def __init__(self, mission, section):
         self.mission = mission
+        self.section = section
+        self.parms = {}
 
 def StepGpsWaypoint(MissionStep):
     def __init__(self, mission, waypoint):
@@ -138,51 +140,82 @@ class StepAccMotion(MissionStep):
         nav.PublishNavigation()
         return True
 
-def MissionSetting(navigator, parts):
-    topic = parts[1]
-    payload = parts[3]
-    navigator.Publish(topic, payload)
+class StepMessage(MissionStep):
+    def __init__(self, mission, section, topic):
+        super().__init__(mission, section)
+        self.topic = topic
+
+    def DoMissionStep(self):
+        print("StepMessage", self.topic, self.parms)
+        self.mission.navigator.Publish(self.topic, self.parms)
+        return True
+
+class StepSleep(MissionStep):
+    def __init__(self, mission, section, interval):
+        super().__init__(mission, section)
+        self.interval = interval
+
+    def DoMissionStep(self):
+        time.sleep(float(self.interval))
+        return True
+
 
 class Mission(object):
-    def __init__(self, navigator, MissionName=None):
+    def __init__(self, navigator, payload):
         self.navigator = navigator
         self.missionDir = self.navigator.missionDir
-        self.missionName = None
-        self.Init(MissionName=MissionName)
-
-    def Init(self, MissionName=None):
-        if MissionName is not None:
-            # If supplied, this is a permanent change.
-            # But keep previous if not specified, this is a reset.
-            self.missionName = MissionName
-        if self.missionName is None:
-            self.missionName = 'test'
+        self.mission_name = payload['mission_name']
+        self.mission_script = payload['mission_script'].split('\n')
         self.mission_steps = []
         self.mission_step_ix = 0
+        self.running = True
         self.LoadMission()
 
-    def LoadMission(self, MissionName=None):
-        print("LOAD", self.missionDir, self.missionName, MissionName)
-        mission_name = self.missionName
-        if MissionName is not None:
-            mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_name) + '.mis'
-        f = open(fp, "r")
-        for this in f.readlines():
-            s = None
-            parts = this.split(',')
-            if parts[0] == 'W':
-                s = StepGpWaypoint(self)
-            elif parts[0] == 'M':
-                s = StepMagic(self)
-            elif parts[0] == 'SETTING':
-                MissionSetting(navigator, parts)
-            elif parts[0] == 'ACC':
-                s = StepAccMotion(self)
-            if s is not None:
-                s.Load(parts)
-                self.mission_steps.append(s)
-                print("MISSION", len(self.mission_steps))
+    def LoadMission(self):
+        print("LOAD", self.mission_name)
+        section = 'run'
+        for this in self.mission_script:
+            line = this.strip()
+            if line == '':
+                continue
+            if line[0] == '#':
+                continue
+            print(line)
+            if line[0] == '/':
+                step = None
+                # This is a new mission command
+                parts = line[1:].split(':')
+                step_type = parts[0].strip()
+                if step_type == 'begin':
+                    section = 'begin'
+                elif step_type == 'run':
+                    section = 'run'
+                elif step_type == 'end':
+                    section = 'end'
+                elif step_type == 'msg':
+                    step = StepMessage(self, section, parts[1].strip())
+                elif step_type == 'sleep':
+                    step = StepSleep(self, section, parts[1].strip())
+                if step is not None:
+                    self.mission_steps.append(step)
+            else:
+                # This is a parameter of the step being loaded
+                pos = line.find('=')
+                key = line[:pos].strip()
+                value = line[pos+1:].strip()
+                step.parms[key] = value
+
+    def DoLoop(self):
+        if self.mission_step_ix >= len(self.mission_steps):
+            self.EndMission()
+            return False
+        step = self.mission_steps[self.mission_step_ix]
+        if step.DoMissionStep():
+            self.mission_step_ix += 1
+        return True
+
+    def StartWrapup(self):
+        pass
 
     def Waypoints(self):
         waypoints = []
@@ -191,15 +224,18 @@ class Mission(object):
                 waypoints.append(s.waypoint)
         return waypoints
 
-    def StartMission(self):
-        payload = {}
-        payload['loop_mode'] = 'run'
-        self.navigator.Publish(vconst.cameraman_orders_topic, payload)
-
     def EndMission(self):
+        self.running = False
+        # Putting the camera in idle mode may be redundant but doesn't do any harm.
+        # Making sure we are in idle mode helps avoid crashes due to running out of
+        # storage.
+        # The mission end topic stops logging of data. This should only happen 
+        # once per mission from here, but redundant messages should not be harmful.
         payload = {}
         payload['loop_mode'] = 'idle'
         self.navigator.Publish(vconst.cameraman_orders_topic, payload)
+        payload = {}
+        self.navigator.Publish(vconst.mission_end_topic, payload)
 
     def SaveWaypoints(self, MissionName=None):
         return
@@ -250,9 +286,15 @@ class NavStep(object):
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=['navigator/mode', vconst.navigator_service_topic,
-					vconst.engineer_1_gps_topic, vconst.engineer_1_imu_topic,
-					'cameraman/last'
+        super().__init__(Subscriptions=[
+						'navigator/mode',
+						vconst.engineer_1_gps_topic,
+						vconst.engineer_1_imu_topic,
+						vconst.mission_begin_topic,
+						vconst.mission_cancel_topic,
+						vconst.mission_end_topic,
+						vconst.navigator_service_topic,
+						'cameraman/last'
 					],
 					Readers=[],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
@@ -264,21 +306,15 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.imageRequested = None
         self.latitude = 0
         self.pausedMode = None
-        self.missionName = None
+        self.mission = None
         self.new_gps_payload = None
         self.new_imu_payload = None
+        self.new_mission_begin_payload = None
+        self.new_mission_cancel_payload = None
         self.new_mode_payload = None
         self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
-        #self.gpsRequested = False
-        self.Init()
-
-    def Init(self, MissionName=None):
-        self.nav = None
-        self.navSteps = []
-        self.mode = "M"
-        self.mission = Mission(self, MissionName=MissionName)
 
     def NavigateTowardWaypoint(self, ix):
         # should be reworked using GeographicLib ??
@@ -406,12 +442,35 @@ class navigator(vnavs_mqtt.mqtt_node):
             self.imageFn
         print("LAST", payload)
 
+    def rmsg_engineer_1_imu(self, payload):
+        self.new_imu_payload = payload
+
+    def rmsg_engineer_1_gps(self, payload):
+        self.new_gps_payload = payload
+
+    def rmsg_mission_begin(self, payload):
+        self.new_mission_begin_payload = payload
+
+    def rmsg_mission_cancel(self, payload):
+        self.new_mission_cancel_payload = payload
+
+    def rmsg_mission_end(self, payload):
+        # This should be filled in to verify that we have semt this normally.
+        # If we think the mission is still running, we need to do something.
+        pass
+
     def rmsg_navigator_mode(self, payload):
         print("MODE_MSG", payload)
         new_mode = payload['mode']
         if new_mode not in "GMPR":
             return 'invalid mode'
         self.new_mode_payload = payload
+
+    def rmsg_navigator_service(self, payload):
+        request = payload['request']
+        if request not in self.serviceNames:
+            return 'unknown service'
+        self.serviceRequests.append(payload)
 
     def ChangeMode(self):
         payload = self.new_mode_payload
@@ -454,12 +513,6 @@ class navigator(vnavs_mqtt.mqtt_node):
             self.mode = mode
             self.pausedMode = None
 
-    def rmsg_navigator_service(self, payload):
-        request = payload['request']
-        if request not in self.serviceNames:
-            return 'unknown service'
-        self.serviceRequests.append(payload)
-
     def ProcessServiceRequest(self):
         if len(self.serviceRequests) < 1:
             return
@@ -489,9 +542,6 @@ class navigator(vnavs_mqtt.mqtt_node):
 
         self.Publish(vconst.navigator_service_ack_topic, payload)
 
-    def rmsg_engineer_1_gps(self, payload):
-        self.new_gps_payload = payload
-
     def LoadGpsPayload(self):
         payload = self.new_gps_payload
         if payload is None:
@@ -508,9 +558,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.stats.Count('GpsRcv')
         return True
 
-    def rmsg_engineer_1_imu(self, payload):
-        self.new_imu_payload = payload
-
     def LoadImuPayload(self):
         payload = self.new_imu_payload
         if payload is None:
@@ -521,6 +568,24 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.stats.Count('ImuRcv')
 
     def DoLoop(self):
+        if self.mission is None:
+            if self.new_mission_begin_payload is None:
+                return
+            mission_payload = self.new_mission_begin_payload
+            self.new_mission_begin_payload = None
+            self.new_mission_cancel_payload = None
+            self.mission = Mission(self, mission_payload)
+        if self.mission is not None:
+            if self.new_mission_begin_payload is not None:
+                self.mission.StartWrapup()
+            elif self.new_mission_cancel_payload is not None:
+                self.new_mission_cancel_payload = None
+                self.mission.StartWrapup()
+            self.mission.DoLoop()
+            if not self.mission.running:
+                self.mission = None
+            return
+        return		# the following code needs to be moved to mission
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         #
         # Handle message data within this thread.
