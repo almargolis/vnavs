@@ -26,7 +26,7 @@ RACE_THRESHOLD = 130
 RACE_THRESHOLD = 50
 RACE_THRESHOLD = 150
 
-# automatically set threshold using technique from 
+# automatically set threshold using technique from
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
 # just saw URL, and have seen it before, so that's re-assuring that I like it
 def auto_canny(img_to_canny, auto_canny_sigma):
@@ -62,6 +62,13 @@ def apply_threshold(channel, low_value, high_value):
     channel = apply_mask(channel, high_mask, high_value)
 
     return channel
+
+def Histogram_CB(img):
+    channels = cv2.split(img)
+    out_channels = []
+    for channel in channels:
+        out_channels.append(cv2.equalizeHist(channel))
+    return cv2.merge(out_channels)
 
 def simplest_cb(img, percentile):
     # Separately for each channel,
@@ -156,7 +163,7 @@ class ColorBalance(object):
         out_channels = []
         for ix, channel in enumerate(channels):
             low_val = self.low_vals[ix]
-            high_val = self.high_vals[ix]   
+            high_val = self.high_vals[ix]
             # saturate below the low percentileile and above the high percentileile
             thresholded = self.apply_threshold(channel, low_val, high_val)
             # scale the channel
@@ -207,7 +214,7 @@ def _thinningIteration(im, iter):
 				M2(i,j) = 1;
 			}
 		}
-	} 
+	}
 	"""
 
 	weave.inline(expr, ["I", "iter", "M"])
@@ -224,7 +231,7 @@ def ColorMaskWhite(hsvChannels, threshold=50):
 def ColorMaskOneColor(hsvChannels, hueValue, threshold=50):
     # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to 179,
     # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
-    # Red color, value 0,  is one of the special case where our selection range wraps 0/179. 
+    # Red color, value 0,  is one of the special case where our selection range wraps 0/179.
     assert (hueValue >= 0) and (hueValue <= 179)
     hueRange = 25
 
@@ -433,7 +440,7 @@ def CrayolaFilter2(im, bw_threshold=20, mix_threshold=50):
     im = cv2.drawContours(im, opencv_contours, -1, (255, 0, 255), 1)
     #return canny_image
     return im
-    
+
 
 def CrayolaFilter(im, bw_threshold=20, mix_threshold=50):
     color_map = {
@@ -459,7 +466,7 @@ def CrayolaFilter(im, bw_threshold=20, mix_threshold=50):
             print(y, x, t, color, c_out)
             out_im[y, x] = c_out
     return out_im
-    
+
 def ColorString(color, bw_threshold=20, mix_threshold=50):
   # bw_sthreshold of 30 was about right for white line
   min_v = min(color)
@@ -730,7 +737,7 @@ class Robogames(object):
                     if (slope1 > 0) and (slope2 < 0):
                         self.selectedLines.append((l1, l2))
 
-    def MakeConeRec(self):  
+    def MakeConeRec(self):
                 self.rectangles = []
                 for this in self.selectedLines:
                     points = [this[0][5], this[0][6], this[1][5], this[1][6]]
@@ -759,7 +766,7 @@ class Robogames(object):
                     cv2.rectangle(self.annotated, llp, urp, self.green, a_width)
                     self.rectangles.append((llp, urp))
                     print("RECT", llp, urp)
-                
+
 
 class ImageAnalyzer(object):
     def __init__(self, fpath=None, Crop=None, CroppedHeight=None,
@@ -997,7 +1004,7 @@ def CreateContours(src, w, h):
     #if brec[1] < 30:
     if brec[1] < 0:
       # Too far up in frame, ignore till we get closer.
-      # This needs to be smarter because it catches lines that begin at the 
+      # This needs to be smarter because it catches lines that begin at the
       # top of the frame but continue into the relevant part of hte frame.
       tiny.append(this_c)
       continue
@@ -1005,7 +1012,7 @@ def CreateContours(src, w, h):
     rect = cv2.minAreaRect(this_c)
     # rect: center (x,y), (width, height), angle of rotation
     print("R", rect)
-    print(CalcRectCenterline(rect, w, h)) 
+    print(CalcRectCenterline(rect, w, h))
     x = rect[0][0]
     y = rect[0][1]
     w = rect[1][0]
@@ -1093,35 +1100,35 @@ def test_ColorMask():
 def test_Cone():
     # Setup SimpleBlobDetector parameters.
     params = cv2.SimpleBlobDetector_Params()
- 
+
     # Change thresholds
     params.minThreshold = 0;
     params.maxThreshold = 256;
- 
+
     # Filter by Area.
     params.filterByArea = True
     params.minArea = 30
- 
+
     # Filter by Circularity
     params.filterByCircularity = False
     params.minCircularity = 0.1
- 
+
     # Filter by Convexity
     params.filterByConvexity = True
     params.filterByConvexity = False
     params.minConvexity = 0.5
- 
+
     # Filter by Inertia
     params.filterByInertia = True
     params.filterByInertia = False
     params.minInertiaRatio = 0.01
     params.minInertiaRatio = 0.50
- 
+
     # Create a detector with the parameters
     ver = (cv2.__version__).split('.')
     if int(ver[0]) < 3 :
         detector = cv2.SimpleBlobDetector(params)
-    else : 
+    else :
         detector = cv2.SimpleBlobDetector_create(params)
 
 
@@ -1152,11 +1159,11 @@ def test_Cone():
     #cv2.drawContours(im, opencv_contours, big_ix, outline_color, -1)
 
     #keypoints = detector.detect(bw)
- 
+
     # Draw detected blobs as red circles.
     # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
     #im = cv2.drawKeypoints(im, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
- 
+
     cv2.imshow('c', im)
     cv2.imshow('bw', bw)
     cv2.waitKey()

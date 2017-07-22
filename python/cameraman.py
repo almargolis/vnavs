@@ -88,6 +88,10 @@ class macbook_camera(object):
         else:
             return False
 
+    def capture_opencv(self):
+        ret, frame = self._video.read()
+        return frame
+
     def capture_continuous(self, output, format=None, use_video_port=False, resize=None, splitter_port=0, burst=False, bayer=False, **options):
         kwargs = options
         kwargs['format'] = format
