@@ -417,7 +417,7 @@ class TkWidgetDef(object):
         row, col = self.Position(row=row, col=col)
         frame = TkWidgetDef('', ttk.Label(self.tkw))
         if thumbnailof is None:
-            frame.UpdateImage(pil_fn=pil_fn, opencvi_im=opencv_im, opencv_fn=opencv_fn)
+            frame.UpdateImage(pil_fn=pil_fn, opencv_im=opencv_im, opencv_fn=opencv_fn)
         else:
             # after this, the thumbnail will be automatically updated whenever the base image is updated
             frame.UpdateImage(opencv_im=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))

@@ -623,7 +623,13 @@ class FileClient(SocketWrapperClient):
         p = self.buffer.find('\x00')
         #print("RCV DATA", len(data), len(self.buffer), self.buf_sum)
         if p > 0:
-            file_len = int(self.buffer[:p])
+            try:
+                file_len = int(self.buffer[:p])
+            except:
+                # need to do something specific here to restart / recover transfer
+                # or neatly notify as not complete.
+                # got an "invalid literal" exception. maybe due to noisy network.
+                raise 
             #print("FILE LEN", file_len)
             buf_len = p + file_len + 1
             if len(self.buffer) == buf_len:
