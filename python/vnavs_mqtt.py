@@ -922,7 +922,7 @@ class mqtt_node(object):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         #	switch between cameras / bots manually.
         # BlockIfNotConnected is for nodes that only need to run when connected to a message server. DoLoop() is what is blocked.
-        #	If set to false, the node to code around communications activities.
+        #	If set to false, the node needs code to avoid crashing when calling communications activities.
         self.args = {}
         for this in sys.argv[1:]:
             eq_pos = this.find('=')
