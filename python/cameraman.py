@@ -230,7 +230,20 @@ class cameraman(vnavs_mqtt.mqtt_node):
             y2 += r
         roi = OpticChiasm.ROI(Im, x1, y1, x2, y2)
         d = OpticChiasm.ReflexEntities(roi, process=process['process'], colors=process['colors'])
-        d.ProcessLines()
+        mid_x = int((x2 - x1) / 2)
+        sensor_point = d.ProcessLines()
+        if sensor_point is not None:
+            # e = sensor_point[0] - mid_x		# guide by x
+            e = sensor_point[2]
+            print("ERR", e, sensor_point)
+            if e > 0.85:
+                e = 0.85
+            if e < 0.45:
+                e = 0.45
+            s = (e - 0.65) * 200
+            payload = {}
+            payload['heading'] = -s
+            self.Publish(vconst.helmsman_orders_topic, payload)
         if An is not None:
             cv2.rectangle(An, (x1, y1), (x2, y2), green, thickness=2)
             d.AnnotateFullImage(An, x1=x1, y1=y1, linect=1, color=blue)
@@ -310,7 +323,8 @@ class cameraman(vnavs_mqtt.mqtt_node):
         #
         burst_start_time = time.time()
         burst_ct = 0
-        print("READY", burst_loop_mode, burst_loop_format, burst_loop_publish, burst_dest)
+        if self.verbose:
+            print("READY", burst_loop_mode, burst_loop_format, burst_loop_publish, burst_dest)
         last_time = 0
         for im_path in self.camera.capture_continuous(burst_dest, format=burst_loop_format, use_video_port=True):
             self.image_ct += 1
@@ -318,7 +332,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
             # mqtt can change values asynchronously. copy so values are consistent during capture
             capture_format = self.capture_format
             capture_publish = self.capture_publish
-            print("MODE", capture_publish)
             if burst_loop_publish == 'file':
                 im_fn = os.path.basename(im_path)
                 # the file is already written, make sure its the correct format
@@ -386,6 +399,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             payload['capture_format'] = capture_format
             payload['capture_publish'] = capture_publish
             self.Publish(vconst.cameraman_pic_ready_topic, payload)
+            print("P", self.mqttc.connected)
             if self.camera.iso != self.iso:
                 # The camera may not use the exact ISO specified. Save the corrected value in
                 # self.iso so we don't keep repeating the request.
@@ -398,7 +412,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 burst_dest.truncate()
                 burst_dest.seek(0)   # ?? needed for io.Bytes?? Required for PiRGBArray for subsequent images
             if burst_loop_mode == 'idle':
-                print("END IDLE")
+                #print("END IDLE")
                 # need conditional to determin conversion paramter for different formats
                 bw = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 hist = cv2.calcHist([bw], [0], None, [256], [0,256])

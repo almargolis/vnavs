@@ -49,6 +49,8 @@ def RGB2BGR(rgb):
     # image to OpenCV
     return rgb[...,::-1]
 
+def BGR2GRAY(bgr):
+    return cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
 def apply_mask(channel, mask, fill_value):
     masked = np.ma.array(channel, mask=mask, fill_value=fill_value)
@@ -532,21 +534,25 @@ class ReflexEntities(object):
         self.image = image
         for this in process:
             if this == 'B':
-                print("simplest_cb")
+                #print("simplest_cb")
                 self.image = simplest_cb(self.image.copy(), 20)
             elif this == 'C':
-                print("ColorMask", color_list)
+                #print("ColorMask", color_list)
                 self.image = ColorMask(self.image.copy(), colors=color_list, threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
+            elif this == 'E':
+                self.image = cv2.equalizeHist(self.image.copy())
             elif this == 'G':
                 self.image = cv2.GaussianBlur(self.image.copy(), (5,5), 0)
+            elif this == 'W':
+                self.image = BGR2GRAY(self.image)
             elif this == 'Y':
-                print("Canny")
-                self.image = auto_canny(self.image.copy(), 0.33)
+                #print("Canny")
+                self.image = auto_canny(self.image.copy(), 0.1)		# ben's sigma was 0.33
         self.h_lines = cv2.HoughLinesP(self.image, 1, np.pi/180, 15, minLineLength=30, maxLineGap=10)
-        if self.h_lines is None:
-            print("LINES -- NONE")
-        else:
-            print("LINES", len(self.h_lines))
+        #if self.h_lines is None:
+        #    print("LINES -- NONE")
+        #else:
+        #    print("LINES", len(self.h_lines))
         self.map_lines = []
         self.avg_slope = 0
 
@@ -573,9 +579,9 @@ class ReflexEntities(object):
                     mx2 = x2 - m
                     my1 = h - y1
                     my2 = h - y2
-                    mrise = my2 - my1
-                    mrun = mx2 - mx1
-                    if abs(mrun) < 0.01:
+                    mrise = float(my2 - my1)
+                    mrun = float(mx2 - mx1)
+                    if (mrun > -0.01) and (mrun < 0.01):
                         mslope = VERTICAL_SLOPE
                     else:
                         mslope = mrise / mrun
@@ -584,9 +590,18 @@ class ReflexEntities(object):
                     p2dist = math.sqrt((mx2 ** 2) + (my2 ** 2))
                     mdist = min(p1dist, p2dist)
                     if mdist < 300:
-                        self.map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2)))
+                        self.map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2), mrise, mrun))
             self.map_lines.sort()
-            print("Map Lines", len(self.map_lines))
+            print(self.map_lines[0])
+            #print("Map Lines", len(self.map_lines))
+            p1 = self.map_lines[0][5]
+            p2 = self.map_lines[0][6]
+            x1 = int((p1[0] + p2[0]) / 2)
+            y1 = int((p1[1] + p2[1]) / 2)
+            m = self.map_lines[0][2]
+            return (x1, y1, m)
+        else:
+            return None
 
     def AnnotateFullImage(self, image, linect=10, x1=0, y1=0, color=None):
         if color is None:
