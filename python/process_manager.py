@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import platform
 import subprocess
 import sys
 import time
@@ -9,6 +10,23 @@ import time
 import vnavs_mqtt
 
 SYSTEMCTL = '/bin/systemctl'
+
+class SystemProcess(object):
+    def __init__(self):
+        self.system_release = platform.release()
+
+class LinuxProcess(SystemProcess):
+    def __init__(self):
+        super().__init__()
+
+    def WirelessNetworks(self):
+        cmd = ['sudo', '/sbin/iw', 'wlan0', 'scan']
+        proc = RunCommand(cmd)
+        for this in proc.stdout.readlines():
+            t = this.strip()
+            parts = t.split(':')
+            if parts[0] in ['SSID', 'last seen']:
+                print(parts)
 
 def RunCommand(cmd, Shell=False):
     print("RUN COMMAND", cmd)
@@ -70,7 +88,12 @@ class process(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[],
 					Readers=[],
-					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+					SingleThreaded=False, BlockIfNotConnected=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+        self.system =  platform.system()
+        if self.system == 'Linux':
+            self.system_process = LinuxProcess()
+        else:
+            self.system_process = None
         self.process_specs = self.config.items("ProcessMonitor")
         self.startTime = time.time()
         self.loop_sleep = 60
@@ -94,11 +117,8 @@ class process(vnavs_mqtt.mqtt_node):
                     proc = RunCommand('screen -d -m -S %s /bin/bash ~/projects/vnavs/launch/run_%s' % (vnavs_process, vnavs_process), Shell=True)
                     PrintProcResult(proc)
 
-def Run():
-    p = process()
-    p.Loop()
-    p.Disconnect()
-
 if __name__ == '__main__':
     if sys.argv[1] == 'run':
-        Run()
+        vnavs_mqtt.LaunchNode(process)
+    p = LinuxProcess()
+    p.WirelessNetworks()

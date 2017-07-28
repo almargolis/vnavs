@@ -623,7 +623,13 @@ class FileClient(SocketWrapperClient):
         p = self.buffer.find('\x00')
         #print("RCV DATA", len(data), len(self.buffer), self.buf_sum)
         if p > 0:
-            file_len = int(self.buffer[:p])
+            try:
+                file_len = int(self.buffer[:p])
+            except:
+                # need to do something specific here to restart / recover transfer
+                # or neatly notify as not complete.
+                # got an "invalid literal" exception. maybe due to noisy network.
+                raise 
             #print("FILE LEN", file_len)
             buf_len = p + file_len + 1
             if len(self.buffer) == buf_len:
@@ -916,7 +922,7 @@ class mqtt_node(object):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         #	switch between cameras / bots manually.
         # BlockIfNotConnected is for nodes that only need to run when connected to a message server. DoLoop() is what is blocked.
-        #	If set to false, the node to code around communications activities.
+        #	If set to false, the node needs code to avoid crashing when calling communications activities.
         self.args = {}
         for this in sys.argv[1:]:
             eq_pos = this.find('=')

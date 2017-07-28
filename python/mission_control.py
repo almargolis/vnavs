@@ -144,8 +144,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         return im
 
     def rmsg_wildcard(self, topic, payload):
-        print(topic)
-        self.f1_helmsman_entry.ReplaceValue(payload)
+        self.f1_engineer_1_entry.ReplaceValue(payload)
         if topic[-5:] == 'abend':
           t = payload['traceback']
           self.alert_text.ReplaceValue(t)
@@ -156,6 +155,17 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         else:
             self.pic_fn = payload['filename']
         self.pic_processed = False
+
+    def filter_payload(self, payload):
+        new_payload = {}
+        for (k, v) in payload.items():
+            if k[0] == '_':
+                continue
+            new_payload[k] = v
+        return new_payload
+
+    def rmsg_helmsman_orders(self, payload):
+        self.f1_helmsman_entry.ReplaceValue(self.filter_payload(payload))
 
     def rmsg_navigator_status(self, payload):
         print("NAV STAT", payload)

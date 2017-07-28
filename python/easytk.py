@@ -12,6 +12,7 @@ import Tkinter			# python 2.7
 import ScrolledText
 import ttk			# python 2.7 - Tk themed widget set
 from PIL import ImageTk, Image
+import os
 
 SAME_ROW = -1
 NEXT_ROW = -2
@@ -49,8 +50,8 @@ class TkWidgetDef(object):
         self.thumbnail = None		# update this thumbnail if image is changed
         self.thumbnailwidth = 0		# width of thumbnail
         self.children = []
-        self.canvasWidth = 400
-        self.canvasHeight = 200
+        self.canvas_width = 400
+        self.canvas_height = 200
         self.parm_id = parm_id		# associated application field, not directly used for TK stuff
         if TkWidgetDef.root is None:
             TkWidgetDef.root = self
@@ -123,25 +124,33 @@ class TkWidgetDef(object):
         if isinstance(self.tkw, ScrolledText.ScrolledText):
             self.tkw.delete("1.0", Tkinter.END)
             self.tkw.insert("1.0", value)
-        elif isinstance(self.tkw, ttk.Entry):
-            self.tkd.set(value)
         elif isinstance(self.tkw, ttk.Label):
             self.tkw.config(text=value)
+        elif isinstance(self.tkw, Tkinter.Listbox):
+            # clear current selection first, else multi-selection occurs
+            cur_selection = self.tkw.curselection()
+            self.tkw.select_clear(cur_selection)
+            ix = self.list_items.index(value)
+            self.tkw.selection_set(ix)
+            self.tkw.see(ix)
+        else:
+            if isinstance(self.tkd, Tkinter.StringVar):
+                self.tkd.set(value)
         if Caption is not None:
             self.tkw_label.config(text=Caption)
 
     def Value(self):
         if isinstance(self.tkw, ScrolledText.ScrolledText):
             return self.tkw.get("1.0", Tkinter.END)
-        if isinstance(self.tkw, ttk.Entry):
-            v = self.tkd.get()
-            return v
         if isinstance(self.tkw, Tkinter.Listbox):
             # ix is a tuple like (2,). I assume the 2nd element would be the end of
             # the range. Or maybe it a list of items for multi-selection.
             # This works for now.
             ix = self.tkw.curselection()
             return self.tkw.get(ix)
+        if isinstance(self.tkd, Tkinter.StringVar):
+            v = self.tkd.get()
+            return v
 
     def AddScrolledEntryField(self, caption, width=10, height=5, value='', row=NEXT_ROW, col=SAME_COL):
         if self.debug_this:
@@ -158,6 +167,36 @@ class TkWidgetDef(object):
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
         self.RememberPosition(frame, row, col, colspan=2, rowspan=height)
         self.children.append(frame)
+        return frame
+
+    def XMakePopupWindow(self, title):
+        popup = Tkinter.Toplevel()
+        popup.title(title)
+
+        ksbar=ttk.Scrollbar(popup, orient=Tkinter.VERTICAL)
+        ksbar.grid(row=0, column=1, sticky="ns")
+
+        popCanv = Tkinter.Canvas(popup, width=300, height = 300,
+                         scrollregion=(0,0,500,800)) #width=1256, height = 1674)
+        popCanv.grid(row=0, column=0, sticky=Tkinter.W) #added sticky
+
+        ksbar.config(command=popCanv.yview)
+        popCanv.config(yscrollcommand = ksbar.set)
+
+        self.xxopencv_im = cv2.imread('zoom.jpeg')
+        self.xximg_pil = Image.fromarray(self.xxopencv_im)
+        self.xximg = ImageTk.PhotoImage(self.xximg_pil) #amended
+        image = popCanv.create_image(300, 400, image=self.xximg) #correct way of adding an image to canvas
+        #popCanv.create_text(420,790,text=source)
+
+        popup.rowconfigure(0, weight=1) #added (answer to your question)
+        popup.columnconfigure(0, weight=1) #added (answer to your question)
+
+    def MakePopupWindow(self, title):
+        refname = title
+        top = Tkinter.Toplevel()
+        top.title(title)
+        frame = TkWidgetDef(refname, top, IsContainer=True)
         return frame
 
     def AddLabel(self, text='', width=10, value='', row=NEXT_ROW, col=SAME_COL):
@@ -224,9 +263,10 @@ class TkWidgetDef(object):
                 active_index = 0
         frame.tkw.selection_set(active_index)
         frame.tkw.see(active_index)
+        frame.list_items = s_items
         return frame
 
-    def AddScrolledWidget(self, tk_widget_class, tk_widget_parms, caption=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, XSCROLL=False):
+    def AddScrolledWidget(self, tk_widget_class, tk_widget_parms, caption=None, OnClick=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, XSCROLL=False):
         # Getting scrolled widgets right is verbose and fussy. I found this technique using a seperate frame and 
         # explicit borderwidth and weight on StackOverflow somewhere.
         # The goal is for this tmethod to create any widget that needs scroll bars.
@@ -261,6 +301,8 @@ class TkWidgetDef(object):
         if rowspan > 1:
             parms['rowspan'] = rowspan
         tkw.grid(row=0, column=0, sticky=Tkinter.N+Tkinter.S+Tkinter.E+Tkinter.W)
+        if OnClick is not None:
+            tkw.bind("<Button-1>", OnClick)
         frame = TkWidgetDef(refname, tkw, tkw_label=tk_label)
         frame.hbar = xscrollbar
         frame.vbar = yscrollbar
@@ -346,36 +388,39 @@ class TkWidgetDef(object):
             print("RememberPosition/new", new_TkWidgetDef.ReprPos())
             print("RememberPosition/parent", self.ReprPos())
 
-    def AddCanvas(self, fn=None, opencv=None, opencvfn=None,
+    def AddCanvas(self, pil_fn=None, opencv_im=None, opencv_fn=None,
+				OnClick=None,
 				thumbnailof=None, thumbnailwidth=100,
 				width=400, height=200,
 				row=NEXT_ROW, col=SAME_COL, colspan=1, rowspan=1):
         frame = self.AddScrolledWidget(Tkinter.Canvas, {'width': width, 'height': height},
+						OnClick=OnClick,
 						row=row, col=col, rowspan=rowspan, XSCROLL=True)
         frame.scrollableImage = None
-        frame.canvasWidth = width
-        frame.canvasHeight = height
+        frame.canvas_width = width
+        frame.canvas_height = height
 
-        if thumbnailof is None:
-            frame.UpdateImage(fn=fn, opencv=opencv, opencvfn=opencvfn)
-        else:
-            # after this, the thumbnail will be automatically updated whenever the base image is updated
-            frame.UpdateImage(opencv=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
-            thumbnailof.thumbnail = frame
-            thumbnailof.thumbnailwidth = thumbnailwidth
+        if (pil_fn is not None) or (opencv_fn is not None) or (opencv_im is not None):
+            if thumbnailof is None:
+                frame.UpdateImage(pil_fn=pil_fn, opencv_im=opencv_im, opencv_fn=opencv_fn)
+            else:
+                # after this, the thumbnail will be automatically updated whenever the base image is updated
+                frame.UpdateImage(opencv_im=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
+                thumbnailof.thumbnail = frame
+                thumbnailof.thumbnailwidth = thumbnailwidth
 
         return frame
 
-    def AddLabelImage(self, fn=None, opencv=None, opencvfn=None,
+    def AddLabelImage(self, pil_fn=None, opencv_im=None, opencv_fn=None,
 				thumbnailof=None, thumbnailwidth=100,
 				row=NEXT_ROW, col=SAME_COL, colspan=1):
         row, col = self.Position(row=row, col=col)
         frame = TkWidgetDef('', ttk.Label(self.tkw))
         if thumbnailof is None:
-            frame.UpdateImage(fn=fn, opencv=opencv, opencvfn=opencvfn)
+            frame.UpdateImage(pil_fn=pil_fn, opencv_im=opencv_im, opencv_fn=opencv_fn)
         else:
             # after this, the thumbnail will be automatically updated whenever the base image is updated
-            frame.UpdateImage(opencv=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
+            frame.UpdateImage(opencv_im=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
             thumbnailof.thumbnail = frame
             thumbnailof.thumbnailwidth = thumbnailwidth
 
@@ -384,55 +429,70 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def UpdateImage(self, fn=None, opencv=None, opencvfn=None):
+    def UpdateImage(self, pil_fn=None, opencv_im=None, opencv_fn=None):
         # Replaces image in Canvas and Label widgets
-        img_pil = None
-        img_tk = None
-        if fn is not None:
-            try:
-                img_pil = Image.open(fn)
-            except IOError:
-                img_pil = None
-            self.opencv_im = None
-        elif opencv is not None:
-            img_pil = Image.fromarray(opencv)
-            self.opencv_im = opencv
-        elif opencvfn is not None:
-            opencv = cv2.imread(opencvfn)
-            self.opencv_im = opencv
-            img_pil = Image.fromarray(opencv)
+        # We can have up to 3 stages of image buffers. We keep references to all
+        # for debugging and becaues of some strange garbage collection issues with
+        # TK images.
+        # self.tkd is ImageTk.PhotoImage() which actually gets placed on widget
+        # self.pil_im is a Pillow Image() which TK directly uses
+        # self.opencv_im is an OpenCV buffer for JPEG (or other) files
         #
-        if img_pil is not None:
-            imWidth = img_pil.width
-            if self.canvasWidth < imWidth:
-                imHeight = img_pil.height
-                height = int((self.canvasWidth / imWidth) * imHeight)
-                img_pil = img_pil.resize((self.canvasWidth, height))
-                #print("RESIZE", self.canvasWidth, height)
-            img_tk = ImageTk.PhotoImage(img_pil)
-        self.tkd = img_tk
-        if img_tk is not None:
-            if isinstance(self.tkw, ttk.Label):
-                self.tkw.configure(image=img_tk)
-            elif isinstance(self.tkw, Tkinter.Canvas):
-                if self.scrollableImage is None:
-                    self.scrollableImage = self.tkw.create_image(0, 0, image=img_tk, anchor='nw')
-                else:
-                    self.tkw.itemconfig(self.scrollableImage, image=img_tk)
-                width, height = img_pil.size
-                self.tkw.config(scrollregion=(0, 0, width, height))
-                pctWidth = self.canvasWidth / width
-                if pctWidth > 1.0:
-                    pctWidth = 1.0
-                self.hbar.set(0.0, pctWidth)
-                pctHeight = self.canvasHeight / height
-                if pctHeight > 1.0:
-                    pctHeight = 1.0
-                self.vbar.set(0.0, pctHeight)
+        self.pil_im = None
+        self.opencv_im= None
+        if pil_fn is not None:
+            try:
+                self.pil_im = Image.open(pil_fn)
+            except IOError:
+                self.pil_im = None
+            self.opencv_im = None
+        elif opencv_im is not None:
+            self.pil_im = Image.fromarray(opencv_im)
+            self.opencv_im = opencv_im
+        elif opencv_fn is not None:
+            print("***", os.getcwd(), opencv_fn)
+            self.opencv_im = cv2.imread(opencv_fn)
+            self.pil_im = Image.fromarray(self.opencv_im)
+        #
+        if self.pil_im is None:
+            print("UpdateImage() unable to create PILLOW image object", pil_fn, opencv_fn, opencv_im.__class__.__name__)
+            # should blank thumbnail here
+            return False
+        imWidth = self.pil_im.width
+        if self.canvas_width < imWidth:
+            imHeight = self.pil_im.height
+            height = int((self.canvas_width / imWidth) * imHeight)
+            self.pil_im = self.pil_im.resize((self.canvas_width, height))
+            #print("RESIZE", self.canvas_width, height)
+        self.tkd = ImageTk.PhotoImage(self.pil_im)
+        if self.tkd is None:
+            print("UpdateImage() unable to create TK image object")
+            # should blank thumbnail here
+            return False
+        if isinstance(self.tkw, ttk.Label):
+            self.tkw.configure(image=self.tkd)
+        elif isinstance(self.tkw, Tkinter.Canvas):
+            if self.scrollableImage is None:
+                self.scrollableImage = self.tkw.create_image(0, 0, image=self.tkd, anchor='nw')
             else:
-                raise TypeError("Unsupported image widget: " + self.tkw.__class__.__name__)
+                self.tkw.itemconfig(self.scrollableImage, image=self.tkd)
+            width, height = self.pil_im.size
+            self.tkw.config(scrollregion=(0, 0, width, height))
+            pctWidth = self.canvas_width / width
+            if pctWidth > 1.0:
+                pctWidth = 1.0
+            self.hbar.set(0.0, pctWidth)
+            pctHeight = self.canvas_height / height
+            if pctHeight > 1.0:
+                pctHeight = 1.0
+            self.vbar.set(0.0, pctHeight)
+            print("UpdateImage()", self.canvas_width, self.canvas_height, width, height, pctWidth, pctHeight, opencv_fn)
+        else:
+            raise TypeError("Unsupported image widget: " + self.tkw.__class__.__name__)
         if self.thumbnail:
-            self.thumbnail.UpdateImage(opencv=self.MakeThumbnail(self.opencv_im, self.thumbnailwidth))
+            return self.thumbnail.UpdateImage(opencv_im=self.MakeThumbnail(self.opencv_im, self.thumbnailwidth))
+        else:
+            return True
 
     def AddLabelFrame(self, caption, row=NEXT_ROW, col=SAME_COL, colspan=1):
         row, col = self.Position(row=row, col=col)
@@ -456,20 +516,30 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def AddNotebook(self, row=NEXT_ROW, col=SAME_COL, colspan=1):
+    def AddNotebook(self, OnTabSelected=None, row=NEXT_ROW, col=SAME_COL, colspan=1):
         row, col = self.Position(row=row, col=col)
         frame = TkWidgetDef('', ttk.Notebook(self.tkw), IsContainer=True)
-        #frame.tkw.pack(expand="yes")
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
+        frame.tkw.enable_traversal()
+        if OnTabSelected is not None:
+            frame.tkw.bind('<<NotebookTabChanged>>', OnTabSelected)
         self.RememberPosition(frame, row, col, colspan=colspan)
         self.children.append(frame)
         return frame
 
-    def AddTab(self, caption):
+    def DeleteTab(self, ix):
+        print("TAB CT", self.tkw.index('end'))
+        self.tkw.forget(ix)
+        self.children.pop(ix)
+
+    def AddTab(self, caption, Where=None):
         # Add a tab to notebook
         refname = caption.lower().replace(' ', '_')
         frame = TkWidgetDef(refname, ttk.Frame(self.tkw), IsContainer=True)
-        self.tkw.add(frame.tkw, text=caption)
+        if Where is None:
+            self.tkw.add(frame.tkw, text=caption)
+        else:
+            self.tkw.insert(Where, frame.tkw, text=caption)
         self.children.append(frame)
         return frame
 
