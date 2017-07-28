@@ -541,15 +541,15 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             elif self.pic_source == 'bot':
                 if self.last_pic_payload is not None:
                     self.pic_needed = False			# if single frame mode, mark done
-                payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
-                self.pic_fn = payload['filename']
-                path = os.path.join(self.imageDir, self.pic_fn)
-                #print("ProcessImage()", self.pic_fn, path)
-                if self.pic_get:
-                    if not self.file_client.GetFile(self.pic_fn, path=path):
-                        print("Unable to fetch PIC", self.pic_fn)
-                        return
-                new_image = cv2.imread(path)
+                    payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
+                    self.pic_fn = payload['filename']
+                    path = os.path.join(self.imageDir, self.pic_fn)
+                    #print("ProcessImage()", self.pic_fn, path)
+                    if self.pic_get:
+                        if not self.file_client.GetFile(self.pic_fn, path=path):
+                            print("Unable to fetch PIC", self.pic_fn)
+                            return
+                    new_image = cv2.imread(path)
             if new_image is not None:
                 ProcessStep.steps[0].opencv_im = new_image
                 ProcessStep.steps[0].parm_values['opencv_fn'] = path
