@@ -25,15 +25,25 @@ EXTEND_COL = -4
 COL_SPAN_ALL = -1
 
 class TkWidgetDef(object):
+    __slots__ = (
+		'bottom_row', 'canvas_height', 'canvas_width', 'children', 'col', 'col_span',
+		'debug_all', 'file_opt', 'hbar', 'is_container', 'is_initializing',
+		'last_used_col', 'last_used_colspan', 'last_used_row', 'last_used_rowspan',
+		'opencv_im', 'parm_id', 'right_col', 'root', 'row', 'row_span',
+		'scroll_container', 'thumbnail', 'thumbnail_width', 'tkd', 'tkw', 'tkw_label',
+		'vbar', 'wname'
+    )
     root = None
     debug_all = False
 
     def __init__(self, wname, tkw, Data=None, tkw_label=None, parm_id=None, IsContainer=False, debug=None):
-        self.isContainer = IsContainer
+        self.is_container = IsContainer
+        self.is_initializing = True
         self.wname = wname		# reference name for this widget
         self.tkw = tkw			# tk widget
         self.tkw_label = tkw_label	# tk widget of associated label
         self.tkd = Data			# the tk data (usually StringVar) for this widget
+        self.scroll_container = None	# tk frame widget holding tkw plus scrollbars
         self.hbar = None
         self.vbar = None
         self.opencv_im = None
@@ -77,19 +87,32 @@ class TkWidgetDef(object):
 								self.last_used_row, self.last_used_col)
        return res
 
-    def DoFileNameDialog(self, Dir=None):
+    def FileDialogParms(self, FileName=None, Dir=None, FileTypes=None):
         self.file_opt['parent'] = self.tkw
+        if FileName is not None:
+            self.file_opt['initialfile'] = FileName
         if Dir is not None:
             self.file_opt['initialdir'] = Dir
+        if FileTypes is not None:
+            self.file_opt['filetypes'] = FileTypes
+
+    def DoFileNameDialog(self, Dir=None, FileTypes=None):
+        self.FileDialogParms(Dir=Dir, FileTypes=FileTypes)
         return tkFileDialog.askopenfilename(**self.file_opt)
 
-    def DoFileOpenDialog(self):
-        return tkFileDialog.askopenfile(mode='r', **self.file_opt)
+    def DoFileSaveAsNameDialog(self, FileName=None, Dir=None, FileTypes=None):
+        self.FileDialogParms(FileName=FileName, Dir=Dir, FileTypes=FileTypes)
+        return tkFileDialog.asksaveasfilename(**self.file_opt)
+
+    def DoFileOpenDialog(self, mode='r', Dir=None, FileTypes=None):
+        self.FileDialogParms(Dir=Dir, FileTypes=FileTypes)
+        return tkFileDialog.askopenfile(mode=mode, **self.file_opt)
 
     def Focus(self):
         self.tkw.focus()
 
     def Update(self):			# Process Tkinter events
+        self.is_initializing = False
         self.tkw.update()
 
     def AddButton(self, caption, command, row=NEXT_ROW, col=SAME_COL):
@@ -103,7 +126,7 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def AddEntryField(self, caption, width=10, value='', row=NEXT_ROW, col=SAME_COL):
+    def AddEntryField(self, caption, width=10, value='', row=NEXT_ROW, col=SAME_COL, OnDoubleClick=None):
         if self.debug_this:
             print("AddEntryField", row, col, caption)
         row, col = self.Position(row=row, col=col)
@@ -115,6 +138,8 @@ class TkWidgetDef(object):
         tk_label.grid(column=col, row=row, sticky=Tkinter.W)
         tk_entry = ttk.Entry(self.tkw, width=width, textvariable=tk_data)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
+        if OnDoubleClick is not None:
+            tk_entry.bind('<Double-Button-1>', OnDoubleClick)
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
         self.RememberPosition(frame, row, col, colspan=2)
         self.children.append(frame)
@@ -306,6 +331,7 @@ class TkWidgetDef(object):
         frame = TkWidgetDef(refname, tkw, tkw_label=tk_label)
         frame.hbar = xscrollbar
         frame.vbar = yscrollbar
+        frame.scroll_container = container		# may be needed to avoid garbage collection
         self.RememberPosition(frame, row, col, rowspan=rowspan, colspan=2)
         self.children.append(frame)
         return frame
@@ -372,7 +398,7 @@ class TkWidgetDef(object):
         new_TkWidgetDef.col_span = colspan
         new_TkWidgetDef.row_span = rowspan
         # Update container positioning to reflect this new widget
-        assert self.isContainer
+        assert self.is_container
         new_widget_right_col = col + colspan - 1
         new_widget_bottom_row = row + rowspan - 1
         self.last_used_row = row
@@ -532,7 +558,7 @@ class TkWidgetDef(object):
         self.tkw.forget(ix)
         self.children.pop(ix)
 
-    def AddTab(self, caption, Where=None):
+    def AddTab(self, caption, Where=None, OnClick=None):
         # Add a tab to notebook
         refname = caption.lower().replace(' ', '_')
         frame = TkWidgetDef(refname, ttk.Frame(self.tkw), IsContainer=True)
@@ -540,6 +566,8 @@ class TkWidgetDef(object):
             self.tkw.add(frame.tkw, text=caption)
         else:
             self.tkw.insert(Where, frame.tkw, text=caption)
+        if OnClick is not None:
+            frame.tkw.bind('<Button-1>', OnClick)
         self.children.append(frame)
         return frame
 

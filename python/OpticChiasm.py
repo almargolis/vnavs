@@ -643,6 +643,72 @@ class ReflexEntities(object):
         self.slope_ct = ct_slope
         cv2.imwrite('temp/ann.jpeg', self.annotated)
 
+def Raw_Crop_TranslateSym(c, ext, p1=None):
+    if isinstance(c, basestring):
+        if c[0] == 'm':
+            if c == 'm':
+                return ext / 2
+            else:
+                return (ext / 2) + int(c[1:])
+        elif c[0] == 'e':
+            if c == 'e':
+                return ext
+            else:
+                return ext + int(c[1:])
+        elif (c[0] == 'p') and (p1 is not None):
+            if c == 'p':
+                return p1
+            else:
+                return p1 + int(c[1:])
+        elif c[0] == 'b':
+            if c == 'b':
+                return 0
+            else:
+                return int(c[1:])
+        else:
+            print("CROP-T", c, int(c))
+            c = int(c)
+            if c < 0:
+                return ext + c
+            else:
+                return c
+    else:
+        if c < 0:
+            return ext + c
+        else:
+            return c
+
+def Crop_TranslateSym(c, ext, p1=None):
+    res = Raw_Crop_TranslateSym(c=c, ext=ext, p1=p1)
+    if res < 0:
+        return 0
+    if res > ext:
+        return ext
+    return res
+
+def Crop_TranslateYX(im, y_range, x_range):
+    height, width, channels = im.shape
+    y_low = Crop_TranslateSym(y_range[0], height)
+    y_high = Crop_Translat_Sym(y_range[1], height)
+    x_low = Crop_TranslateSym(x_range[0], width)
+    x_high = Crop_TranslateSym(x_range[1], width)
+    if x_low > x_high:
+        x_low, x_high = x_high, x_low
+    if y_low > y_high:
+        y_low, y_high = y_high, y_low
+    return (y_low, y_high, x_low, x_high)
+
+def Crop_TranslatePP(im, p1, p2):
+    height, width, channels = im.shape
+    x_low = Crop_TranslateSym(p1[0], width)
+    y_low = Crop_TranslateSym(p1[1], height)
+    x_high = Crop_TranslateSym(p2[0], width, x_low)
+    y_high = Crop_TranslateSym(p2[1], height, y_low)
+    if x_low > x_high:
+        x_low, x_high = x_high, x_low
+    if y_low > y_high:
+        y_low, y_high = y_high, y_low
+    return (y_low, y_high, x_low, x_high)
 
 class Robogames(object):
     def __init__(self, image, colors):
