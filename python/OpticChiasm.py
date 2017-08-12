@@ -6,14 +6,23 @@ import sys
 import re
 
 # OpenCv uses a range of 0 to 179 instead of 0 to 360.
-HSV_MASK_WHITE = -1
-HSV_MASK_YELLOW = 30
-HSV_MASK_ORANGE = 12
-HSV_MASK_BLUE = 120
-HSV_MASK_RED = 178
+# old, non-working values were yellow=30, orange=12, blue=120, red=178
+HSV_RATIO = 179.0 / 360.0
+HSV_WHITE = -1
+HSV_YELLOW = int(70.0 * HSV_RATIO)
+HSV_ORANGE = int(60.0 * HSV_RATIO)
+HSV_BLUE = int(240.0 * HSV_RATIO)
+HSV_RED = int(350.0 * HSV_RATIO)
 
-IM_BGR = 'bgr'
-IM_RGB = 'rgb'
+IM_BGR = 'BGR'
+IM_RGB = 'RGB'
+IM_GRAY = 'GRAY'
+IM_HSV = 'HSV'
+COLORCODES = [IM_BGR, IM_GRAY, IM_RGB, IM_HSV]
+
+DRAW_BGR_RED = (0, 0, 255)
+DRAW_BGR_BLUE = (255, 0, 0)
+DRAW_BGR_GREEN = (0, 255, 0)
 
 RACE_BLUR = False
 RACE_CANNY = False
@@ -26,16 +35,80 @@ RACE_THRESHOLD = 130
 RACE_THRESHOLD = 50
 RACE_THRESHOLD = 150
 
+class Image(object):
+    """
+	Image is a wrapper around OpenCv images. Its main unique value is adding colorcode as a property
+	of the image, avoiding a variety of bugs. It also provides convenience functions to deal with
+        OpenCv and numpy operations that I find non-intuitive.
+    """
+    __slots__ = (
+	'colorcode', 'colordepth', 'height', '_im', 'width' 
+    )
+
+    def __init__(self, im=None, colorcode=None, opencv_fn=None):
+        if opencv_fn is not None:
+            im = cv2.imread(opencv_fn)
+            colorcode = IM_BGR
+        self.ReplaceImage(im, colorcode)
+
+    def copy(self):
+        return Image(im=self._im.copy(), colorcode=self.colorcode)
+
+    def CopyAsGray(self):
+        if self.colorcode == IM_GRAY:
+            return self.copy()
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_GRAY))
+        return Image(im=cv2.cvtColor(self._im, transform), colorcode=IM_GRAY)
+
+    @property
+    def im(self):			# im is a property to discourage skipping ReplaceImage()
+        return self._im
+
+    def ImAsRGB(self):
+        if self.colorcode == IM_RGB:
+            return self._im
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_RGB))
+        return cv2.cvtColor(self._im, transform)
+
+    def ImAsHSV(self):
+        if self.colorcode == IM_HSV:
+            return self._im
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_HSV))
+        return cv2.cvtColor(self._im, transform)
+
+    def ImAsGray(self):
+        if self.colorcode == IM_GRAY:
+            return self._im
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_GRAY))
+        return cv2.cvtColor(self._im, transform)
+
+    def ReplaceImage(self, im, colorcode):
+        assert colorcode in COLORCODES
+        self._im = im
+        self.colorcode = colorcode
+        self.width = 0
+        self.height = 0
+        self.colordepth = 0
+        if self._im is not None:
+            shape = self._im.shape
+            self.height = shape[0]
+            self.width = shape[1]
+            if len(shape) > 2:
+                self.colordepth = shape[2]
+            else:
+                self.colordepth = 1
+    
+
 # automatically set threshold using technique from
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
 # just saw URL, and have seen it before, so that's re-assuring that I like it
-def auto_canny(img_to_canny, auto_canny_sigma):
-    img_to_canny_median = np.median(img_to_canny)
-    lower_canny_thresh = int(max(0, (1 - auto_canny_sigma) * img_to_canny_median ))
-    upper_canny_thresh = int(max(255, (1 + auto_canny_sigma) * img_to_canny_median ))
+def auto_canny(grayscale_im, auto_canny_sigma):
+    grayscale_im_median = np.median(grayscale_im)
+    lower_canny_thresh = int(max(0, (1 - auto_canny_sigma) * grayscale_im_median ))
+    upper_canny_thresh = int(max(255, (1 + auto_canny_sigma) * grayscale_im_median ))
     lower_canny_thresh = 100
     upper_canny_thresh = 130
-    return cv2.Canny(img_to_canny,lower_canny_thresh,upper_canny_thresh)
+    return cv2.Canny(grayscale_im, lower_canny_thresh, upper_canny_thresh)
 
 #
 # BGR / RGB Conversions
@@ -230,12 +303,11 @@ def ColorMaskWhite(hsvChannels, threshold=50):
     filterMask = cv2.bitwise_and(saturationMask, valueMask)
     return filterMask
 
-def ColorMaskOneColor(hsvChannels, hueValue, threshold=50):
+def ColorMaskOneColor(hsvChannels, hueValue, huerange=25, threshold=50):
     # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to 179,
     # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
     # Red color, value 0,  is one of the special case where our selection range wraps 0/179.
     assert (hueValue >= 0) and (hueValue <= 179)
-    hueRange = 25
 
     minSaturation = threshold
     minValue = threshold
@@ -243,15 +315,15 @@ def ColorMaskOneColor(hsvChannels, hueValue, threshold=50):
     hueArray = hsvChannels[0]
 
     # is the color within the lower hue range?
-    hueMask = cv2.inRange(hueArray, hueValue - hueRange, hueValue + hueRange)
+    hueMask = cv2.inRange(hueArray, hueValue - huerange, hueValue + huerange)
 
     # If the color is near the limits of the 0 to 179 hue value range, check the overflow range.
     hueWrapMask = None
-    if (hueValue - hueRange) < 0:
-        hueWrapLowerValue = 179 - (hueValue - hueRange)
+    if (hueValue - huerange) < 0:
+        hueWrapLowerValue = 179 - (hueValue - huerange)
         hueWrapMask = cv2.inRange(hueArray, hueWrapLowerValue, 179)
-    elif (hueValue + hueRange) > 179:
-        hueWrapUpperValue = (hueValue + hueRange) - 179
+    elif (hueValue + huerange) > 179:
+        hueWrapUpperValue = (hueValue + huerange) - 179
         hueWrapMask = cv2.inRange(hueArray, 0, hueWrapUpperValue)
     if hueWrapMask is not None:
         hueMask = cv2.bitwise_or(hueMask, hueWrapMask)
@@ -269,10 +341,9 @@ def ColorMaskOneColor(hsvChannels, hueValue, threshold=50):
     print("FINAL SHAPE", hueMask.shape)
     return hueMask
 
-def ColorMask(im, colors=[0], threshold=50, wthreshold=50):
+def ColorMask(hsvImage, colors=[0], huerange=25, threshold=50, wthreshold=50):
     # adapted from http://stackoverflow.com/questions/35866411/opencv-how-to-detect-lines-of-a-specific-colour
     # convert to HSV color space
-    hsvImage = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
     hsvChannels = cv2.split(hsvImage)
 
     result = None
@@ -280,7 +351,7 @@ def ColorMask(im, colors=[0], threshold=50, wthreshold=50):
         if this_hue < 0:
             this_result = ColorMaskWhite(hsvChannels, threshold=wthreshold)
         else:
-            this_result = ColorMaskOneColor(hsvChannels, this_hue, threshold=threshold)
+            this_result = ColorMaskOneColor(hsvChannels, this_hue, huerange=huerange, threshold=threshold)
         if result is None:
             result = this_result
         else:
@@ -315,13 +386,13 @@ def thinning_example(src):
 	#src = cv2.imread("kanji.png")
 	#if src == None:
 	#	sys.exit()
-	bw = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
-	_, bw2 = cv2.threshold(bw, 10, 255, cv2.THRESH_BINARY)
-	bw2 = thinning(bw2)
+        bw = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+        _, bw2 = cv2.threshold(bw, 10, 255, cv2.THRESH_BINARY)
+        bw2 = thinning(bw2)
         return bw2
-	cv2.imshow("src", bw)
-	cv2.imshow("thinning", bw2)
-	cv2.waitKey()
+        cv2.imshow("src", bw)
+        cv2.imshow("thinning", bw2)
+        cv2.waitKey()
 
 def HoughLines(img, gray):
   contoured_image = img.copy()
@@ -490,7 +561,7 @@ def ColorString(color, bw_threshold=20, mix_threshold=50):
           c = "green"
   else:
       c = "red"
-  return c + ' ' + `color`
+  return c + ' ' + repr(color)
 
 def FilterContours(img, contours, SelectColors='r'):
   image_shape = img.shape
@@ -498,7 +569,7 @@ def FilterContours(img, contours, SelectColors='r'):
   final = img.copy()
   mask = np.zeros(mask_shape, np.uint8)
   area_threshold = 90	 # minimum area sized contour to draw
-  area_threshold = 05	 # minimum area sized contour to draw
+  area_threshold =  5	 # minimum area sized contour to draw
   area_threshold = 10	 # minimum area sized contour to draw
   new_contours = []
 
@@ -529,13 +600,13 @@ class ReflexEntities(object):
         color_list = []
         for this in colors:
             if this == "W":
-                color_list.append(HSV_MASK_WHITE)
+                color_list.append(HSV_WHITE)
             elif this == "R":
-                color_list.append(HSV_MASK_RED)
+                color_list.append(HSV_RED)
             elif this == "Y":
-                color_list.append(HSV_MASK_YELLOW)
+                color_list.append(HSV_YELLOW)
             elif this == "B":
-                color_list.append(HSV_MASK_BLUE)
+                color_list.append(HSV_BLUE)
         # im is an OpenCV BGR image object
         self.original = image
         self.image = image
@@ -878,7 +949,7 @@ class ImageAnalyzer(object):
     def FindLines(self, image=None):
         if image is None:
             fpath = os.path.join(self.img_source_dir, self.img_fpath + self.img_fname_suffix + '.jpg')
-            print fpath
+            print(fpath)
             image = cv2.imread(fpath)
         DrawGrid(self.Snapshot(image, 'Original'))
 
@@ -1171,7 +1242,7 @@ def test_ColorMask():
     fn = 'test_images/red_strap_box.jpeg'
     fn = 'test_images/white_line.jpeg'
     im = cv2.imread(fn)
-    bw = ColorMask(im, colors=[HSV_MASK_WHITE, HSV_MASK_RED], wthreshold=5)		# red, yellow
+    bw = ColorMask(im, colors=[HSV_WHITE, HSV_RED], wthreshold=5)		# red, yellow
 
     cv2.imshow('c', im)
     cv2.imshow('bw', bw)
@@ -1220,7 +1291,7 @@ def test_Cone():
     r.ProcessLines()
     bw = r.annotated
 
-    #bw = ColorMask(im, colors=[HSV_MASK_RED], threshold=150)
+    #bw = ColorMask(im, colors=[HSV_RED], threshold=150)
     #bw = np.bitwise_xor(bw, 255)
     #canny_image = auto_canny(bw, 0.33)
     #edges, im = HoughLines(im, bw)

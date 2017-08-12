@@ -92,6 +92,10 @@ class macbook_camera(object):
         ret, frame = self._video.read()
         return frame
 
+    def capture_image(self):
+        ret, frame = self._video.read()
+        return OpticChiasm.Image(im=frame, colorcode=OpticChiasm.IM_BGR)
+
     def capture_continuous(self, output, format=None, use_video_port=False, resize=None, splitter_port=0, burst=False, bayer=False, **options):
         kwargs = options
         kwargs['format'] = format
