@@ -39,13 +39,13 @@ class FilterParm(object):
 
 class FilterParmFloat(FilterParm):
     def GetValue(self, raw_value):
-        if isinstance(raw_value, basestring):
+        if isinstance(raw_value, str):
             raw_value = raw_value.strip()
         return str(float(raw_value))
 
 class FilterParmInt(FilterParm):
     def GetValue(self, raw_value):
-        if isinstance(raw_value, basestring):
+        if isinstance(raw_value, str):
             raw_value = raw_value.strip()
         return str(int(raw_value))
 
@@ -160,11 +160,13 @@ ImageFilter('Erode',
 
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
 filter = ImageFilter('FindContours',
-			'cont2, xstep.exec_contours, hierarchy = cv2.findContours(im_in.ImAsGray(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
-			[],
+			'cont2, xstep.exec_contours, xstep.exec_hierarchy = cv2.findContours(im_in.ImAsGray(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
+			[FilterParmInt('MaxLevel', '-1')],
 			Flags=[])
-filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
-				+ 'cv2.drawContours(xstep.exec_annotated._im, xstep.exec_contours, -1, oc.DRAW_BGR_RED, 1)\n'
+filter.annotate_code = 'xstep.exec_annotated = im_base.CopyAsGray().CopyAsBGR()\n' \
+				+ 'oc.CrayolaContours(xstep.exec_annotated._im, xstep.exec_contours, xstep.exec_hierarchy, MaxLevel={MaxLevel})\n' \
+				+ 'oc.ContoursToLineVectors(xstep.exec_annotated._im, xstep.exec_contours, xstep.exec_hierarchy)\n'
+		#		+ 'cv2.drawContours(xstep.exec_annotated._im, xstep.exec_contours, -1, oc.DRAW_BGR_RED, 1)\n'
 		#		+ 'for i in xrange(0, len(xstep.exec_contours)):\n'
 		#		+ '    color = (np.random.uniform(0, 255), np.random.uniform(0, 255), np.random.uniform(0, 255))\n'
 		#		+ '    cv2.drawContours(xstep.exec_im, xstep.exec_contours, 1, color, 1)\n',
@@ -190,10 +192,13 @@ filter = ImageFilter('HoughLinesP',
 			Flags=[''])
 filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
 				+ 'print(xstep.exec_lines)\n' \
+				+ 'color_ix = -1\n' \
 				+ 'if (xstep.exec_lines is not None) and (len(xstep.exec_lines) > 0):\n' \
 				+ '    for line  in xstep.exec_lines:\n' \
 				+ '        for x1,y1,x2,y2 in line:\n' \
-				+ '            cv2.line(xstep.exec_annotated._im, (x1,y1), (x2,y2), oc.DRAW_BGR_GREEN, 2)\n'
+				+ '            color_ix = oc.NextColorIx(color_ix)\n' \
+				+ '            color = oc.DRAW_COLORS[color_ix]\n' \
+				+ '            cv2.line(xstep.exec_annotated._im, (x1,y1), (x2,y2), color, 1)\n'
 
 ImageFilter('Map',
 			'cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))',
@@ -203,7 +208,7 @@ ImageFilter('Map',
 class ProcessStep(object):
     __slots__ = ('cv_filter', 'cv_specs',
 			'deposition', 
-			'exec_annotated', 'exec_contours', 'exec_im', 'exec_lines',
+			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_im', 'exec_lines',
 			'filter_selection',
 			'image_widget', 'input_panel', 'ix', 'output_panel', 
 			'parm_entries', 'parm_values', 'parms_specs', 'point_target', 'source_im', 'tab', 'tab_title', 'thumbnail'
@@ -350,6 +355,8 @@ class ProcessStep(object):
                     base_image = this.exec_im
             if this.exec_contours is not None:
                 exec_global_vars['contours_in'] = this.exec_contours
+            if this.exec_hierarchy is not None:
+                exec_global_vars['hierarchy_in'] = this.exec_hierarchy
 
         code_substitutions = {}
         for this_parm in self.parms_specs:
@@ -358,6 +365,7 @@ class ProcessStep(object):
         trace = None
         self.exec_im = None
         self.exec_contours = None
+        self.exec_hierarchy = None
         self.exec_lines = None
         self.exec_annotated = None
         deposition = ''
@@ -382,10 +390,6 @@ class ProcessStep(object):
             deposition = trace + "\n\n" + deposition
             self.deposition.ReplaceValue(deposition)
         self.image_widget.UpdateImage(source_im=self.exec_annotated)
-        if self.exec_contours is None:
-            print("CONTOURS - None")
-        else:
-            print("CONTOURS", len(self.exec_contours))
         return
 
 SRC_LOCAL_CAMERA = 'local'
@@ -507,7 +511,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             else:
                 sep = ln.find('=')
                 if sep > 0:
-                    self.load_parms[ln[:sep]] = ln[sep+1:]
+                    key = ln[:sep][5:]				# eliminate "parm." prefix
+                    value = ln[sep+1:]
+                    self.load_parms[key] = value
         if self.load_filter_name is not None:
             AssignFilter()
         f.close()
@@ -521,7 +527,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.loading = False
 
     def SaveProcessFile(self):
-        fn = self.statusFrame.DoFileSaveAsNameDialog(Dir=self.scriptsDir, FileTypes=ProcessStep.process_file_types)
+        fn = self.statusFrame.DoFileSaveAsNameDialog(Dir=self.scriptsDir,
+							FileName=self.load_process_file_name,
+							FileTypes=ProcessStep.process_file_types)
         f = open(fn, 'w')
         for this_step in ProcessStep.steps:
             f.write(u'/{}\n'.format(this_step.cv_filter))

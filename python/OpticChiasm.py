@@ -2,6 +2,7 @@ import os, cv2, numpy as np
 import math
 import time
 #from scipy import weave
+from operator import itemgetter
 import sys
 import re
 
@@ -21,8 +22,14 @@ IM_HSV = 'HSV'
 COLORCODES = [IM_BGR, IM_GRAY, IM_RGB, IM_HSV]
 
 DRAW_BGR_RED = (0, 0, 255)
+DRAW_BGR_MAGENTA = (255, 0, 255)
 DRAW_BGR_BLUE = (255, 0, 0)
 DRAW_BGR_GREEN = (0, 255, 0)
+DRAW_BGR_YELLOW = (0, 255, 255)
+DRAW_BGR_CYAN = (255, 255, 0)
+DRAW_BGR_BLACK = (0, 0, 0)
+DRAW_BGR_WHITE = (255, 255, 255)
+DRAW_COLORS = (DRAW_BGR_GREEN, DRAW_BGR_RED, DRAW_BGR_BLUE, DRAW_BGR_YELLOW, DRAW_BGR_MAGENTA, DRAW_BGR_CYAN)
 
 RACE_BLUR = False
 RACE_CANNY = False
@@ -53,6 +60,12 @@ class Image(object):
 
     def copy(self):
         return Image(im=self._im.copy(), colorcode=self.colorcode)
+
+    def CopyAsBGR(self):
+        if self.colorcode == IM_BGR:
+            return self.copy()
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_BGR))
+        return Image(im=cv2.cvtColor(self._im, transform), colorcode=IM_BGR)
 
     def CopyAsGray(self):
         if self.colorcode == IM_GRAY:
@@ -193,6 +206,84 @@ def simplest_cb(img, percentile):
         out_channels.append(normalized)
 
     return cv2.merge(out_channels)
+
+def NextColorIx(c):
+    c += 1
+    if c >= len(DRAW_COLORS):
+        c = 0
+    return c
+
+def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=3):
+    # This only looks at top level of hierarchy.
+    if hierarchy is None:
+        return None
+    print("VECTOR vvvvvvv")
+    h_ix = 0
+    areas = []
+    while h_ix >= 0:
+        h = hierarchy[0, h_ix]
+        cnt = contours[h_ix]
+        area = cv2.contourArea(cnt)
+        if area >= MinimumArea:
+            areas.append((area, h_ix))
+        h_ix = h[0]
+    areas.sort(reverse=True)			# sort from largest to smallest)
+    for this in areas[:MaximumLines]:
+        h_ix = this[1]
+        cnt = contours[h_ix]
+        rect = cv2.minAreaRect(cnt)
+        box = cv2.boxPoints(rect).tolist()
+        box.sort(key=itemgetter(1))		# sort by descending y-coordinate
+        if box[0][0] <= box[1][0]:
+            upper_left = box[0]
+            upper_right = box[1]
+        else:
+            upper_left = box[1]
+            upper_right = box[0]
+        if box[2][0] <= box[1][0]:
+            lower_left = box[2]
+            lower_right = box[3]
+        else:
+            lower_left = box[3]
+            lower_right = box[2]
+        xu = int((upper_left[0] + upper_right[0]) / 2)
+        if upper_left[1] > upper_right[1]:
+            yu = int(upper_left[1])
+        else:
+            yu = int(upper_right[1])
+        xl = int((lower_left[0] + lower_right[0]) / 2)
+        if lower_left[1] > lower_right[1]:
+            yl = int(lower_left[1])
+        else:
+            yl = int(lower_right[1])
+        cv2.line(img, (xu, yu), (xl, yl), DRAW_BGR_BLACK, 5) 
+        box = np.int0(box)
+        cv2.drawContours(img, [box], 0, DRAW_BGR_WHITE, 2)
+        print("RRR", rect)
+    print("^^^^^^^^^")
+        
+def CrayolaContours(img, contours, hierarchy, MaxLevel=-1):
+    def ColorBranch(ix, c, this_level, max_level):
+        h = hierarchy[0, ix]
+        c = NextColorIx(c)
+        color = DRAW_COLORS[c]
+        next_ix = h[0]
+        child_ix = h[2]
+        cnt = contours[ix]
+        cv2.drawContours(img, [cnt], 0, color, -1)
+        if (MaxLevel < 0) or (this_level < max_level):
+            while child_ix >= 0:
+                child_ix = ColorBranch(child_ix, c, this_level+1, max_level)
+                c = NextColorIx(c)
+        return next_ix
+    if hierarchy is None:
+        return img
+    h_ix = 0
+    h_color = -1
+    while h_ix >= 0:
+        h_ix = ColorBranch(h_ix, h_color, 1, MaxLevel)
+        h_color = NextColorIx(h_color)
+    return img
 
 class ColorBalance(object):
     def __init__(self, low_vals=None, high_vals=None):

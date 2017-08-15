@@ -1,0 +1,16 @@
+/CapturedImage
+parm.ksize=3,3
+parm.Parm2=
+parm.Parm3=
+parm.Parm4=
+parm.Parm1=
+/ColorMask
+parm.huerange=25
+parm.threshold=50
+parm.wthreshold=50
+parm.colors=oc.HSV_BLUE
+/Erode
+parm.kernel_dim=5
+parm.iterations=1
+/FindContours
+parm.MaxLevel=1
