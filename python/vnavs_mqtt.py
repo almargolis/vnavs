@@ -5,7 +5,6 @@ from builtins import (bytes, str, open, super, range,
 import json
 import multiprocessing
 import os
-import Queue
 import select
 import socket
 import sys
@@ -19,8 +18,10 @@ import vnavs_const as vconst
 
 if sys.version_info[0] < 3:
     import ConfigParser
+    import Queue
 else:
     import configparser as ConfigParser
+    import queue as Queue
 
 config_file_path = os.path.expanduser("~/vnavs.ini")
 handler_method_prefix = 'rmsg_'
@@ -412,7 +413,7 @@ class SocketWrapperServer(SocketWrapper):
         else:
             displayHost = self.socket_host
         print("Server listening on host %s, port %s." % (displayHost, self.socket_port))
-        print("Server listening on port %s." % (`self.os_socket.getsockname()`))
+        print("Server listening on port %s." % (repr(self.os_socket.getsockname()),))
         while True:
             self.Select(timeout=None)
 
@@ -570,7 +571,7 @@ class FileServer(SocketWrapperServer):
         while ix < len(c):
             rec = c[ix:ix+self.buffer_len]
             if ix == 0:
-                rec = `len(c)` + '\x00' + rec
+                rec = repr(len(c)) + '\x00' + rec
             self.QueueMessage(rec, s=s)
             ix += self.buffer_len
 
@@ -712,7 +713,7 @@ class FastMqttServer(SocketWrapperServer):
                     if sendSocket in self.inputSockets:
                         # we get here for subscription by still-connected sockets
                         newSubscriptionList.append(sendSocket)
-                        self.QueueMessageZ(['message', topic, `self.message_in_ct`, payload], s=sendSocket)
+                        self.QueueMessageZ(['message', topic, repr(self.message_in_ct), payload], s=sendSocket)
                         print("PUBLISH", topic, "Queued")
                     else:
                         print("PUBLISH", topic, "Socket unknown")
@@ -733,7 +734,7 @@ class FastMqttServer(SocketWrapperServer):
             else:
                 mid = 0
                 payload = '{}'
-            self.QueueMessageZ(['message', topic, `mid`, payload], s=s)
+            self.QueueMessageZ(['message', topic, repr(mid), payload], s=s)
             print("READ", topic)
         elif action == 'subscribe':
             topic = message[1]
@@ -912,11 +913,12 @@ def LaunchNode(node_class):
     n.Loop()
 
 class mqtt_node(object):
-    __slots__ = ('args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
+    __slots__ = ('args', 'arrivedReads', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'debug', 'exception_ct', 'exception_last_time',
-					'handlers', 'imageDir', 'lastSocketError', 'loop_sleep', 'pendingReads', 'arrivedReads',
-					'readers', 'select_timeout', 'single_threaded', 'node_name', 'stats', 'streamer', 'subscriptions',
+					'handlers', 'imageDir', 'lastSocketError', 'loop_sleep', 'mqttc', 'node_name', 'pendingReads',
+					'readers', 'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
 					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
+
     def __init__(self, node_name=None, Subscriptions=[], Readers=[],
 				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
@@ -956,7 +958,7 @@ class mqtt_node(object):
         self.readers = Readers
         self.subscriptions = Subscriptions
         self.handlers = {}
-        self.wildcardHandler = None
+        self.wildcard_handler = None
         self.broker_type = BrokerType
         self.InitMqttClient()
         self.broker_timeout = 60
@@ -1122,13 +1124,13 @@ class mqtt_node(object):
 
     def RegisterMessageHandlers(self):
         self.handlers = {}
-        self.wildcardHandler = getattr(self, wildcard_method_name, None)
+        self.wildcard_handler = getattr(self, wildcard_method_name, None)
         topics = self.subscriptions + self.readers
         for this_topic in topics:
             handler_name = handler_method_prefix + this_topic.replace('/', '_')
             handler_method = getattr(self, handler_name, None)
             if handler_method is None:
-                if self.wildcardHandler is None:
+                if self.wildcard_handler is None:
                     print("No message handler for topic '%s'" % (this_topic))
             self.handlers[this_topic] = handler_method
             if this_topic in self.subscriptions:
@@ -1235,8 +1237,8 @@ class mqtt_node(object):
             self.arrivedReads[message.topic] = payload
             return
         if handler_method is None:
-            if self.wildcardHandler is not None:
-                error = self.wildcardHandler(message.topic, payload)
+            if self.wildcard_handler is not None:
+                error = self.wildcard_handler(message.topic, payload)
             else:
                 error = ' no handler for topic'
         else:

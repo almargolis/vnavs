@@ -32,9 +32,49 @@ BOT_1_MAP_TRANSPOSE = [
 
 BOT_1_H = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
+class FilterParm(object):
+    def __init__(self, name, default):
+        self.name = name
+        self.default = default
+
+class FilterParmFloat(FilterParm):
+    def GetValue(self, raw_value):
+        if isinstance(raw_value, str):
+            raw_value = raw_value.strip()
+        return str(float(raw_value))
+
+class FilterParmInt(FilterParm):
+    def GetValue(self, raw_value):
+        if isinstance(raw_value, str):
+            raw_value = raw_value.strip()
+        return str(int(raw_value))
+
+class FilterParmStr(FilterParm):
+    def GetValue(self, raw_value):
+        if raw_value is None:
+            raw_value = ''
+        v = raw_value.strip()
+        if '"' in v:
+            v = ''
+        if "'" in v:
+            v = ''
+        return v
+
+class FilterParmPoint(FilterParm):
+    def GetValue(self, raw_value):
+        v = raw_value.split(',')
+        x = int(v[0].strip())
+        y = int(v[1].strip())
+        return "({},{})".format(x, y)
+
+class FilterParmPointSym(FilterParm):
+    def GetValue(self, raw_value):
+        v = raw_value.split(',')
+        x = v[0].strip()
+        y = v[1].strip()
+        return "('{}','{}')".format(x, y)
 
 # Filter functions should modify only:
-#	ProcessStep.annotation_base
 #	xstep.im
 # GetParm() must filter parameters to avoid code injection attacks
 
@@ -47,6 +87,7 @@ class ImageFilter(object):
         self.code = code
         self.parms = parms
         self.flags = Flags
+        self.annotate_code = None
         self.filters[name] = self
         self.filter_names.append(name)
         self.filter_names.sort()
@@ -57,56 +98,78 @@ class ImageFilter(object):
 #	xstep is the current ProcessStep() with exec_im set to None.
 #
 ImageFilter('CapturedImage',
-			'xstep.exec_im = xstep.opencv_im.copy()',
+			'xstep.exec_im = xstep.source_im.copy()',
 			[],
 			Flags=['isbase'])
 
 ImageFilter('ColorMask',
-			'xstep.exec_im = OpticChiasm.ColorMask(im, colors=[{colors}], threshold={threshold})',
-                        [('threshold', 'i', '50'), ('wthreshold', 'i', '50'),
-                                ('colors', 's', 'OpticChiasm.HSV_MASK_WHITE, OpticChiasm.HSV_MASK_RED')],
+			'xstep.exec_im = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={huerange}, threshold={threshold}),\n' \
+				+ '	colorcode=oc.IM_GRAY)',
+                        [FilterParmInt('huerange', '25'), FilterParmInt('threshold', '50'), FilterParmInt('wthreshold', '50'),
+                                FilterParmStr('colors', 'oc.HSV_WHITE, oc.HSV_RED')],
                         Flags=[])
 
 ImageFilter('FileImage',
-			"xstep.exec_im = cv2.imread('{opencv_fn}')",
-			[('opencv_fn', 's', '')],
+			"xstep.exec_im = oc.Image(opencv_fn='{opencv_fn}')",
+			[FilterParmStr('opencv_fn', '')],
 			Flags=['isbase'])
 
-ImageFilter('Crop',
-			"xstep.exec_im = im.copy()[{y}, {x}]",
-			[('x', 'l', 'm-50:m+50', 'w'), ('y', 'l', '-100:', 'h')],
+
+filter = ImageFilter('CropPP',
+			'y_low, y_high, x_low, x_high = oc.Crop_TranslatePP(im_in._im, {p1}, {p2})\n'
+				+ 'xstep.exec_im = oc.Image(im=im_in._im[y_low:y_high, x_low:x_high], colorcode=im_in.colorcode)\n'
+				+ 'print(im_in._im.shape, y_low, y_high, x_low, x_high)\n',
+			[FilterParmPointSym('p1', 'm-50,m+50'), FilterParmPointSym('p2', '-100,e')],
+			Flags=['isbase'])
+filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
+				+ 'cv2.rectangle(xstep.exec_annotated._im, (x_low, y_low), (x_high, y_high), oc.DRAW_BGR_GREEN, 2)\n'
+
+ImageFilter('CropYX',
+			'y_low, y_high, x_low, x_high = oc.Crop_TranslateYX(im, {y_range}, {x_range})\n'
+				+ 'xstep.exec_im = im[{y_low}:{y_high}, {x_low}:{x_high}]\n',
+			[FilterParmPointSym('y_range', '-100,'), FilterParmPointSym('x_range', 'm-50,m+50')], 
 			Flags=['isbase'])
 
-ImageFilter('BW',
-			'xstep.exec_im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)',
+ImageFilter('Gray',
+			'xstep.exec_im = im_in.CopyAsGray()',
 			[],
 			Flags=[])
 
 ImageFilter('Blur',
-			'xstep.exec_im = cv2.blur(im, {ksize})',
-			[('ksize', 'p', '3,3')],
+			'xstep.exec_im = oc.Image(im=cv2.blur(im_in._im, {ksize}), colorcode=im_in.colorcode)',
+			[FilterParmPoint('ksize', '3,3')],
 			Flags=[])
 
 ImageFilter('CannyAuto',
-			'xstep.exec_im = OpticChiasm.auto_canny(im, {sigma})',
-			[('sigma', 'f', '0.33')],
+			'xstep.exec_im = oc.Image(im=oc.auto_canny(im_in.ImAsGray(), {sigma}), colorcode=oc.IM_GRAY)',
+			[FilterParmFloat('sigma', '0.33')],
 			Flags=[])
 
 ImageFilter('ColorBalance',
-			'xstep.exec_im = OpticChiasm.simplest_cb(im, {pct})',
-			[('pct', 'i', '20')],
+			'xstep.exec_im = oc.simplest_cb(im, {pct})',
+			[FilterParmInt('pct', '20')],
+			Flags=[])
+
+ImageFilter('Erode',
+			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
+				+ 'xstep.exec_im = oc.Image(im=cv2.erode(im_in._im, kernel, iterations={iterations}),\n'
+				+ '			colorcode=im_in.colorcode)\n',
+			[FilterParmInt('kernel_dim', '1'),
+				FilterParmInt('iterations', '1')],
 			Flags=[])
 
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
-ImageFilter('FindContours',
-			'cont2, xstep.exec_contours, hierarchy = cv2.findContours(im.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n'
-				+ 'xstep.exec_im = xstep.annotation_base.exec_im.copy()\n'
+filter = ImageFilter('FindContours',
+			'cont2, xstep.exec_contours, xstep.exec_hierarchy = cv2.findContours(im_in.ImAsGray(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
+			[FilterParmInt('MaxLevel', '-1')],
+			Flags=[])
+filter.annotate_code = 'xstep.exec_annotated = im_base.CopyAsGray().CopyAsBGR()\n' \
+				+ 'oc.CrayolaContours(xstep.exec_annotated._im, xstep.exec_contours, xstep.exec_hierarchy, MaxLevel={MaxLevel})\n' \
+				+ 'oc.ContoursToLineVectors(xstep.exec_annotated._im, xstep.exec_contours, xstep.exec_hierarchy)\n'
+		#		+ 'cv2.drawContours(xstep.exec_annotated._im, xstep.exec_contours, -1, oc.DRAW_BGR_RED, 1)\n'
 		#		+ 'for i in xrange(0, len(xstep.exec_contours)):\n'
 		#		+ '    color = (np.random.uniform(0, 255), np.random.uniform(0, 255), np.random.uniform(0, 255))\n'
 		#		+ '    cv2.drawContours(xstep.exec_im, xstep.exec_contours, 1, color, 1)\n',
-				+ 'cv2.drawContours(xstep.exec_im, xstep.exec_contours, -1, (255, 0, 0), 1)\n',
-			[],
-			Flags=[])
 
 ImageFilter('DrawContours',
 			'cv2.drawContours(im, contours, -1, (0, 0, 255))',
@@ -114,19 +177,28 @@ ImageFilter('DrawContours',
 			Flags=['incont'])
 
 ImageFilter('EqualizeHistogram',
-			'cv2.equalizeHist(im)',
+			'xstep.exec_im = cv2.equalizeHist(im)',
 			[],
 			Flags=[])
 
 ImageFilter('HistogramCB',
-			'OpticChiasm.Histogram_CB(im)',
+			'oc.Histogram_CB(im)',
 			[],
 			Flags=[])
 
-ImageFilter('HoughLinesP',
-			'cv2.HoughLinesP(im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
-			[('MinLineLength', 'i', '30'), ('MaxLineGap', 'i', 10)],
-			Flags=['outlines'])
+filter = ImageFilter('HoughLinesP',
+			'xstep.exec_lines = cv2.HoughLinesP(im_in._im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
+			[FilterParmInt('MinLineLength', '30'), FilterParmInt('MaxLineGap', 10)],
+			Flags=[''])
+filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
+				+ 'print(xstep.exec_lines)\n' \
+				+ 'color_ix = -1\n' \
+				+ 'if (xstep.exec_lines is not None) and (len(xstep.exec_lines) > 0):\n' \
+				+ '    for line  in xstep.exec_lines:\n' \
+				+ '        for x1,y1,x2,y2 in line:\n' \
+				+ '            color_ix = oc.NextColorIx(color_ix)\n' \
+				+ '            color = oc.DRAW_COLORS[color_ix]\n' \
+				+ '            cv2.line(xstep.exec_annotated._im, (x1,y1), (x2,y2), color, 1)\n'
 
 ImageFilter('Map',
 			'cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))',
@@ -134,42 +206,57 @@ ImageFilter('Map',
 			Flags=[])
 
 class ProcessStep(object):
-    __slots__ = ('annotation_base', 'app', 'cv_filter',
-			'exec_contours', 'exec_im', 'exec_lines',
+    __slots__ = ('cv_filter', 'cv_specs',
 			'deposition', 
-			'image_widget', 'input_panel', 'ix', 'opencv_im', 'output_panel', 
-			'parm_entries', 'parm_values', 'steps', 'tab', 'tab_title', 'thumbnail'
+			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_im', 'exec_lines',
+			'filter_selection',
+			'image_widget', 'input_panel', 'ix', 'output_panel', 
+			'parm_entries', 'parm_values', 'parms_specs', 'point_target', 'source_im', 'tab', 'tab_title', 'thumbnail'
 		)
     app = None
     steps = []
-    annotation_base = None
+    process_file_extension = 'drk'
+    process_file_types = (('Darkroom Process', '*.'+process_file_extension), )
 
-    def __init__(self, FilterName=None, Where=None, **kwargs):
+    def __init__(self, FilterName=None, Where=None, Parms={}):
         self.ix = len(self.steps)
         self.exec_im = None
         self.steps.append(self)
         self.cv_filter = None			# this gets set by NewFilter()
-        self.parm_values = kwargs
+        self.parm_values = Parms
         self.tab_title = "Step %d" % (self.ix)
         self.tab = self.app.notebook.AddTab(self.tab_title, Where=Where)
         self.input_panel = self.tab.AddLabelFrame('Input')
         self.output_panel = self.tab.AddLabelFrame('Output')
         #
         self.filter_selection = self.input_panel.AddListbox('Filters', ImageFilter.filter_names, Selection=FilterName, command=self.NewFilter, rowspan=4)
-        self.parmEntries = []
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL))
-        parm_col = self.parmEntries[0].col
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm2', col=parm_col))
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm3', col=parm_col))
-        self.parmEntries.append(self.input_panel.AddEntryField('Parm4', col=parm_col))
+        self.parm_entries = []
+        self.parm_entries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL, OnDoubleClick=self.OnPickPoint))
+        parm_col = self.parm_entries[0].col
+        self.parm_entries.append(self.input_panel.AddEntryField('Parm2', col=parm_col, OnDoubleClick=self.OnPickPoint))
+        self.parm_entries.append(self.input_panel.AddEntryField('Parm3', col=parm_col))
+        self.parm_entries.append(self.input_panel.AddEntryField('Parm4', col=parm_col))
         self.input_panel.AddButton('Delete Step', command=self.OnDeleteStep, col=parm_col)
         #
         self.image_widget = self.output_panel.AddCanvas(OnClick=self.ZoomPopup)
-        self.deposition = self.output_panel.AddLabel(col=2)
+        self.deposition = self.output_panel.AddLabel(row=0, col=2)
         self.thumbnail = self.app.thumbnailFrame.AddLabelImage(thumbnailof=self.image_widget, row=0, col=NEXT_COL)
         self.thumbnail.tkw.bind("<Button-1>", self.SelectTab)
-        self.opencv_im = None			# captured image
-        self.NewFilter()
+        self.source_im = None			# captured image
+        self.point_target = None
+        self.SetFilter()
+
+    def OnPickPoint(self, event):
+        # event.widget is the tkw object. We could use that to use this
+        # method for multiple points.
+        self.point_target = None
+        if self.cv_filter != "CropPP":
+            return
+        for ix, this in enumerate(self.parm_entries):
+            if this.tkw == event.widget:
+                self.point_target = this
+        if self.point_target is not None:
+            self.point_target.ReplaceValue('<click image>')
 
     def OnDeleteStep(self):
         # This event is here because it is associated with the step and
@@ -184,37 +271,60 @@ class ProcessStep(object):
         self.app.notebook.tkw.select(self.tab.tkw)
 
     def ZoomPopup(self, event):
-        print("ZoomPopup()")
+        print("ZoomPopup() *************")
+        if self.point_target is not None:
+            # event.x and event.y reference the visible area.
+            # canvasx() and canvasy() translate to canvas size.
+            x = self.image_widget.tkw.canvasx(event.x)
+            y = self.image_widget.tkw.canvasy(event.y)
+            if self.image_widget.pil_resize_ratio is not None:
+                x = int(x / self.image_widget.pil_resize_ratio)
+                y = int(y / self.image_widget.pil_resize_ratio)
+            v = "{},{}".format(int(x), int(y))
+            self.point_target.ReplaceValue(v)
+            self.point_target = None
+            sys.exit(-1)
+            return
         cv2.imwrite('zoom.jpeg', self.exec_im)
         top = self.app.tk.MakePopupWindow(self.cv_filter)
         top.AddLabel("Sum Thing")
         canvas = top.AddCanvas(width=800, height=400)
         canvas.UpdateImage(opencv_fn='zoom.jpeg')
 
-    def UpdateAll(self):
-        for this_step in self.steps:
+    @classmethod
+    def UpdateAll(cls):
+        for this_step in cls.steps:
             this_step.Update()
 
     def SaveParameters(self):
-        for ix, this_entry in enumerate(self.parmEntries):
+        for ix, this_entry in enumerate(self.parm_entries):
             if this_entry.parm_id is not None:
                 # save prior value
                 self.parm_values[this_entry.parm_id] = this_entry.Value()
 
     def NewFilter(self, *args):
         # TK callbacks seem to incude *args
+        self.SetFilter()
+        self.UpdateAll()
+
+    def SetFilter(self, FilterName=None, NewParms=None):
         self.SaveParameters()
-        new_filter = self.filter_selection.Value()
-        #print("NewFilter()", new_filter,  self.cv_filter)
+        if NewParms is not None:
+            for key, value in NewParms.items():
+                self.parm_values[key] = value
+        if FilterName is None:
+            new_filter = self.filter_selection.Value()
+        else:
+            new_filter = FilterName
+        #print("SetFilter()", new_filter,  self.cv_filter)
         if new_filter != self.cv_filter:
             self.cv_filter = new_filter
             self.cv_specs = ImageFilter.filters[self.cv_filter]
             self.parms_specs = self.cv_specs.parms
-            for ix, this_entry in enumerate(self.parmEntries):
+            for ix, this_entry in enumerate(self.parm_entries):
                 if ix < len(self.parms_specs):
-                    parm_label = self.parms_specs[ix][0]
-                    parm_type = self.parms_specs[ix][1]
-                    parm_default = self.parms_specs[ix][2]
+                    parm_label = self.parms_specs[ix].name
+                    parm_default = self.parms_specs[ix].default
                     if parm_label not in self.parm_values:
                         self.parm_values[parm_label] = parm_default
                     parm_value = self.parm_values[parm_label]
@@ -225,204 +335,93 @@ class ProcessStep(object):
                     parm_id = None
                 this_entry.ReplaceValue(parm_value, Caption=parm_label)
                 this_entry.parm_id = parm_label
-        self.UpdateAll()
-
-    def GetParm(self, d, parm_spec, exec_global_vars):
-        # All parameters are returned as strings which are put in a string.format()
-        # dictionary. Whenever appropriate, the incoming strings are evaluated
-        # via int(), float(), etc as a means to validate data types. This is
-        # both to help assure correct operation and to avoid code insertion attacks.
-        #
-        # Tkinter sometimes converts types so its not safe to make assumptions
-        # about the class of raw_value
-        #
-        parm_name = parm_spec[0]
-        parm_type = parm_spec[1]
-        if len(parm_spec) >= 4:
-            v1 = exec_global_vars[parm_spec[3]]
-        else:
-            v1 = None
-        raw_value = self.parm_values[parm_name]
-        if parm_type == 'i':
-            # integer number
-            if isinstance(raw_value, basestring):
-                raw_value = raw_value.strip()
-            d[parm_name] = str(int(raw_value))
-            return
-        if parm_type == 'f':
-            # floating point number
-            if isinstance(raw_value, basestring):
-                raw_value = raw_value.strip()
-            d[parm_name] = str(float(raw_value))
-            return
-        if parm_type == 'l':
-            # this is a np slice s:e
-            v = raw_value.split(':')
-            s = v[0].strip()
-            if s == '':
-                s = 0
-            elif s[0] == 'm':
-                adj = int(s[1:])
-                s = str(int(v1 / 2) + adj)
-            else:
-                s = int(s)
-                if s < 0:
-                    s = v1 + s
-            if len(v) > 1:
-                e = v[1].strip()
-            else:
-                e = ''
-            if e == '':
-                e = v1
-            elif e[0] == 'm':
-                adj = int(e[1:])
-                e = str(int(v1 / 2) + adj)
-            else:
-                e = int(e)
-                if e < 0:
-                    e = v1 + e
-            d[parm_name] = "%s:%s" % (s, e)
-            return
-        if parm_type == 'p':
-            # this is a point (x,y)
-            v = raw_value.split(',')
-            x = int(v[0].strip())
-            y = int(v[1].strip())
-            d[parm_name] = "(%d,%d)" % (x, y)
-            return
-        if parm_type == 's':
-            # this is a string
-            if raw_value is None:
-                raw_value = ''
-            v = raw_value.strip()
-            if '"' in v:
-                v = ''
-            if "'" in v:
-                v = ''
-            d[parm_name] = v
-            return
 
     def Update(self):
-        flags = self.cv_specs.flags
-        code = self.cv_specs.code
-        if code == '':
-            code = None
         exec_global_vars = {}
         exec_global_vars['__builtins__'] = __builtins__
         exec_global_vars['cv2'] = cv2
         exec_global_vars['np'] = np
-        exec_global_vars['OpticChiasm'] = OpticChiasm
+        exec_global_vars['oc'] = OpticChiasm
         exec_global_vars['xstep'] = self
         #
-        input_image = None
-        if self.ix > 0:
-            # input image is output image of previous step 
-            input_image = self.steps[self.ix - 1].exec_im
-        else:
-            input_image = None
-        if input_image is None:
-            exec_global_vars['im'] = None
-            exec_global_vars['h'] = 0
-            exec_global_vars['w'] = 0
-            exec_global_vars['c'] = 0
-        else:
-            exec_global_vars['im'] = input_image
-            exec_global_vars['h'] = input_image.shape[0]
-            exec_global_vars['w'] = input_image.shape[1]
-            if len(input_image.shape) > 2:
-                exec_global_vars['c'] = input_image.shape[2]
-            else:
-                exec_global_vars['c'] = 1
-        exec_global_vars['contours'] = None
-        w = exec_global_vars['w']
-        h = exec_global_vars['h']
-        h3 = h * 4
-        sq = (w * 0.5) / 2
-        pts_src = np.array([(sq, 0), (w-sq, 0), (w, h), (0, h)], dtype="float32")
-        pts_dst = np.array([(0,0), (w, 0), (w, h3), (0, h3)], dtype="float32")
-        exec_global_vars['transform'] = cv2.getPerspectiveTransform(pts_src, pts_dst)
-        if ('incont' in flags) and (self.ix > 0):
-            exec_global_vars['contours'] = self.steps[self.ix - 1].contours
-            print("GET CONTOURS")
+        base_image = None
+        for ix, this in enumerate(self.steps):
+            if ix >= self.ix:
+                break
+            if this.exec_im is not None:
+                exec_global_vars['im_in'] = this.exec_im
+                if 'isbase' in this.cv_specs.flags:
+                    exec_global_vars['im_base'] = this.exec_im
+                    base_image = this.exec_im
+            if this.exec_contours is not None:
+                exec_global_vars['contours_in'] = this.exec_contours
+            if this.exec_hierarchy is not None:
+                exec_global_vars['hierarchy_in'] = this.exec_hierarchy
+
         code_substitutions = {}
         for this_parm in self.parms_specs:
-            self.GetParm(code_substitutions, this_parm, exec_global_vars)
+            raw_value = self.parm_values[this_parm.name]
+            code_substitutions[this_parm.name] = this_parm.GetValue(raw_value)
         trace = None
         self.exec_im = None
         self.exec_contours = None
+        self.exec_hierarchy = None
         self.exec_lines = None
+        self.exec_annotated = None
         deposition = ''
         self.deposition.ReplaceValue(deposition)
-        if code is not None:
+        code = self.cv_specs.code
+        if self.cv_specs.annotate_code is not None:
+            code += '\n' + self.cv_specs.annotate_code
+        if code != '':
             exec_code_str = code.format(**code_substitutions)
-            #print("EXEC", exec_code_str, exec_global_vars['w'], exec_global_vars['h'])
+            print("EXEC", exec_code_str)
             try:
                 exec(exec_code_str, exec_global_vars)
             except:
                 print(trace)
                 trace = traceback.format_exc()
-        if 'outlines' in flags:
-            # **** This should be moved to code of filter if needed at all
-            print("CONTOURS")
-            self.im = ProcessStep.annotation_base.im.copy()
-            deposition += "Lines\n"
-            map_lines = []
-            h, w, c = self.im.shape
-            m = int(w/2)
-            if self.lines is not None:
-                for x in range(0, len(self.lines)):
-                    for x1,y1,x2,y2 in self.lines[x]:
-                        cv2.line(self.im,(x1,y1),(x2,y2),(0,255,0),2)
-                        deposition += "%d. (%d,%d) (%d,%d)\n" % (x, x1, y1, x2, y2)
-                        mx1 = x1 - m
-                        mx2 = x2 - m
-                        my1 = h - y1
-                        my2 = h - y2
-                        mrise = my2 - my1
-                        mrun = mx2 - mx1
-                        mslope = mrise / mrun
-                        mlen = math.sqrt((mrise ** 2) + (mrun ** 2))
-                        p1dist = math.sqrt((mx1 ** 2) + (my1 ** 2))
-                        p2dist = math.sqrt((mx2 ** 2) + (my2 ** 2))
-                        mdist = min(p1dist, p2dist)
-                        map_lines.append((mdist, mlen, mslope, (mx1, my1), (mx2, my2), (x1, y1), (x2, y2)))
-            deposition += "** Lines\n"
-            map_lines.sort()
-            cum_slope = 0
-            ct_slope = 0
-            print("MAP", h, m, w)
-            for this in map_lines[:5]:
-                cv2.line(self.im,this[5],this[6],(0,0,255),3)
-                print(this)
-                ct_slope += 1
-                cum_slope += this[2]
-            if ct_slope > 0:
-                avg_slope = cum_slope / ct_slope
+        if self.cv_specs.annotate_code is None:
+            if self.exec_im is None:
+                self.exec_annotated = base_image
             else:
-                avg_slope = "NO :ONES"
-            print("MAP", avg_slope)
-            deposition += `map_lines`
-            self.deposition.ReplaceValue(deposition[:20])
+                self.exec_annotated = self.exec_im.copy()
         if trace is not None:
             deposition = trace + "\n\n" + deposition
             self.deposition.ReplaceValue(deposition)
-        self.image_widget.UpdateImage(opencv_im=self.exec_im)
-        if 'isbase' in flags:
-            ProcessStep.annotation_base = self
+        self.image_widget.UpdateImage(source_im=self.exec_annotated)
         return
 
-
+SRC_LOCAL_CAMERA = 'local'
+SRC_BOT_CAMERA = 'bot'
 
 class Darkroom(vnavs_mqtt.mqtt_node):
-    __slots__ = ('camera_iso', 'camera_last_filename', 'delete_process_step_ix', 'last_pic_payload', 'camera_shutter_speed', 'file_client', 'image',
-				'notebook', 'pic_continuous', 'pic_fn', 'pic_get', 'pic_needed', 'statusFrame', 'thumbnailFrame', 'tk')
+    __slots__ = (
+				'camera_iso', 'camera_last_filename', 'camera_shutter_speed',
+				'delete_process_step_ix', 'downloadDir', 'file_client', 'image',
+				'last_pic_payload', 'load_filter_name', 'load_new_filter_ct', 'load_parms', 'load_process_file_name',
+				'loading', 'local_cam',
+				'new_step', 'notebook', 'notebook_add_id',
+				'pic_continuous', 'pic_fn', 'pic_get', 'pic_needed', 'pic_source',
+				'scriptsDir', 'source_widget', 'statusFrame', 'thumbnailFrame', 'tk'
+		)
     def __init__(self):
         super().__init__(Subscriptions=[vconst.cameraman_pic_ready_topic],
 					SingleThreaded=True, BrokerType='F',
 					AutomaticallyConnect=False, BlockIfNotConnected=False, SelectTimeoutSecs=0.1,
 					Verbose=False)
+        self.load_process_file_name = None
         self.delete_process_step_ix = None
         self.file_client = vnavs_mqtt.FileClient(Verbose=False)
+        self.downloadDir = self.config.get("FileClient", "DownloadDir")
+        self.downloadDir = os.path.expanduser(self.downloadDir)               # this expands tilde in path
+        self.scriptsDir = self.config.get("MissionControl", "Scripts")
+
+        self.load_filter_name = None
+        self.load_parms = {}
+        self.load_new_filter_ct = 0
+        self.loading = False
+
         self.image = OpticChiasm.ImageAnalyzer()
         self.image.img_crop=(300,200)
         self.image.img_crop=(250,450)
@@ -437,7 +436,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.tk.tkw.title("VNAVS OpenCV Visualizer")
         self.statusFrame = self.tk.AddLabelFrame('Status', row=1)
         self.thumbnailFrame = self.tk.AddLabelFrame('Thumbnails', row=2)
-        self.notebook = self.tk.AddNotebook(row=3, OnTabSelected=self.TabSelected)
+        self.notebook = self.tk.AddNotebook(row=3, OnTabSelected=self.OnTabSelected)
+        plus = self.notebook.AddTab('+')
+        self.notebook_add_id = self.notebook.tkw.tabs()[-1]
         self.camera_iso = self.statusFrame.AddEntryField('ISO', value=800)
         self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', value=10000, row=SAME_ROW, col=NEXT_COL)
         self.camera_last_filename = ''
@@ -451,7 +452,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         if vnavs_mqtt.ARG_IMAGE_GET in self.args:
             self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
 
-        self.source_widget = self.statusFrame.AddDropDown(s_items=['local', 'bot'], command=self.SelectSource, row=SAME_ROW, col=NEXT_COL)
+        self.source_widget = self.statusFrame.AddDropDown(s_items=[SRC_LOCAL_CAMERA, SRC_BOT_CAMERA], command=self.OnSelectSource, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Continuous', command=self.ContinuousImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open File', command=self.OpenImageFile, row=SAME_ROW, col=NEXT_COL)
@@ -459,16 +460,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.statusFrame.AddButton('Save Process', command=self.SaveProcessFile, row=SAME_ROW, col=NEXT_COL)
 
         ProcessStep.app = self
-        ProcessStep('FileImage', opencv_fn=None)
         self.new_step = None
-        plus = self.notebook.AddTab('+')
-        self.notebook_add_id = self.notebook.tkw.tabs()[-1]
-        #ProcessStep('ColorBalance')
-        #ProcessStep('Crop')
-        #ProcessStep('BW')
-        #ProcessStep('Blur')
-        #ProcessStep('CannyAuto')
-        #ProcessStep('Contours')
 
     def OpenImageFile(self):
         fn = self.statusFrame.DoFileNameDialog()
@@ -477,13 +469,70 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         ProcessStep.steps[0].UpdateAll()
 
     def OpenProcessFile(self):
-        fn = self.statusFrame.DoFileNameDialog()
+        self.load_process_file_name = self.statusFrame.DoFileNameDialog(Dir=self.scriptsDir, FileTypes=ProcessStep.process_file_types)
+
+    # While interacting with the process the parms dictionary can get
+    # cluttered with values that are not needed for hte current filter. This 
+    # is intentional because it lets you go back to previous filter with the
+    # parms you had set. Save/LoadProcessFile keep thse dirty values. There
+    # is something to be said to filter the parts based on the current step.
+    def LoadProcessFile(self, fn):
+        # load_filter_name, load_parms and load_new_filter_ct are essentially local variables.
+        # They are made instance properties so they can be modified by AssignFilter() 
+        self.load_filter_name = None
+        self.load_parms = {}
+        self.load_new_filter_ct = 0
+        self.loading = True
+        def AssignFilter():
+            # We redefine the existing steps before creating new ones. This is done because if we try to delete all the
+            # existitng tabs, OnTabSelected() creates a default tab as soon as we delete the last one.
+            # This is neater than the options for modifying OnTabSelected() behavior and may be slightly
+            # more efficient.
+            self.load_new_filter_ct += 1
+            print("ASSIGN", self.load_filter_name, self.load_new_filter_ct)
+            if self.load_new_filter_ct <= len(ProcessStep.steps):
+                ProcessStep.steps[self.load_new_filter_ct-1].SetFilter(FilterName=self.load_filter_name, NewParms=self.load_parms)
+            else:
+                ProcessStep(FilterName=self.load_filter_name, Parms=self.load_parms, Where=self.notebook_add_id)
+            self.load_filter_name = None
+            self.load_parms = {}
+        # This needs error checking. Needs a mechanism for displaying errors to user.
+        # Parm values can be checked via GetParm()
+        f = open(fn, 'r')
+        for ln in f:
+            ln = ln.strip()
+            if ln == '':
+                continue
+            print("LOAD", self.load_filter_name, ln)
+            if ln[0] == '/':
+                if self.load_filter_name is not None:
+                    AssignFilter()
+                self.load_filter_name = ln[1:]
+            else:
+                sep = ln.find('=')
+                if sep > 0:
+                    key = ln[:sep][5:]				# eliminate "parm." prefix
+                    value = ln[sep+1:]
+                    self.load_parms[key] = value
+        if self.load_filter_name is not None:
+            AssignFilter()
+        f.close()
+        while len(ProcessStep.steps) > self.load_new_filter_ct:
+            # The old process had more steps than the current, get rid of the old steps.
+            ix = len(ProcessStep.steps) - 1
+            print("XXXX", ix)
+            self.DeleteProcessStep(ix)
+        self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)	# temporary - needs more optrions
+        ProcessStep.UpdateAll()
+        self.loading = False
 
     def SaveProcessFile(self):
-        f = open('test.dkm', 'w')
+        fn = self.statusFrame.DoFileSaveAsNameDialog(Dir=self.scriptsDir,
+							FileName=self.load_process_file_name,
+							FileTypes=ProcessStep.process_file_types)
+        f = open(fn, 'w')
         for this_step in ProcessStep.steps:
-            f.write(u'/Step\n')
-            f.write(u'cv_filter={}\n'.format(this_step.cv_filter))
+            f.write(u'/{}\n'.format(this_step.cv_filter))
             for this_key, this_value in this_step.parm_values.items():
                 f.write(u'parm.{}={}\n'.format(this_key, this_value))
         f.close()
@@ -491,16 +540,27 @@ class Darkroom(vnavs_mqtt.mqtt_node):
     def ContinuousImageFile(self):
         self.pic_continuous = True
 
-    def SelectSource(self, *args):
+    def OnSelectSource(self, *args):
         self.pic_source = self.source_widget.Value()
-        if self.pic_source == 'local':
+        if self.pic_source == SRC_LOCAL_CAMERA:
             self.local_cam = cameraman.macbook_camera()
-        elif self.pic_source == 'bot':
+        elif self.pic_source == SRC_BOT_CAMERA:
             self.ConnectToMqttServer()
 
-    def TabSelected(self, x):
+    def OnTabSelected(self, x):
+        # This ends up with the initial view being a default filter tab created here
+        # and the plus tab to add filters. When the page is initialialy displayed, the
+        # only tab that exists is the plus. It is automatically selected by TK, which
+        # executes this callback, creating the default filter as if the user had hit plus.
+        # This was unexpected but probably the best compromise.
+        #
+        # The above makes it impossible to delete all filter tabs. As soon as the last
+        # one is deleted, the plus tab is selected and we end up here, creating a default
+        # filter. Again not expected, but not a serious usability issue.
+        #
         tabid = self.notebook.tkw.select()
         if tabid == self.notebook_add_id:
+            # The plus tab was clicked, add a new tab just before that.
             # We want the new tab to be selected but TK ignores select() here,
             # because this is an on_select() callback. To get around this,
             # we set self.new_step and make the selection within update loop.
@@ -521,13 +581,25 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         ProcessStep.steps.pop(ix)
         for adjust_ix, this_step in enumerate(ProcessStep.steps[ix:]):
             this_step.ix = ix + adjust_ix
-            this_step.tab_title = "StepX %d" % (this_step.ix)
+            this_step.tab_title = "Step %d" % (this_step.ix)
             self.notebook.tkw.tab(ix, text=this_step.tab_title)
+        ProcessStep.steps[ix-1].SelectTab(None)
 
     def DoLoop(self):
+        if self.loading:
+            # This was added in order to avoid crashes due to trying to load images
+            # while a new process is being loaded. I am a little surprised that 
+            # we get here during that process.
+            return
+
         if self.delete_process_step_ix is not None:
             self.DeleteProcessStep(self.delete_process_step_ix)
         self.delete_process_step_ix = None
+
+        if self.load_process_file_name is not None:
+            print("LOAD PROCESS", len(ProcessStep.steps))
+            self.LoadProcessFile(self.load_process_file_name)
+        self.load_process_file_name = None
 
         if self.new_step is not None:
             self.new_step.SelectTab(None)
@@ -535,29 +607,35 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         new_image = None
         path = None
         if self.pic_continuous or self.pic_needed:
-            if self.pic_source == 'local':
+            if self.pic_source == SRC_LOCAL_CAMERA:
                 self.pic_needed = False				# don't process others until requested
-                new_image = self.local_cam.capture_opencv()
-            elif self.pic_source == 'bot':
+                new_image = self.local_cam.capture_image()
+            elif self.pic_source == SRC_BOT_CAMERA:
                 if self.last_pic_payload is not None:
                     self.pic_needed = False			# if single frame mode, mark done
                     payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
                     self.pic_fn = payload['filename']
-                    path = os.path.join(self.imageDir, self.pic_fn)
                     #print("ProcessImage()", self.pic_fn, path)
                     if self.pic_get:
+                        path = os.path.join(self.downloadDir, self.pic_fn)
                         if not self.file_client.GetFile(self.pic_fn, path=path):
                             print("Unable to fetch PIC", self.pic_fn)
                             return
-                    new_image = cv2.imread(path)
-            if new_image is not None:
-                ProcessStep.steps[0].opencv_im = new_image
-                ProcessStep.steps[0].parm_values['opencv_fn'] = path
+                    else:
+                        path = os.path.join(self.imageDir, self.pic_fn)
+            if (new_image is not None) or (path is not None):
+                new_parms = {}
                 if path is None:
-                    ProcessStep.steps[0].filter_selection.ReplaceValue('CapturedImage')
+                    new_filter = 'CapturedImage'
                 else:
-                    ProcessStep.steps[0].filter_selection.ReplaceValue('FileImage')
-                ProcessStep.steps[0].NewFilter()
+                    new_filter = 'FileImage'
+                    new_parms['opencv_fn'] = path
+                if len(ProcessStep.steps) == 0:
+                    ProcessStep(new_filter, Parms=new_parms, Where=self.notebook_add_id)
+                else:
+                    ProcessStep.steps[0].SetFilter(FilterName=new_filter, NewParms=new_parms)
+                ProcessStep.steps[0].source_im = new_image
+                ProcessStep.UpdateAll()
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

@@ -7,12 +7,25 @@ from builtins import (bytes, str, open, super, range,
 #from tkinter import ttk	# python 3
 #from tkinter import Canvas
 import cv2
-import tkFileDialog
-import Tkinter			# python 2.7
-import ScrolledText
-import ttk			# python 2.7 - Tk themed widget set
 from PIL import ImageTk, Image
 import os
+import sys
+
+if sys.version_info[0] < 3:
+    import Tkinter			# python 2.7
+    import ttk				# python 2.7 - Tk themed widget set
+    import ScrolledText
+    import tkFileDialog
+else:
+    import tkinter as Tkinter		# python 3.6
+    import tkinter.ttk as ttk
+    import tkinter.scrolledtext as ScrolledText
+    import tkinter.filedialog as tkFileDialog
+
+try:
+    import OpticChiasm
+except:
+    OpticChiasm = None
 
 SAME_ROW = -1
 NEXT_ROW = -2
@@ -25,18 +38,29 @@ EXTEND_COL = -4
 COL_SPAN_ALL = -1
 
 class TkWidgetDef(object):
-    root = None
-    debug_all = False
+    __slots__ = (
+		'bottom_row', 'canvas_height', 'canvas_width', 'children', 'col', 'col_span',
+		'debug_this',
+		'file_opt', 'hbar', 'is_container', 'is_initializing',
+		'last_used_col', 'last_used_colspan', 'last_used_row', 'last_used_rowspan',
+		'list_items',
+		'opencv_im', 'parm_id', 'pil_im', 'pil_resize_ratio', 'rgb_im', 'right_col', 'row', 'row_span',
+		'scroll_container', 'scrollable_image',
+		'thumbnail', 'thumbnail_width', 'tkd', 'tkw', 'tkw_label',
+		'vbar', 'wname'
+    )
 
     def __init__(self, wname, tkw, Data=None, tkw_label=None, parm_id=None, IsContainer=False, debug=None):
-        self.isContainer = IsContainer
+        self.is_container = IsContainer
+        self.is_initializing = True
         self.wname = wname		# reference name for this widget
         self.tkw = tkw			# tk widget
         self.tkw_label = tkw_label	# tk widget of associated label
         self.tkd = Data			# the tk data (usually StringVar) for this widget
+        self.scroll_container = None	# tk frame widget holding tkw plus scrollbars
         self.hbar = None
         self.vbar = None
-        self.opencv_im = None
+        self.rgb_im = None
         self.row = None			# row where positioned
         self.col = None			# col where positioned (left side)
         self.right_col = 0		# furthest right colum used
@@ -48,19 +72,13 @@ class TkWidgetDef(object):
         self.row_span = 0		# height of this TkWidgetDef object (# of rows)
         self.col_span = 0		# width of this TkWidgetDef object (# of columns)
         self.thumbnail = None		# update this thumbnail if image is changed
-        self.thumbnailwidth = 0		# width of thumbnail
+        self.thumbnail_width = 0	# width of thumbnail
         self.children = []
         self.canvas_width = 400
         self.canvas_height = 200
         self.parm_id = parm_id		# associated application field, not directly used for TK stuff
-        if TkWidgetDef.root is None:
-            TkWidgetDef.root = self
-            if debug is not None:
-                TkWidgetDef.debug_all = debug
-        if debug is None:
-            self.debug_this = TkWidgetDef.debug_all
-        else:
-            self.debug_this = debug
+        self.pil_resize_ratio = None
+        self.debug_this = debug
         self.file_opt = {}
         self.file_opt['defaultextension'] = '.txt'
         #specifying file types on OSX seems limit what can be selected
@@ -77,19 +95,32 @@ class TkWidgetDef(object):
 								self.last_used_row, self.last_used_col)
        return res
 
-    def DoFileNameDialog(self, Dir=None):
+    def FileDialogParms(self, FileName=None, Dir=None, FileTypes=None):
         self.file_opt['parent'] = self.tkw
+        if FileName is not None:
+            self.file_opt['initialfile'] = FileName
         if Dir is not None:
             self.file_opt['initialdir'] = Dir
+        if FileTypes is not None:
+            self.file_opt['filetypes'] = FileTypes
+
+    def DoFileNameDialog(self, Dir=None, FileTypes=None):
+        self.FileDialogParms(Dir=Dir, FileTypes=FileTypes)
         return tkFileDialog.askopenfilename(**self.file_opt)
 
-    def DoFileOpenDialog(self):
-        return tkFileDialog.askopenfile(mode='r', **self.file_opt)
+    def DoFileSaveAsNameDialog(self, FileName=None, Dir=None, FileTypes=None):
+        self.FileDialogParms(FileName=FileName, Dir=Dir, FileTypes=FileTypes)
+        return tkFileDialog.asksaveasfilename(**self.file_opt)
+
+    def DoFileOpenDialog(self, mode='r', Dir=None, FileTypes=None):
+        self.FileDialogParms(Dir=Dir, FileTypes=FileTypes)
+        return tkFileDialog.askopenfile(mode=mode, **self.file_opt)
 
     def Focus(self):
         self.tkw.focus()
 
     def Update(self):			# Process Tkinter events
+        self.is_initializing = False
         self.tkw.update()
 
     def AddButton(self, caption, command, row=NEXT_ROW, col=SAME_COL):
@@ -103,7 +134,7 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def AddEntryField(self, caption, width=10, value='', row=NEXT_ROW, col=SAME_COL):
+    def AddEntryField(self, caption, width=10, value='', row=NEXT_ROW, col=SAME_COL, OnDoubleClick=None):
         if self.debug_this:
             print("AddEntryField", row, col, caption)
         row, col = self.Position(row=row, col=col)
@@ -115,6 +146,8 @@ class TkWidgetDef(object):
         tk_label.grid(column=col, row=row, sticky=Tkinter.W)
         tk_entry = ttk.Entry(self.tkw, width=width, textvariable=tk_data)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
+        if OnDoubleClick is not None:
+            tk_entry.bind('<Double-Button-1>', OnDoubleClick)
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
         self.RememberPosition(frame, row, col, colspan=2)
         self.children.append(frame)
@@ -282,35 +315,34 @@ class TkWidgetDef(object):
             tk_label.grid(column=col, row=row, sticky=Tkinter.W)
 
         container = ttk.Frame(master=self.tkw, borderwidth=2, relief=Tkinter.SUNKEN)
-        container.grid_rowconfigure(0, weight=1)
-        container.grid_columnconfigure(0, weight=1)
-        container.grid(row=row, column=col+1)
-        if XSCROLL:
-            xscrollbar = ttk.Scrollbar(master=container, orient=Tkinter.HORIZONTAL)
-            xscrollbar.grid(row=1, column=0, sticky=Tkinter.E+Tkinter.W)
-        else:
-            xscrollbar = None
-        yscrollbar = ttk.Scrollbar(master=container, orient=Tkinter.VERTICAL)
-        yscrollbar.grid(row=0, column=1, sticky=Tkinter.N+Tkinter.S)
-        tkw = tk_widget_class(master=container, borderwidth=0, yscrollcommand=yscrollbar.set, **tk_widget_parms)
-        if XSCROLL:
-            tkw.config(xscrollcommand=xscrollbar.set)
-            xscrollbar.config(command=tkw.xview)
-        yscrollbar.config(command=tkw.yview)
-        parms = {'column': col+1, 'row': row, 'sticky': (Tkinter.W, Tkinter.E) }
-        if rowspan > 1:
-            parms['rowspan'] = rowspan
-        tkw.grid(row=0, column=0, sticky=Tkinter.N+Tkinter.S+Tkinter.E+Tkinter.W)
-        if OnClick is not None:
-            tkw.bind("<Button-1>", OnClick)
+        tkw = tk_widget_class(master=container, borderwidth=0, **tk_widget_parms)
         frame = TkWidgetDef(refname, tkw, tkw_label=tk_label)
-        frame.hbar = xscrollbar
-        frame.vbar = yscrollbar
+        frame.scroll_container = container		# may be needed to avoid garbage collection
+
+        if XSCROLL:
+            frame.hbar = ttk.Scrollbar(master=frame.scroll_container, orient=Tkinter.HORIZONTAL)
+            frame.hbar.grid(row=1, column=0, sticky=Tkinter.E+Tkinter.W)
+        else:
+            frame.hbar = None
+        frame.vbar = ttk.Scrollbar(master=frame.scroll_container, orient=Tkinter.VERTICAL)
+        frame.vbar.grid(row=0, column=1, sticky=Tkinter.N+Tkinter.S)
+        frame.tkw.config(yscrollcommand=frame.vbar.set)
+        frame.vbar.config(command=frame.tkw.yview)
+        if XSCROLL:
+            frame.tkw.config(xscrollcommand=frame.hbar.set)
+            frame.hbar.config(command=frame.tkw.xview)
+        frame.tkw.grid(row=0, column=0, sticky=Tkinter.N+Tkinter.S+Tkinter.E+Tkinter.W)
+        frame.scroll_container.grid_rowconfigure(0, weight=1)
+        frame.scroll_container.grid_columnconfigure(0, weight=1)
+        frame.scroll_container.grid(row=row, column=col+1)
+        if OnClick is not None:
+            frame.tkw.bind("<Button-1>", OnClick)
         self.RememberPosition(frame, row, col, rowspan=rowspan, colspan=2)
         self.children.append(frame)
         return frame
 
     def MakeThumbnail(self, im, width):
+        # im is an OpenCv / numpy buffer. It can be either RGB or BGR. The color format is not changed.
         if im is None:
             return None
         if len(im.shape) > 2:
@@ -372,7 +404,7 @@ class TkWidgetDef(object):
         new_TkWidgetDef.col_span = colspan
         new_TkWidgetDef.row_span = rowspan
         # Update container positioning to reflect this new widget
-        assert self.isContainer
+        assert self.is_container
         new_widget_right_col = col + colspan - 1
         new_widget_bottom_row = row + rowspan - 1
         self.last_used_row = row
@@ -396,7 +428,7 @@ class TkWidgetDef(object):
         frame = self.AddScrolledWidget(Tkinter.Canvas, {'width': width, 'height': height},
 						OnClick=OnClick,
 						row=row, col=col, rowspan=rowspan, XSCROLL=True)
-        frame.scrollableImage = None
+        frame.scrollable_image = None
         frame.canvas_width = width
         frame.canvas_height = height
 
@@ -405,9 +437,9 @@ class TkWidgetDef(object):
                 frame.UpdateImage(pil_fn=pil_fn, opencv_im=opencv_im, opencv_fn=opencv_fn)
             else:
                 # after this, the thumbnail will be automatically updated whenever the base image is updated
-                frame.UpdateImage(opencv_im=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
+                frame.UpdateImage(rgb_im=self.MakeThumbnail(thumbnailof.rgb_im, thumbnailwidth))
                 thumbnailof.thumbnail = frame
-                thumbnailof.thumbnailwidth = thumbnailwidth
+                thumbnailof.thumbnail_width = thumbnailwidth
 
         return frame
 
@@ -420,48 +452,57 @@ class TkWidgetDef(object):
             frame.UpdateImage(pil_fn=pil_fn, opencv_im=opencv_im, opencv_fn=opencv_fn)
         else:
             # after this, the thumbnail will be automatically updated whenever the base image is updated
-            frame.UpdateImage(opencv_im=self.MakeThumbnail(thumbnailof.opencv_im, thumbnailwidth))
+            frame.UpdateImage(rgb_im=self.MakeThumbnail(thumbnailof.rgb_im, thumbnailwidth))
             thumbnailof.thumbnail = frame
-            thumbnailof.thumbnailwidth = thumbnailwidth
+            thumbnailof.thumbnail_width = thumbnailwidth
 
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
         self.RememberPosition(frame, row, col, colspan=colspan)
         self.children.append(frame)
         return frame
 
-    def UpdateImage(self, pil_fn=None, opencv_im=None, opencv_fn=None):
+    def UpdateImage(self, pil_fn=None, source_im=None, opencv_fn=None, rgb_im=None):
         # Replaces image in Canvas and Label widgets
         # We can have up to 3 stages of image buffers. We keep references to all
         # for debugging and becaues of some strange garbage collection issues with
         # TK images.
         # self.tkd is ImageTk.PhotoImage() which actually gets placed on widget
         # self.pil_im is a Pillow Image() which TK directly uses
-        # self.opencv_im is an OpenCV buffer for JPEG (or other) files
+        # self.source_im is either an OpenCV buffer or an OpticChiasm.Image for JPEG (or other) files
         #
         self.pil_im = None
-        self.opencv_im= None
+        self.rgb_im= None
         if pil_fn is not None:
             try:
                 self.pil_im = Image.open(pil_fn)
             except IOError:
                 self.pil_im = None
-            self.opencv_im = None
-        elif opencv_im is not None:
-            self.pil_im = Image.fromarray(opencv_im)
-            self.opencv_im = opencv_im
+            self.rgb_im = None
+        elif rgb_im is not None:
+            self.rgb_im = rgb_im
+            self.pil_im = Image.fromarray(self.rgb_im)
+        elif source_im is not None:
+            if (OpticChiasm is None) or (not isinstance(source_im, OpticChiasm.Image)):
+                self.rgb_im = cv2.cvtColor(source_im, cv2.COLOR_BGR2RGB)
+            else:
+                self.rgb_im = source_im.ImAsRGB()
+            self.pil_im = Image.fromarray(self.rgb_im)
         elif opencv_fn is not None:
             print("***", os.getcwd(), opencv_fn)
-            self.opencv_im = cv2.imread(opencv_fn)
-            self.pil_im = Image.fromarray(self.opencv_im)
+            opencv_im = cv2.imread(opencv_fn)
+            self.rgb_im = cv2.cvtColor(opencv_im, cv2.COLOR_BGR2RGB)
+            self.pil_im = Image.fromarray(self.rgb_im)
         #
         if self.pil_im is None:
-            print("UpdateImage() unable to create PILLOW image object", pil_fn, opencv_fn, opencv_im.__class__.__name__)
+            print("UpdateImage() unable to create PILLOW image object", pil_fn, opencv_fn, source_im.__class__.__name__)
             # should blank thumbnail here
             return False
         imWidth = self.pil_im.width
+        self.pil_resize_ratio = None
         if self.canvas_width < imWidth:
+            self.pil_resize_ratio = float(self.canvas_width) / float(imWidth)
             imHeight = self.pil_im.height
-            height = int((self.canvas_width / imWidth) * imHeight)
+            height = int(self.pil_resize_ratio * imHeight)
             self.pil_im = self.pil_im.resize((self.canvas_width, height))
             #print("RESIZE", self.canvas_width, height)
         self.tkd = ImageTk.PhotoImage(self.pil_im)
@@ -472,13 +513,13 @@ class TkWidgetDef(object):
         if isinstance(self.tkw, ttk.Label):
             self.tkw.configure(image=self.tkd)
         elif isinstance(self.tkw, Tkinter.Canvas):
-            if self.scrollableImage is None:
-                self.scrollableImage = self.tkw.create_image(0, 0, image=self.tkd, anchor='nw')
+            if self.scrollable_image is None:
+                self.scrollable_image = self.tkw.create_image(0, 0, image=self.tkd, anchor='nw')
             else:
-                self.tkw.itemconfig(self.scrollableImage, image=self.tkd)
+                self.tkw.itemconfig(self.scrollable_image, image=self.tkd)
             width, height = self.pil_im.size
             self.tkw.config(scrollregion=(0, 0, width, height))
-            pctWidth = self.canvas_width / width
+            pctWidth = float(self.canvas_width) / float(width)
             if pctWidth > 1.0:
                 pctWidth = 1.0
             self.hbar.set(0.0, pctWidth)
@@ -490,7 +531,7 @@ class TkWidgetDef(object):
         else:
             raise TypeError("Unsupported image widget: " + self.tkw.__class__.__name__)
         if self.thumbnail:
-            return self.thumbnail.UpdateImage(opencv_im=self.MakeThumbnail(self.opencv_im, self.thumbnailwidth))
+            return self.thumbnail.UpdateImage(rgb_im=self.MakeThumbnail(self.rgb_im, self.thumbnail_width))
         else:
             return True
 
@@ -532,7 +573,7 @@ class TkWidgetDef(object):
         self.tkw.forget(ix)
         self.children.pop(ix)
 
-    def AddTab(self, caption, Where=None):
+    def AddTab(self, caption, Where=None, OnClick=None):
         # Add a tab to notebook
         refname = caption.lower().replace(' ', '_')
         frame = TkWidgetDef(refname, ttk.Frame(self.tkw), IsContainer=True)
@@ -540,9 +581,12 @@ class TkWidgetDef(object):
             self.tkw.add(frame.tkw, text=caption)
         else:
             self.tkw.insert(Where, frame.tkw, text=caption)
+        if OnClick is not None:
+            frame.tkw.bind('<Button-1>', OnClick)
         self.children.append(frame)
         return frame
 
 class EasyTk(TkWidgetDef):
+    __slots__ = ()
     def __init__(self, debug=False):
         super().__init__('root', Tkinter.Tk(), IsContainer=True, debug=debug)
