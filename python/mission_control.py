@@ -238,7 +238,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             if not self.file_client.GetFile(self.pic_fn, path=path):
                 print("Unable to fetch PIC", self.pic_fn)
                 return
-        self.f1_img1.UpdateImage(fn=path)
+        self.f1_img1.UpdateImage(opencv_fn=path)
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.pic_fn = None
         self.pic_processed = True
