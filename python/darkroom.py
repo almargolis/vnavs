@@ -386,8 +386,8 @@ class ProcessStep(object):
             try:
                 exec(exec_code_str, exec_global_vars)
             except:
-                print(trace)
                 trace = traceback.format_exc()
+                print(trace)
         if self.cv_specs.annotate_code is None:
             if self.exec_im is None:
                 self.exec_annotated = base_image
@@ -466,6 +466,15 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
         ProcessStep.app = self
         self.new_step = None
+
+    def ConfigureCamera(self):
+        print("ConfigureCamera", self.pic_source, SRC_BOT_CAMERA)
+        payload = {}
+        payload['iso'] = self.camera_iso.Value()
+        payload['shutter_speed'] = self.camera_shutter_speed.Value()
+        if self.pic_source == SRC_BOT_CAMERA:
+            print(payload)
+            self.Publish(vconst.cameraman_orders_topic, payload)
 
     def ConfigureImageSource(self, new_filter, path=None, new_image=None):
         new_parms = {}
@@ -548,6 +557,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
     def OnCaptureImage(self):
         print("OnCaptureImage()")
+        self.ConfigureCamera()					# we don't wait for this to take effect
         self.pic_needed = True
         self.pic_continuous = False
         if self.source_widget.Value() is None:
@@ -558,6 +568,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         print("FILTER", ProcessStep.steps[0].filter_selection.Value())
 
     def OnContinuousImage(self):
+        self.ConfigureCamera()					# we don't wait for this to take effect
         self.pic_continuous = True
         if self.source_widget.Value() is None:
             self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
@@ -648,6 +659,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
                             return
                     else:
                         path = os.path.join(self.imageDir, self.pic_fn)
+                    iso = payload['iso']
+                    shutter_speed = payload['shutter_speed']
+                    print("CAM", iso, shutter_speed)
             if (new_image is not None) or (path is not None):
                 new_parms = {}
                 if path is None:
