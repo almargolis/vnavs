@@ -159,6 +159,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.camera.vflip = True
         self.camera.hflip = True
         self.camera.iso = self.iso
+        self.do_auto_iso = False
         self.idle_image_id = 0
         self.idle_image_id_max = 20
         self.iso = self.camera.iso
@@ -212,6 +213,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     setattr(self, key, value)
 
     def rmsg_cameraman_orders(self, payload):
+        print(payload)
         self.ValidateMessage(self.orders_parms, payload)
 
     def DoLoop(self):
@@ -288,6 +290,21 @@ class cameraman(vnavs_mqtt.mqtt_node):
         payload['filename'] = self.last_fn
         payload['format'] = self.last_format
         self.Publish('last', payload)
+
+    def AutoIso(self, img):
+        bw = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        hist = cv2.calcHist([bw], [0], None, [256], [0,256])
+        rows, cols = bw.shape
+        hist_limit = (rows * cols) * 0.5
+        pixel_sum = 0
+        for ix, this in enumerate(hist):
+            pixel_sum += this
+            if pixel_sum > hist_limit:
+                break
+        if ix < 100:
+            self.iso += 100
+        if self.iso > 800:
+            self.iso = 800
 
     def ImageBurst(self):
         # establish paramters for this burst. Since MQTT is running in a separate thread
@@ -411,6 +428,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             if self.camera.iso != self.iso:
                 # The camera may not use the exact ISO specified. Save the corrected value in
                 # self.iso so we don't keep repeating the request.
+                print("CHANGING ISO", self.camera.iso, self.iso)
                 self.camera.iso = self.iso
                 self.iso = self.camera.iso
             if self.camera.shutter_speed != self.shutter_speed:
@@ -422,19 +440,8 @@ class cameraman(vnavs_mqtt.mqtt_node):
             if burst_loop_mode == 'idle':
                 #print("END IDLE")
                 # need conditional to determin conversion paramter for different formats
-                bw = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                hist = cv2.calcHist([bw], [0], None, [256], [0,256])
-                rows, cols = bw.shape
-                hist_limit = (rows * cols) * 0.5
-                pixel_sum = 0
-                for ix, this in enumerate(hist):
-                    pixel_sum += this
-                    if pixel_sum > hist_limit:
-                        break
-                if ix < 100:
-                    self.iso += 100
-                if self.iso > 800:
-                    self.iso = 800
+                if self.do_auto_iso:
+                    self.AutoIso(img)
                 # idle takes one image per "burst". Mainly to control file names.
                 break
             if burst_loop_mode == 'single':
