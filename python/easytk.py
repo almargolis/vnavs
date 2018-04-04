@@ -153,22 +153,32 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def ReplaceValue(self, value, Caption=None):
+    def ReplaceValue(self, new_value, Caption=None):
+        debug = "ReplaceValue({0}): tkw {1} '{2}' -- ".format(new_value, self.tkw.__class__.__name__, self.Value())
+        if self.tkd is None:
+            debug += 'None'
+        elif isinstance(self.tkd, Tkinter.StringVar):
+            debug += "StringVar '{0}".format(self.tkd.get())
+        else:
+            debug += "{0} '{1}'".format(self.tkd.__class__.__name__, `self.tkd`)
+        print(debug)
+        
         if isinstance(self.tkw, ScrolledText.ScrolledText):
             self.tkw.delete("1.0", Tkinter.END)
-            self.tkw.insert("1.0", value)
+            self.tkw.insert("1.0", new_value)
         elif isinstance(self.tkw, ttk.Label):
-            self.tkw.config(text=value)
+            self.tkw.config(text=new_value)
         elif isinstance(self.tkw, Tkinter.Listbox):
             # clear current selection first, else multi-selection occurs
             cur_selection = self.tkw.curselection()
             self.tkw.select_clear(cur_selection)
-            ix = self.list_items.index(value)
+            ix = self.list_items.index(new_value)
             self.tkw.selection_set(ix)
             self.tkw.see(ix)
         else:
+            # For many/most widgets, the value is in the self.tkd StringVar
             if isinstance(self.tkd, Tkinter.StringVar):
-                self.tkd.set(value)
+                self.tkd.set(new_value)
         if Caption is not None:
             self.tkw_label.config(text=Caption)
 
@@ -181,8 +191,13 @@ class TkWidgetDef(object):
             # This works for now.
             ix = self.tkw.curselection()
             return self.tkw.get(ix)
+        # For many/most widgets, the value is in the self.tkd StringVar
         if isinstance(self.tkd, Tkinter.StringVar):
             v = self.tkd.get()
+            if isinstance(self.tkw, Tkinter.OptionMenu) and (v == 'None'):
+                # I'm not sure if its me or Tkinter that turned no selection to a string
+                v = None
+            print("Value() tkd '{0}'".format(v))
             return v
 
     def AddScrolledEntryField(self, caption, width=10, height=5, value='', row=NEXT_ROW, col=SAME_COL):
@@ -449,7 +464,7 @@ class TkWidgetDef(object):
         row, col = self.Position(row=row, col=col)
         frame = TkWidgetDef('', ttk.Label(self.tkw))
         if thumbnailof is None:
-            frame.UpdateImage(pil_fn=pil_fn, opencv_im=opencv_im, opencv_fn=opencv_fn)
+            frame.UpdateImage(pil_fn=pil_fn, source_im=opencv_im, opencv_fn=opencv_fn)
         else:
             # after this, the thumbnail will be automatically updated whenever the base image is updated
             frame.UpdateImage(rgb_im=self.MakeThumbnail(thumbnailof.rgb_im, thumbnailwidth))

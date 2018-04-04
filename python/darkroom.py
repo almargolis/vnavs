@@ -78,6 +78,12 @@ class FilterParmPointSym(FilterParm):
 #	xstep.im
 # GetParm() must filter parameters to avoid code injection attacks
 
+GUI_FILTER_FileImage = 'FileImage'
+GUI_FILTER_CapturedImage = 'CapturedImage'
+
+SRC_LOCAL_CAMERA = 'local'
+SRC_BOT_CAMERA = 'bot'
+
 class ImageFilter(object):
     filters = {}
     filter_names = []
@@ -97,7 +103,7 @@ class ImageFilter(object):
 #	previous step exec_im and its shape as im, h, w and c,
 #	xstep is the current ProcessStep() with exec_im set to None.
 #
-ImageFilter('CapturedImage',
+ImageFilter(GUI_FILTER_CapturedImage,
 			'xstep.exec_im = xstep.source_im.copy()',
 			[],
 			Flags=['isbase'])
@@ -109,7 +115,7 @@ ImageFilter('ColorMask',
                                 FilterParmStr('colors', 'oc.HSV_WHITE, oc.HSV_RED')],
                         Flags=[])
 
-ImageFilter('FileImage',
+ImageFilter(GUI_FILTER_FileImage,
 			"xstep.exec_im = oc.Image(opencv_fn='{opencv_fn}')",
 			[FilterParmStr('opencv_fn', '')],
 			Flags=['isbase'])
@@ -318,6 +324,7 @@ class ProcessStep(object):
             new_filter = FilterName
         #print("SetFilter()", new_filter,  self.cv_filter)
         if new_filter != self.cv_filter:
+            self.filter_selection.ReplaceValue(new_filter)
             self.cv_filter = new_filter
             self.cv_specs = ImageFilter.filters[self.cv_filter]
             self.parms_specs = self.cv_specs.parms
@@ -392,8 +399,6 @@ class ProcessStep(object):
         self.image_widget.UpdateImage(source_im=self.exec_annotated)
         return
 
-SRC_LOCAL_CAMERA = 'local'
-SRC_BOT_CAMERA = 'bot'
 
 class Darkroom(vnavs_mqtt.mqtt_node):
     __slots__ = (
@@ -453,19 +458,23 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
 
         self.source_widget = self.statusFrame.AddDropDown(s_items=[SRC_LOCAL_CAMERA, SRC_BOT_CAMERA], command=self.OnSelectSource, row=SAME_ROW, col=NEXT_COL)
-        self.statusFrame.AddButton('Capture', command=self.CaptureImageFile, row=SAME_ROW, col=NEXT_COL)
-        self.statusFrame.AddButton('Continuous', command=self.ContinuousImageFile, row=SAME_ROW, col=NEXT_COL)
-        self.statusFrame.AddButton('Open File', command=self.OpenImageFile, row=SAME_ROW, col=NEXT_COL)
+        self.statusFrame.AddButton('Capture', command=self.OnCaptureImage, row=SAME_ROW, col=NEXT_COL)
+        self.statusFrame.AddButton('Continuous', command=self.OnContinuousImage, row=SAME_ROW, col=NEXT_COL)
+        self.statusFrame.AddButton('Open File', command=self.OnOpenImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open Process', command=self.OpenProcessFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Save Process', command=self.SaveProcessFile, row=SAME_ROW, col=NEXT_COL)
 
         ProcessStep.app = self
         self.new_step = None
 
-    def OpenImageFile(self):
-        fn = self.statusFrame.DoFileNameDialog()
-        ProcessStep.steps[0].filter = 'FileImage'
-        ProcessStep.steps[0].parm_values['opencv_fn'] = fn
+    def ConfigureImageSource(self, new_filter, path=None, new_image=None):
+        new_parms = {}
+        new_parms['opencv_fn'] = path
+        if len(ProcessStep.steps) == 0:
+            ProcessStep(new_filter, Parms=new_parms, Where=self.notebook_add_id)
+        else:
+            ProcessStep.steps[0].SetFilter(FilterName=new_filter, NewParms=new_parms)
+        ProcessStep.steps[0].source_im = new_image
         ProcessStep.steps[0].UpdateAll()
 
     def OpenProcessFile(self):
@@ -537,8 +546,28 @@ class Darkroom(vnavs_mqtt.mqtt_node):
                 f.write(u'parm.{}={}\n'.format(this_key, this_value))
         f.close()
 
-    def ContinuousImageFile(self):
+    def OnCaptureImage(self):
+        print("OnCaptureImage()")
+        self.pic_needed = True
+        self.pic_continuous = False
+        if self.source_widget.Value() is None:
+            print("On Capture update source")
+            self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
+        self.ConfigureImageSource(GUI_FILTER_CapturedImage)
+        print("SOURCE", self.source_widget.Value())
+        print("FILTER", ProcessStep.steps[0].filter_selection.Value())
+
+    def OnContinuousImage(self):
         self.pic_continuous = True
+        if self.source_widget.Value() is None:
+            self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
+        self.ConfigureImageSource(GUI_FILTER_CapturedImage)
+
+    def OnOpenImageFile(self):
+        self.pic_continuous = False
+        self.pic_needed = False
+        fn = self.statusFrame.DoFileNameDialog()
+        self.ConfigureImageSource(GUI_FILTER_FileImage, path=fn)
 
     def OnSelectSource(self, *args):
         self.pic_source = self.source_widget.Value()
@@ -566,10 +595,6 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             # we set self.new_step and make the selection within update loop.
             self.new_step = ProcessStep(Where=tabid)
 
-    def CaptureImageFile(self):
-        self.pic_needed = True
-        self.pic_continuous = False
-        return
 
     def rmsg_cameraman_pic_ready(self, payload):
         # Do as little as possible here in mqtt thread.
@@ -626,16 +651,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             if (new_image is not None) or (path is not None):
                 new_parms = {}
                 if path is None:
-                    new_filter = 'CapturedImage'
+                    self.ConfigureImageSource(GUI_FILTER_CapturedImage, path=path, new_image=new_image)
                 else:
-                    new_filter = 'FileImage'
-                    new_parms['opencv_fn'] = path
-                if len(ProcessStep.steps) == 0:
-                    ProcessStep(new_filter, Parms=new_parms, Where=self.notebook_add_id)
-                else:
-                    ProcessStep.steps[0].SetFilter(FilterName=new_filter, NewParms=new_parms)
-                ProcessStep.steps[0].source_im = new_image
-                ProcessStep.UpdateAll()
+                    self.ConfigureImageSource(GUI_FILTER_FileImage, path=path, new_image=new_image)
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
