@@ -54,6 +54,7 @@ class macbook_camera(object):
         self.hflip = False
         self.vflip = False
         self.resolution = resolution
+        self.shutter_speed = 0
         self.source_fn = source_fn
         self.device_id = device_id
         if self.source_fn is not None:
@@ -75,10 +76,17 @@ class macbook_camera(object):
     def iso(self, value):
         self._iso = value
 
+    def read(self):
+        ret, frame = self._video.read()
+        if frame is not None:
+            self._iso = self._video.get(cv2.CAP_PROP_ISO_SPEED)
+            self.shutter_speed = self._video.get(cv2.CAP_PROP_EXPOSURE)
+        return ret, frame
+
     def capture(self, output, format=None, use_video_port=False, resize=None, splitter_port=0, bayer=False, **options):
         assert isinstance(output, basestring)
         assert format == 'jpeg'
-        ret, frame = self._video.read()
+        ret, frame = self.read()
         if frame is None:
             return False
         if isinstance(output, basestring):
@@ -89,11 +97,11 @@ class macbook_camera(object):
             return False
 
     def capture_opencv(self):
-        ret, frame = self._video.read()
+        ret, frame = self.read()
         return frame
 
     def capture_image(self):
-        ret, frame = self._video.read()
+        ret, frame = self.read()
         return OpticChiasm.Image(im=frame, colorcode=OpticChiasm.IM_BGR)
 
     def capture_continuous(self, output, format=None, use_video_port=False, resize=None, splitter_port=0, burst=False, bayer=False, **options):

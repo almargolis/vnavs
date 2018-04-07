@@ -18,7 +18,7 @@ import numpy as np
 
 import cameraman
 import easytk
-from easytk import SAME_ROW, NEXT_ROW, NEXT_COL
+from easytk import SAME_ROW, NEXT_ROW, SAME_COL, NEXT_COL, LEFT_COL, RIGHT_COL
 import OpticChiasm
 import vnavs_mqtt
 import vnavs_const as vconst
@@ -216,7 +216,7 @@ class ProcessStep(object):
 			'deposition', 
 			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_im', 'exec_lines',
 			'filter_selection',
-			'image_widget', 'input_panel', 'ix', 'output_panel', 
+			'image_widget', 'info_data', 'info_widgets', 'input_panel', 'ix', 'output_panel', 
 			'parm_entries', 'parm_values', 'parms_specs', 'point_target', 'source_im', 'tab', 'tab_title', 'thumbnail'
 		)
     app = None
@@ -235,7 +235,15 @@ class ProcessStep(object):
         self.input_panel = self.tab.AddLabelFrame('Input')
         self.output_panel = self.tab.AddLabelFrame('Output')
         #
+        # input_panel
+        #
         self.filter_selection = self.input_panel.AddListbox('Filters', ImageFilter.filter_names, Selection=FilterName, command=self.NewFilter, rowspan=4)
+        self.info_data = []
+        self.info_widgets = []
+        for ix in range(4):
+            info_label = self.input_panel.AddLabel('', row=NEXT_ROW, col=LEFT_COL)
+            info_value = self.input_panel.AddLabel('', row=SAME_ROW, col=NEXT_COL)
+            self.info_widgets.append((info_label, info_value))
         self.parm_entries = []
         self.parm_entries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL, OnDoubleClick=self.OnPickPoint))
         parm_col = self.parm_entries[0].col
@@ -244,6 +252,8 @@ class ProcessStep(object):
         self.parm_entries.append(self.input_panel.AddEntryField('Parm4', col=parm_col))
         self.input_panel.AddButton('Delete Step', command=self.OnDeleteStep, col=parm_col)
         #
+        # output_panel
+        #
         self.image_widget = self.output_panel.AddCanvas(OnClick=self.ZoomPopup)
         self.deposition = self.output_panel.AddLabel(row=0, col=2)
         self.thumbnail = self.app.thumbnailFrame.AddLabelImage(thumbnailof=self.image_widget, row=0, col=NEXT_COL)
@@ -251,6 +261,12 @@ class ProcessStep(object):
         self.source_im = None			# captured image
         self.point_target = None
         self.SetFilter()
+
+    def ClearInfo(self):
+        self.info_data = []
+
+    def AddInfo(self, label, value):
+        self.info_data.append((label, value))
 
     def OnPickPoint(self, event):
         # event.widget is the tkw object. We could use that to use this
@@ -365,6 +381,14 @@ class ProcessStep(object):
             if this.exec_hierarchy is not None:
                 exec_global_vars['hierarchy_in'] = this.exec_hierarchy
 
+        for ix, this in enumerate(self.info_widgets):
+            if ix < len(self.info_data):
+                this[0].ReplaceValue(self.info_data[ix][0])
+                this[1].ReplaceValue(self.info_data[ix][1])
+            else:
+                this[0].ReplaceValue('')
+                this[1].ReplaceValue('')
+
         code_substitutions = {}
         for this_parm in self.parms_specs:
             raw_value = self.parm_values[this_parm.name]
@@ -476,7 +500,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             print(payload)
             self.Publish(vconst.cameraman_orders_topic, payload)
 
-    def ConfigureImageSource(self, new_filter, path=None, new_image=None):
+    def ConfigureImageSource(self, new_filter, path=None, new_image=None, iso=None, shutter_speed=None):
         new_parms = {}
         new_parms['opencv_fn'] = path
         if len(ProcessStep.steps) == 0:
@@ -484,6 +508,11 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         else:
             ProcessStep.steps[0].SetFilter(FilterName=new_filter, NewParms=new_parms)
         ProcessStep.steps[0].source_im = new_image
+        ProcessStep.steps[0].ClearInfo()
+        if iso is not None:
+            ProcessStep.steps[0].AddInfo('ISO', iso)
+        if shutter_speed is not None:
+            ProcessStep.steps[0].AddInfo('Shutter', shutter_speed)
         ProcessStep.steps[0].UpdateAll()
 
     def OpenProcessFile(self):
@@ -642,10 +671,14 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             self.new_step = None
         new_image = None
         path = None
+        iso = None
+        shutter_speed = None
         if self.pic_continuous or self.pic_needed:
             if self.pic_source == SRC_LOCAL_CAMERA:
                 self.pic_needed = False				# don't process others until requested
                 new_image = self.local_cam.capture_image()
+                iso = self.local_cam.iso
+                shutter_speed = self.local_cam.shutter_speed
             elif self.pic_source == SRC_BOT_CAMERA:
                 if self.last_pic_payload is not None:
                     self.pic_needed = False			# if single frame mode, mark done
@@ -665,9 +698,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             if (new_image is not None) or (path is not None):
                 new_parms = {}
                 if path is None:
-                    self.ConfigureImageSource(GUI_FILTER_CapturedImage, path=path, new_image=new_image)
+                    self.ConfigureImageSource(GUI_FILTER_CapturedImage, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)
                 else:
-                    self.ConfigureImageSource(GUI_FILTER_FileImage, path=path, new_image=new_image)
+                    self.ConfigureImageSource(GUI_FILTER_FileImage, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

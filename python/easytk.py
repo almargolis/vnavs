@@ -34,6 +34,7 @@ EXTEND_ROW = -4
 SAME_COL = -1
 NEXT_COL = -2
 RIGHT_COL = -3
+LEFT_COL = -1
 EXTEND_COL = -4
 COL_SPAN_ALL = -1
 
@@ -123,36 +124,72 @@ class TkWidgetDef(object):
         self.is_initializing = False
         self.tkw.update()
 
-    def AddButton(self, caption, command, row=NEXT_ROW, col=SAME_COL):
+    def Position(self, row=NEXT_ROW, col=-SAME_COL):
+        # This makes convenient substitutions for special, negative values.
+        # Positive or zero values are unchanged since they are specified positions.
+        # SAME_ROW/COL and NEXT_ROW/COL are relative to last component placed, which may 
+        # not be sequential. The others are relative to the extents of component.
+        # This is called in the context of a container for the component thas is about to be created.
+        if row == SAME_ROW:
+            # same row as the previous item, fixup initial value for first row.
+            if self.last_used_row < 0:
+                self.last_used_row = 0
+            row = self.last_used_row
+        elif row == NEXT_ROW:
+            # next sequential row
+            row = self.last_used_row + self.last_used_rowspan
+            self.last_used_rowspan = 1
+            self.last_used_col = -1		# initialize column for new row
+            self.last_used_colspan = 1
+        elif row == BOTTOM_ROW:
+            # row below everything else
+            row = self.bottom_row
+        elif row == EXTEND_ROW:
+            # row below everything else
+            row = self.bottom_row + 1
+        if col == SAME_COL:
+            # use current column, fixup initial value for first column.
+            if self.last_used_col < 0:
+                self.last_used_col = 0
+            col = self.last_used_col
+        elif col == NEXT_COL:
+            col = self.last_used_col + self.last_used_colspan
+        elif col == RIGHT_COL:
+            col = self.right_col
+        elif col == LEFT_COL:
+            col = 0
+        elif col == EXTEND_COL:
+            # use next column to right of everything else.
+            # If components are placed sequentially, this is the same as NEXT_COL.
+            col = self.right_col + 1
+        return (row, col)
+
+    def RememberPosition(self, new_TkWidgetDef, row, col, colspan=1, rowspan=1):
+        # Update the new widgets position info.
+        # Theses properties are relative to the container, ususally set by Position().
+        # The last_used_XXX properties and corresponding NEXT_XXX position
+        # substitutions work only when doing a rectangular grid, layed out by 
+        # rows and left to right within each row.
+        new_TkWidgetDef.row = row
+        new_TkWidgetDef.col = col
+        new_TkWidgetDef.col_span = colspan
+        new_TkWidgetDef.row_span = rowspan
+        # Update container positioning to reflect this new widget
+        assert self.is_container
+        new_widget_right_col = col + colspan - 1
+        new_widget_bottom_row = row + rowspan - 1
+        self.last_used_row = row
+        if rowspan > self.last_used_rowspan:
+            self.last_used_rowspan  = rowspan		# track deepest widget per row
+        self.last_used_col = col
+        self.last_used_colspan = colspan
+        if new_widget_bottom_row > self.bottom_row:
+            self.bottom_row = new_widget_bottom_row
+        if new_widget_right_col > self.right_col:
+            self.right_col = new_widget_right_col
         if self.debug_this:
-            print("AddButton", row, col, caption)
-        row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
-        frame = TkWidgetDef(refname, ttk.Button(self.tkw, text=caption, command=command))
-        frame.tkw.grid(row=row, column=col)
-        self.RememberPosition(frame, row, col)
-        self.children.append(frame)
-        return frame
-
-    def AddEntryField(self, caption, width=10, value='', row=NEXT_ROW, col=SAME_COL, OnDoubleClick=None):
-        if self.debug_this:
-            print("AddEntryField", row, col, caption)
-        row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
-
-        tk_data = Tkinter.StringVar()
-        tk_data.set(value)
-        tk_label = ttk.Label(self.tkw, text=caption)
-        tk_label.grid(column=col, row=row, sticky=Tkinter.W)
-        tk_entry = ttk.Entry(self.tkw, width=width, textvariable=tk_data)
-        tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
-        if OnDoubleClick is not None:
-            tk_entry.bind('<Double-Button-1>', OnDoubleClick)
-        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
-        self.RememberPosition(frame, row, col, colspan=2)
-        self.children.append(frame)
-        return frame
-
+            print("RememberPosition/new", new_TkWidgetDef.ReprPos())
+            print("RememberPosition/parent", self.ReprPos())
     def ReplaceValue(self, new_value, Caption=None):
         debug = "ReplaceValue({0}): tkw {1} '{2}' -- ".format(new_value, self.tkw.__class__.__name__, self.Value())
         if self.tkd is None:
@@ -199,6 +236,36 @@ class TkWidgetDef(object):
                 v = None
             print("Value() tkd '{0}'".format(v))
             return v
+
+    def AddButton(self, caption, command, row=NEXT_ROW, col=SAME_COL):
+        if self.debug_this:
+            print("AddButton", row, col, caption)
+        row, col = self.Position(row=row, col=col)
+        refname = caption.lower().replace(' ', '_')
+        frame = TkWidgetDef(refname, ttk.Button(self.tkw, text=caption, command=command))
+        frame.tkw.grid(row=row, column=col)
+        self.RememberPosition(frame, row, col)
+        self.children.append(frame)
+        return frame
+
+    def AddEntryField(self, caption, width=10, value='', row=NEXT_ROW, col=SAME_COL, OnDoubleClick=None):
+        if self.debug_this:
+            print("AddEntryField", row, col, caption)
+        row, col = self.Position(row=row, col=col)
+        refname = caption.lower().replace(' ', '_')
+
+        tk_data = Tkinter.StringVar()
+        tk_data.set(value)
+        tk_label = ttk.Label(self.tkw, text=caption)
+        tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+        tk_entry = ttk.Entry(self.tkw, width=width, textvariable=tk_data)
+        tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
+        if OnDoubleClick is not None:
+            tk_entry.bind('<Double-Button-1>', OnDoubleClick)
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
+        self.RememberPosition(frame, row, col, colspan=2)
+        self.children.append(frame)
+        return frame
 
     def AddScrolledEntryField(self, caption, width=10, height=5, value='', row=NEXT_ROW, col=SAME_COL):
         if self.debug_this:
@@ -247,7 +314,7 @@ class TkWidgetDef(object):
         frame = TkWidgetDef(refname, top, IsContainer=True)
         return frame
 
-    def AddLabel(self, text='', width=10, value='', row=NEXT_ROW, col=SAME_COL):
+    def AddLabel(self, text='', width=10, row=NEXT_ROW, col=SAME_COL):
         # An alternate method would be to create a TK StringVar and when creating the label
         # use the textvariable property instead of text. Visually this shouldn't be any different.
         # The update process would be a bit different in some cases because the label would 
@@ -370,70 +437,6 @@ class TkWidgetDef(object):
         t = cv2.resize(im, (tw, th), interpolation=cv2.INTER_LINEAR)
         return t
 
-    def Position(self, row=NEXT_ROW, col=-SAME_COL):
-        # This makes convenient substitutions for special, negative values.
-        # Positive or zero values are unchanged since they are specified positions.
-        # SAME_ROW/COL and NEXT_ROW/COL are relative to last component placed, which may 
-        # not be sequential. The others are relative to the extents of component.
-        # This is called in the context of a container for the component thas is about to be created.
-        if row == SAME_ROW:
-            # same row as the previous item, fixup initial value for first row.
-            if self.last_used_row < 0:
-                self.last_used_row = 0
-            row = self.last_used_row
-        elif row == NEXT_ROW:
-            # next sequential row
-            row = self.last_used_row + self.last_used_rowspan
-            self.last_used_rowspan = 1
-            self.last_used_col = -1		# initialize column for new row
-            self.last_used_colspan = 1
-        elif row == BOTTOM_ROW:
-            # row below everything else
-            row = self.bottom_row
-        elif row == EXTEND_ROW:
-            # row below everything else
-            row = self.bottom_row + 1
-        if col == SAME_COL:
-            # use current column, fixup initial value for first column.
-            if self.last_used_col < 0:
-                self.last_used_col = 0
-            col = self.last_used_col
-        elif col == NEXT_COL:
-            col = self.last_used_col + self.last_used_colspan
-        elif col == RIGHT_COL:
-            col = self.right_col
-        elif col == EXTEND_COL:
-            # use next column to right of everything else.
-            # If components are placed sequentially, this is the same as NEXT_COL.
-            col = self.right_col + 1
-        return (row, col)
-
-    def RememberPosition(self, new_TkWidgetDef, row, col, colspan=1, rowspan=1):
-        # Update the new widgets position info.
-        # Theses properties are relative to the container, ususally set by Position().
-        # The last_used_XXX properties and corresponding NEXT_XXX position
-        # substitutions work only when doing a rectangular grid, layed out by 
-        # rows and left to right within each row.
-        new_TkWidgetDef.row = row
-        new_TkWidgetDef.col = col
-        new_TkWidgetDef.col_span = colspan
-        new_TkWidgetDef.row_span = rowspan
-        # Update container positioning to reflect this new widget
-        assert self.is_container
-        new_widget_right_col = col + colspan - 1
-        new_widget_bottom_row = row + rowspan - 1
-        self.last_used_row = row
-        if rowspan > self.last_used_rowspan:
-            self.last_used_rowspan  = rowspan		# track deepest widget per row
-        self.last_used_col = col
-        self.last_used_colspan = colspan
-        if new_widget_bottom_row > self.bottom_row:
-            self.bottom_row = new_widget_bottom_row
-        if new_widget_right_col > self.right_col:
-            self.right_col = new_widget_right_col
-        if self.debug_this:
-            print("RememberPosition/new", new_TkWidgetDef.ReprPos())
-            print("RememberPosition/parent", self.ReprPos())
 
     def AddCanvas(self, pil_fn=None, opencv_im=None, opencv_fn=None,
 				OnClick=None,
