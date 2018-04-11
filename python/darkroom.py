@@ -33,9 +33,15 @@ BOT_1_MAP_TRANSPOSE = [
 BOT_1_H = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class FilterParm(object):
-    def __init__(self, name, default):
+    __slots__ = ('caption', 'default', 'name')
+    def __init__(self, name, default, click_point=False):
         self.name = name
         self.default = default
+        self.click_point = click_point
+        if self.click_point:
+            self.caption = self.name + ' (PP)'
+        else:
+            self.caption = self.name
 
 class FilterParmFloat(FilterParm):
     def GetValue(self, raw_value):
@@ -61,6 +67,8 @@ class FilterParmStr(FilterParm):
         return v
 
 class FilterParmPoint(FilterParm):
+    # This is a numpy / mathematical point
+
     def GetValue(self, raw_value):
         v = raw_value.split(',')
         x = int(v[0].strip())
@@ -68,6 +76,9 @@ class FilterParmPoint(FilterParm):
         return "({},{})".format(x, y)
 
 class FilterParmPointSym(FilterParm):
+    def __init__(self, name, default, click_point=True):
+        super().__init__(name, default, click_point=click_point)
+
     def GetValue(self, raw_value):
         v = raw_value.split(',')
         x = v[0].strip()
@@ -78,21 +89,25 @@ class FilterParmPointSym(FilterParm):
 #	xstep.im
 # GetParm() must filter parameters to avoid code injection attacks
 
-GUI_FILTER_FileImage = 'FileImage'
-GUI_FILTER_CapturedImage = 'CapturedImage'
 
 SRC_LOCAL_CAMERA = 'local'
 SRC_BOT_CAMERA = 'bot'
 
+FILTER_NAME_FILEIMAGE		= 'FileImage'
+FILTER_NAME_CAPTUREDIMAGE	= 'CapturedImage'
+FILTER_NAME_ANALYZER		= 'Analyzer'
+FILTER_NAME_CROPPP		= 'CropPP'
+
 class ImageFilter(object):
+    __slots__ = ('annotate_code', 'filter_names', 'filters', 'flags', 'code', 'name', 'parms')
     filters = {}
     filter_names = []
 
     def __init__(self, name, code, parms, Flags=None):
         self.name = name
         self.code = code
-        self.parms = parms
-        self.flags = Flags
+        self.parms = parms		# a list of FilterParm() and descendent objects
+        self.flags = Flags		# a list of string flag names
         self.annotate_code = None
         self.filters[name] = self
         self.filter_names.append(name)
@@ -103,7 +118,7 @@ class ImageFilter(object):
 #	previous step exec_im and its shape as im, h, w and c,
 #	xstep is the current ProcessStep() with exec_im set to None.
 #
-ImageFilter(GUI_FILTER_CapturedImage,
+ImageFilter(FILTER_NAME_CAPTUREDIMAGE,
 			'xstep.exec_im = xstep.source_im.copy()',
 			[],
 			Flags=['isbase'])
@@ -115,13 +130,13 @@ ImageFilter('ColorMask',
                                 FilterParmStr('colors', 'oc.HSV_WHITE, oc.HSV_RED')],
                         Flags=[])
 
-ImageFilter(GUI_FILTER_FileImage,
+ImageFilter(FILTER_NAME_FILEIMAGE,
 			"xstep.exec_im = oc.Image(opencv_fn='{opencv_fn}')",
 			[FilterParmStr('opencv_fn', '')],
 			Flags=['isbase'])
 
 
-filter = ImageFilter('CropPP',
+filter = ImageFilter(FILTER_NAME_CROPPP,
 			'y_low, y_high, x_low, x_high = oc.Crop_TranslatePP(im_in._im, {p1}, {p2})\n'
 				+ 'xstep.exec_im = oc.Image(im=im_in._im[y_low:y_high, x_low:x_high], colorcode=im_in.colorcode)\n'
 				+ 'print(im_in._im.shape, y_low, y_high, x_low, x_high)\n',
@@ -192,6 +207,11 @@ ImageFilter('HistogramCB',
 			[],
 			Flags=[])
 
+ImageFilter(FILTER_NAME_ANALYZER,
+			'xstep.exec_im = im_in',
+			[FilterParmPointSym('p1', 'm-50,m+50'), FilterParmPointSym('p2', '-100,e')],
+			Flags=[])
+
 filter = ImageFilter('HoughLinesP',
 			'xstep.exec_lines = cv2.HoughLinesP(im_in._im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
 			[FilterParmInt('MinLineLength', '30'), FilterParmInt('MaxLineGap', 10)],
@@ -212,12 +232,13 @@ ImageFilter('Map',
 			Flags=[])
 
 class ProcessStep(object):
-    __slots__ = ('cv_filter', 'cv_specs',
+    __slots__ = ('cv_filter_name', 'cv_specs',
 			'deposition', 
 			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_im', 'exec_lines',
 			'filter_selection',
 			'image_widget', 'info_data', 'info_widgets', 'input_panel', 'ix', 'output_panel', 
-			'parm_entries', 'parm_values', 'parms_specs', 'point_target', 'source_im', 'tab', 'tab_title', 'thumbnail'
+			'parm_widgets', 'parm_values', 'parms_specs', 'point_target', 'source_im', 'tab', 'tab_title', 'thumbnail',
+			'zoom_popup'
 		)
     app = None
     steps = []
@@ -226,14 +247,15 @@ class ProcessStep(object):
 
     def __init__(self, FilterName=None, Where=None, Parms={}):
         self.ix = len(self.steps)
-        self.exec_im = None
+        self.exec_im = None				# this is an OpticChiasm.Image produced by the filter
         self.steps.append(self)
-        self.cv_filter = None			# this gets set by NewFilter()
-        self.parm_values = Parms
+        self.cv_filter_name = None			# this gets set by NewFilter()
+        self.parm_values = Parms			# key is FilterParm.name
         self.tab_title = "Step %d" % (self.ix)
         self.tab = self.app.notebook.AddTab(self.tab_title, Where=Where)
         self.input_panel = self.tab.AddLabelFrame('Input')
         self.output_panel = self.tab.AddLabelFrame('Output')
+        self.zoom_popup = None
         #
         # input_panel
         #
@@ -244,17 +266,18 @@ class ProcessStep(object):
             info_label = self.input_panel.AddLabel('', row=NEXT_ROW, col=LEFT_COL)
             info_value = self.input_panel.AddLabel('', row=SAME_ROW, col=NEXT_COL)
             self.info_widgets.append((info_label, info_value))
-        self.parm_entries = []
-        self.parm_entries.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL, OnDoubleClick=self.OnPickPoint))
-        parm_col = self.parm_entries[0].col
-        self.parm_entries.append(self.input_panel.AddEntryField('Parm2', col=parm_col, OnDoubleClick=self.OnPickPoint))
-        self.parm_entries.append(self.input_panel.AddEntryField('Parm3', col=parm_col))
-        self.parm_entries.append(self.input_panel.AddEntryField('Parm4', col=parm_col))
-        self.input_panel.AddButton('Delete Step', command=self.OnDeleteStep, col=parm_col)
+        self.parm_widgets = []
+        self.parm_widgets.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL, OnDoubleClick=self.OnPickPoint))
+        parm_col = self.parm_widgets[0].col
+        self.parm_widgets.append(self.input_panel.AddEntryField('Parm2', col=parm_col, OnDoubleClick=self.OnPickPoint))
+        self.parm_widgets.append(self.input_panel.AddEntryField('Parm3', col=parm_col))
+        self.parm_widgets.append(self.input_panel.AddEntryField('Parm4', col=parm_col))
+        self.input_panel.AddButton('Update', command=self.OnUpdateStep, col=parm_col)
+        self.input_panel.AddButton('Delete Step', command=self.OnDeleteStep, row=SAME_ROW, col=NEXT_COL)
         #
         # output_panel
         #
-        self.image_widget = self.output_panel.AddCanvas(OnClick=self.ZoomPopup)
+        self.image_widget = self.output_panel.AddCanvas(OnClick=self.OnImageClick)
         self.deposition = self.output_panel.AddLabel(row=0, col=2)
         self.thumbnail = self.app.thumbnailFrame.AddLabelImage(thumbnailof=self.image_widget, row=0, col=NEXT_COL)
         self.thumbnail.tkw.bind("<Button-1>", self.SelectTab)
@@ -269,16 +292,25 @@ class ProcessStep(object):
         self.info_data.append((label, value))
 
     def OnPickPoint(self, event):
+        # This configures OnImageClick() to save the clicked point in a parm.
         # event.widget is the tkw object. We could use that to use this
         # method for multiple points.
         self.point_target = None
-        if self.cv_filter != "CropPP":
-            return
-        for ix, this in enumerate(self.parm_entries):
+        for ix, this in enumerate(self.parm_widgets):
             if this.tkw == event.widget:
-                self.point_target = this
+                # this is the tkeasy widget that was double-clicked
+                if self.parms_specs[ix].click_point:
+                    # the parm_spec indicates the paramter is a point in the image
+                    # that can be slected by clicking on the image.
+                    self.point_target = this
         if self.point_target is not None:
             self.point_target.ReplaceValue('<click image>')
+
+    def OnUpdateStep(self):
+        # Click this to refresh after changing a parameter. We don't automatically do
+        # that in case intermediate updates might fail when make several changes.
+        self.SetFilter()			# This saves the parameter values
+        self.UpdateAll()			# this processes all steps
 
     def OnDeleteStep(self):
         # This event is here because it is associated with the step and
@@ -292,26 +324,36 @@ class ProcessStep(object):
         # Event is None if called as a general method.
         self.app.notebook.tkw.select(self.tab.tkw)
 
-    def ZoomPopup(self, event):
-        print("ZoomPopup() *************")
+    def OnImageClick(self, event):
+        # The image has been clicked. What we do depends on the filter and
+        # other state values.
+        print("OnImageClick() *************")
+        # Convert the mouse click coordinates of the scrolled and shrunken image
+        # to coordinates of the full image.
+        # event.x and event.y reference the visible area.
+        # canvasx() and canvasy() translate to canvas size.
+        x = self.image_widget.tkw.canvasx(event.x)
+        y = self.image_widget.tkw.canvasy(event.y)
+        if self.image_widget.pil_resize_ratio is not None:
+            x = int(x / self.image_widget.pil_resize_ratio)
+            y = int(y / self.image_widget.pil_resize_ratio)
+        #
+        # Now use the click appropriately
+        #
         if self.point_target is not None:
-            # event.x and event.y reference the visible area.
-            # canvasx() and canvasy() translate to canvas size.
-            x = self.image_widget.tkw.canvasx(event.x)
-            y = self.image_widget.tkw.canvasy(event.y)
-            if self.image_widget.pil_resize_ratio is not None:
-                x = int(x / self.image_widget.pil_resize_ratio)
-                y = int(y / self.image_widget.pil_resize_ratio)
+            # save the point as a parm
             v = "{},{}".format(int(x), int(y))
             self.point_target.ReplaceValue(v)
             self.point_target = None
-            sys.exit(-1)
             return
-        cv2.imwrite('zoom.jpeg', self.exec_im)
-        top = self.app.tk.MakePopupWindow(self.cv_filter)
-        top.AddLabel("Sum Thing")
-        canvas = top.AddCanvas(width=800, height=400)
-        canvas.UpdateImage(opencv_fn='zoom.jpeg')
+        # Default action: pop-up a window with a larger image.
+        print("ZOOM IM", self.exec_im.__class__.__name__)
+        self.exec_im.Write('zoom.jpeg')
+        # Reference to popup must be maintained or image gets lost in garbage collection.
+        self.zoom_popup = self.app.tk.MakePopupWindow(self.cv_filter_name)
+        self.zoom_popup.AddLabel("Sum Thing")
+        canvas = self.zoom_popup.AddCanvas(width=800, height=400)
+        canvas.UpdateImage(pil_fn='zoom.jpeg')
 
     @classmethod
     def UpdateAll(cls):
@@ -319,10 +361,10 @@ class ProcessStep(object):
             this_step.Update()
 
     def SaveParameters(self):
-        for ix, this_entry in enumerate(self.parm_entries):
-            if this_entry.parm_id is not None:
+        for ix, this_widget in enumerate(self.parm_widgets):
+            if this_widget.parm_id is not None:
                 # save prior value
-                self.parm_values[this_entry.parm_id] = this_entry.Value()
+                self.parm_values[this_widget.parm_id] = this_widget.Value()
 
     def NewFilter(self, *args):
         # TK callbacks seem to incude *args
@@ -335,29 +377,29 @@ class ProcessStep(object):
             for key, value in NewParms.items():
                 self.parm_values[key] = value
         if FilterName is None:
-            new_filter = self.filter_selection.Value()
+            new_filter_name = self.filter_selection.Value()
         else:
-            new_filter = FilterName
-        #print("SetFilter()", new_filter,  self.cv_filter)
-        if new_filter != self.cv_filter:
-            self.filter_selection.ReplaceValue(new_filter)
-            self.cv_filter = new_filter
-            self.cv_specs = ImageFilter.filters[self.cv_filter]
+            new_filter_name = FilterName
+        #print("SetFilter()", new_filter_name,  self.cv_filter_name)
+        if new_filter_name != self.cv_filter_name:
+            self.filter_selection.ReplaceValue(new_filter_name)
+            self.cv_filter_name = new_filter_name
+            self.cv_specs = ImageFilter.filters[self.cv_filter_name]
             self.parms_specs = self.cv_specs.parms
-            for ix, this_entry in enumerate(self.parm_entries):
+            for ix, this_widget in enumerate(self.parm_widgets):
                 if ix < len(self.parms_specs):
-                    parm_label = self.parms_specs[ix].name
-                    parm_default = self.parms_specs[ix].default
-                    if parm_label not in self.parm_values:
-                        self.parm_values[parm_label] = parm_default
-                    parm_value = self.parm_values[parm_label]
-                    parm_id = parm_label
+                    parm_name = self.parms_specs[ix].name
+                    parm_caption = self.parms_specs[ix].caption
+                    parm_default_value = self.parms_specs[ix].default
+                    if parm_name not in self.parm_values:
+                        self.parm_values[parm_name] = parm_default_value
+                    parm_value = self.parm_values[parm_name]
                 else:
-                    parm_label = "Parm" + str(ix+1)
+                    parm_name = None
+                    parm_caption = "Parm" + str(ix+1)
                     parm_value = ""
-                    parm_id = None
-                this_entry.ReplaceValue(parm_value, Caption=parm_label)
-                this_entry.parm_id = parm_label
+                this_widget.ReplaceValue(parm_value, Caption=parm_caption)
+                this_widget.parm_id = parm_name
 
     def Update(self):
         exec_global_vars = {}
@@ -500,13 +542,13 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             print(payload)
             self.Publish(vconst.cameraman_orders_topic, payload)
 
-    def ConfigureImageSource(self, new_filter, path=None, new_image=None, iso=None, shutter_speed=None):
+    def ConfigureImageSource(self, new_filter_name, path=None, new_image=None, iso=None, shutter_speed=None):
         new_parms = {}
         new_parms['opencv_fn'] = path
         if len(ProcessStep.steps) == 0:
-            ProcessStep(new_filter, Parms=new_parms, Where=self.notebook_add_id)
+            ProcessStep(new_filter_name, Parms=new_parms, Where=self.notebook_add_id)
         else:
-            ProcessStep.steps[0].SetFilter(FilterName=new_filter, NewParms=new_parms)
+            ProcessStep.steps[0].SetFilter(FilterName=new_filter_name, NewParms=new_parms)
         ProcessStep.steps[0].source_im = new_image
         ProcessStep.steps[0].ClearInfo()
         if iso is not None:
@@ -579,7 +621,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 							FileTypes=ProcessStep.process_file_types)
         f = open(fn, 'w')
         for this_step in ProcessStep.steps:
-            f.write(u'/{}\n'.format(this_step.cv_filter))
+            f.write(u'/{}\n'.format(this_step.cv_filter_name))
             for this_key, this_value in this_step.parm_values.items():
                 f.write(u'parm.{}={}\n'.format(this_key, this_value))
         f.close()
@@ -592,7 +634,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         if self.source_widget.Value() is None:
             print("On Capture update source")
             self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
-        self.ConfigureImageSource(GUI_FILTER_CapturedImage)
+        self.ConfigureImageSource(FILTER_NAME_CAPTUREDIMAGE)
         print("SOURCE", self.source_widget.Value())
         print("FILTER", ProcessStep.steps[0].filter_selection.Value())
 
@@ -601,13 +643,13 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.pic_continuous = True
         if self.source_widget.Value() is None:
             self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
-        self.ConfigureImageSource(GUI_FILTER_CapturedImage)
+        self.ConfigureImageSource(FILTER_NAME_CAPTUREDIMAGE)
 
     def OnOpenImageFile(self):
         self.pic_continuous = False
         self.pic_needed = False
         fn = self.statusFrame.DoFileNameDialog()
-        self.ConfigureImageSource(GUI_FILTER_FileImage, path=fn)
+        self.ConfigureImageSource(FILTER_NAME_FILEIMAGE, path=fn)
 
     def OnSelectSource(self, *args):
         self.pic_source = self.source_widget.Value()
@@ -698,9 +740,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             if (new_image is not None) or (path is not None):
                 new_parms = {}
                 if path is None:
-                    self.ConfigureImageSource(GUI_FILTER_CapturedImage, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)
+                    self.ConfigureImageSource(FILTER_NAME_CAPTUREDIMAGE, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)
                 else:
-                    self.ConfigureImageSource(GUI_FILTER_FileImage, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)
+                    self.ConfigureImageSource(FILTER_NAME_FILEIMAGE, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

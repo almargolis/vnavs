@@ -489,7 +489,7 @@ class TkWidgetDef(object):
         # self.source_im is either an OpenCV buffer or an OpticChiasm.Image for JPEG (or other) files
         #
         self.pil_im = None
-        self.rgb_im= None
+        self.rgb_im = None
         if pil_fn is not None:
             try:
                 self.pil_im = Image.open(pil_fn)

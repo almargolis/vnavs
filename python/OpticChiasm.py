@@ -110,6 +110,9 @@ class Image(object):
                 self.colordepth = shape[2]
             else:
                 self.colordepth = 1
+
+    def Write(self, fn):
+        cv2.imwrite(fn, self._im)
     
 
 # automatically set threshold using technique from
