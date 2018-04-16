@@ -80,9 +80,15 @@ class FilterParmPointSym(FilterParm):
         super().__init__(name, default, click_point=click_point)
 
     def GetValue(self, raw_value):
+        # The defaults of 'b' and 'e' works well for ranges like CropYX.
+        # Not so much for points like CropPP.
         v = raw_value.split(',')
         x = v[0].strip()
         y = v[1].strip()
+        if x == '':
+            x = 'b'
+        if y == '':
+            y = 'e'
         return "('{}','{}')".format(x, y)
 
 # Filter functions should modify only:
@@ -137,19 +143,22 @@ ImageFilter(FILTER_NAME_FILEIMAGE,
 
 
 filter = ImageFilter(FILTER_NAME_CROPPP,
-			'y_low, y_high, x_low, x_high = oc.Crop_TranslatePP(im_in._im, {p1}, {p2})\n'
-				+ 'xstep.exec_im = oc.Image(im=im_in._im[y_low:y_high, x_low:x_high], colorcode=im_in.colorcode)\n'
-				+ 'print(im_in._im.shape, y_low, y_high, x_low, x_high)\n',
+			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n'
+				+ 'xstep.exec_im = im_in.Crop(r)\n'
+				+ 'print(im_in.shape, r)\n',
 			[FilterParmPointSym('p1', 'm-50,m+50'), FilterParmPointSym('p2', '-100,e')],
 			Flags=['isbase'])
 filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
-				+ 'cv2.rectangle(xstep.exec_annotated._im, (x_low, y_low), (x_high, y_high), oc.DRAW_BGR_GREEN, 2)\n'
+				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
-ImageFilter('CropYX',
-			'y_low, y_high, x_low, x_high = oc.Crop_TranslateYX(im, {y_range}, {x_range})\n'
-				+ 'xstep.exec_im = im[{y_low}:{y_high}, {x_low}:{x_high}]\n',
+filter = ImageFilter('CropYX',
+			'r = im_in.RectFromSymbolicYX({y_range}, {x_range})\n'
+				+ 'xstep.exec_im = im_in.Crop(r)\n'
+				+ 'print(im_in.shape, r)\n',
 			[FilterParmPointSym('y_range', '-100,'), FilterParmPointSym('x_range', 'm-50,m+50')], 
 			Flags=['isbase'])
+filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
+				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 ImageFilter('Gray',
 			'xstep.exec_im = im_in.CopyAsGray()',
@@ -157,7 +166,7 @@ ImageFilter('Gray',
 			Flags=[])
 
 ImageFilter('Blur',
-			'xstep.exec_im = oc.Image(im=cv2.blur(im_in._im, {ksize}), colorcode=im_in.colorcode)',
+			'xstep.exec_im = oc.Image(im=cv2.blur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
 			[FilterParmPoint('ksize', '3,3')],
 			Flags=[])
 
@@ -173,7 +182,7 @@ ImageFilter('ColorBalance',
 
 ImageFilter('Erode',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
-				+ 'xstep.exec_im = oc.Image(im=cv2.erode(im_in._im, kernel, iterations={iterations}),\n'
+				+ 'xstep.exec_im = oc.Image(im=cv2.erode(im_in.im, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
 			[FilterParmInt('kernel_dim', '1'),
 				FilterParmInt('iterations', '1')],
@@ -185,9 +194,9 @@ filter = ImageFilter('FindContours',
 			[FilterParmInt('MaxLevel', '-1')],
 			Flags=[])
 filter.annotate_code = 'xstep.exec_annotated = im_base.CopyAsGray().CopyAsBGR()\n' \
-				+ 'oc.CrayolaContours(xstep.exec_annotated._im, xstep.exec_contours, xstep.exec_hierarchy, MaxLevel={MaxLevel})\n' \
-				+ 'oc.ContoursToLineVectors(xstep.exec_annotated._im, xstep.exec_contours, xstep.exec_hierarchy)\n'
-		#		+ 'cv2.drawContours(xstep.exec_annotated._im, xstep.exec_contours, -1, oc.DRAW_BGR_RED, 1)\n'
+				+ 'oc.CrayolaContours(xstep.exec_annotated.im, xstep.exec_contours, xstep.exec_hierarchy, MaxLevel={MaxLevel})\n' \
+				+ 'oc.ContoursToLineVectors(xstep.exec_annotated.im, xstep.exec_contours, xstep.exec_hierarchy)\n'
+		#		+ 'cv2.drawContours(xstep.exec_annotated.im, xstep.exec_contours, -1, oc.DRAW_BGR_RED, 1)\n'
 		#		+ 'for i in xrange(0, len(xstep.exec_contours)):\n'
 		#		+ '    color = (np.random.uniform(0, 255), np.random.uniform(0, 255), np.random.uniform(0, 255))\n'
 		#		+ '    cv2.drawContours(xstep.exec_im, xstep.exec_contours, 1, color, 1)\n',
@@ -207,13 +216,15 @@ ImageFilter('HistogramCB',
 			[],
 			Flags=[])
 
-ImageFilter(FILTER_NAME_ANALYZER,
-			'xstep.exec_im = im_in',
-			[FilterParmPointSym('p1', 'm-50,m+50'), FilterParmPointSym('p2', '-100,e')],
+filter = ImageFilter(FILTER_NAME_ANALYZER,
+			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n',
+			[FilterParmPointSym('p1', 'm-3,m-3'), FilterParmPointSym('p2', 'p+3,p+3')],
 			Flags=[])
+filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
+				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 filter = ImageFilter('HoughLinesP',
-			'xstep.exec_lines = cv2.HoughLinesP(im_in._im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
+			'xstep.exec_lines = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
 			[FilterParmInt('MinLineLength', '30'), FilterParmInt('MaxLineGap', 10)],
 			Flags=[''])
 filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
@@ -224,7 +235,7 @@ filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
 				+ '        for x1,y1,x2,y2 in line:\n' \
 				+ '            color_ix = oc.NextColorIx(color_ix)\n' \
 				+ '            color = oc.DRAW_COLORS[color_ix]\n' \
-				+ '            cv2.line(xstep.exec_annotated._im, (x1,y1), (x2,y2), color, 1)\n'
+				+ '            cv2.line(xstep.exec_annotated.im, (x1,y1), (x2,y2), color, 1)\n'
 
 ImageFilter('Map',
 			'cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))',
@@ -388,7 +399,7 @@ class ProcessStep(object):
             self.parms_specs = self.cv_specs.parms
             for ix, this_widget in enumerate(self.parm_widgets):
                 if ix < len(self.parms_specs):
-                    parm_name = self.parms_specs[ix].name
+                    parm_name = self.cv_filter_name + '_' + self.parms_specs[ix].name
                     parm_caption = self.parms_specs[ix].caption
                     parm_default_value = self.parms_specs[ix].default
                     if parm_name not in self.parm_values:
@@ -433,7 +444,7 @@ class ProcessStep(object):
 
         code_substitutions = {}
         for this_parm in self.parms_specs:
-            raw_value = self.parm_values[this_parm.name]
+            raw_value = self.parm_values[self.cv_filter_name + '_' + this_parm.name]
             code_substitutions[this_parm.name] = this_parm.GetValue(raw_value)
         trace = None
         self.exec_im = None

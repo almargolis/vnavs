@@ -42,6 +42,12 @@ RACE_THRESHOLD = 130
 RACE_THRESHOLD = 50
 RACE_THRESHOLD = 150
 
+
+#
+# OpenCv images are numpy arrays
+#   [0,0] is the upper, left corner of the image
+#   The image is stored as an array of horizontal lines, so the index is [y, x]
+#
 class Image(object):
     """
 	Image is a wrapper around OpenCv images. Its main unique value is adding colorcode as a property
@@ -49,7 +55,7 @@ class Image(object):
         OpenCv and numpy operations that I find non-intuitive.
     """
     __slots__ = (
-	'colorcode', 'colordepth', 'height', '_im', 'width' 
+	'colorcode', 'colordepth', 'height', '_im', 'shape', 'width' 
     )
 
     def __init__(self, im=None, colorcode=None, opencv_fn=None):
@@ -110,10 +116,30 @@ class Image(object):
                 self.colordepth = shape[2]
             else:
                 self.colordepth = 1
+            self.shape = (self.height, self.width, self.colordepth)
 
     def Write(self, fn):
         cv2.imwrite(fn, self._im)
+
+    def AverageHue(self, rect=None):
+        if rect is None:
+            hsv = self.ImAsHSV()
+        else:
+            hsv = self.Crop(rect).ImAsHSV()
+        average_color = hsv[:, :, 0].mean()
+        return average_color
+
+    def Crop(self, rect):
+        return Image(im=self._im[rect.y_min:rect.y_max+1, rect.x_min:rect.x_max+1], colorcode=self.colorcode)
+
+    def DrawRectangle(self, rect, color=DRAW_BGR_GREEN, thickness=2):
+        cv2.rectangle(self._im, rect.p1, rect.p2, color, thickness)
     
+    def RectFromSymbolicYX(self, y_range, x_range):
+        return RectFromSymbolicYX(self._im, y_range, x_range)
+
+    def RectFromSymbolicPP(self, p1, p2):
+        return RectFromSymbolicPP(self._im, p1, p2)
 
 # automatically set threshold using technique from
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
@@ -808,72 +834,104 @@ class ReflexEntities(object):
         self.slope_ct = ct_slope
         cv2.imwrite('temp/ann.jpeg', self.annotated)
 
-def Raw_Crop_TranslateSym(c, ext, p1=None):
-    if isinstance(c, basestring):
-        if c[0] == 'm':
-            if c == 'm':
-                return ext / 2
+#
+# Translate an image axis index c
+#   c:
+#	if positive integer: simply the index
+#       if negative integer: index backwards from ext
+#       Otherwise a simple symbolic math operation +/- where the first operand can be:
+#               b: beginning / 0 / zero
+#		e: extent / end of axis
+#		m: middle of axis
+#               p: relative to index p1, used to specify end index as an offset (ususally lenght/width)
+#
+#   ext: (extent) maximum index value for that axis (integer)
+def ResolveSymbolicIndex(c, ext, p1=None):
+    def Raw_ResolveSymbolicIndex(c, ext, p1=None):
+        print('Raw_ResolveSymbolicIndex', `c`, ext, p1)
+        if isinstance(c, basestring):
+            if c[0] == 'm':
+                if c == 'm':
+                    return ext / 2
+                else:
+                    return (ext / 2) + int(c[1:])
+            elif c[0] == 'e':
+                if c == 'e':
+                    return ext
+                else:
+                    return ext + int(c[1:])
+            elif (c[0] == 'p') and (p1 is not None):
+                if c == 'p':
+                    return p1
+                else:
+                    return p1 + int(c[1:])		# c[1:] begins with plus or minus sign
+            elif c[0] == 'b':
+                if c == 'b':
+                    return 0
+                else:
+                    return int(c[1:])
             else:
-                return (ext / 2) + int(c[1:])
-        elif c[0] == 'e':
-            if c == 'e':
-                return ext
-            else:
-                return ext + int(c[1:])
-        elif (c[0] == 'p') and (p1 is not None):
-            if c == 'p':
-                return p1
-            else:
-                return p1 + int(c[1:])
-        elif c[0] == 'b':
-            if c == 'b':
-                return 0
-            else:
-                return int(c[1:])
+                print("CROP-T", c, int(c))
+                c = int(c)
+                if c < 0:
+                    return ext + c
+                else:
+                    return c
         else:
-            print("CROP-T", c, int(c))
-            c = int(c)
             if c < 0:
                 return ext + c
             else:
                 return c
-    else:
-        if c < 0:
-            return ext + c
-        else:
-            return c
-
-def Crop_TranslateSym(c, ext, p1=None):
-    res = Raw_Crop_TranslateSym(c=c, ext=ext, p1=p1)
+    # Main part of function, limits raw calcualtaion to image extents
+    res = Raw_ResolveSymbolicIndex(c=c, ext=ext, p1=p1)
     if res < 0:
         return 0
     if res > ext:
         return ext
     return res
 
-def Crop_TranslateYX(im, y_range, x_range):
-    height, width, channels = im.shape
-    y_low = Crop_TranslateSym(y_range[0], height)
-    y_high = Crop_Translat_Sym(y_range[1], height)
-    x_low = Crop_TranslateSym(x_range[0], width)
-    x_high = Crop_TranslateSym(x_range[1], width)
-    if x_low > x_high:
-        x_low, x_high = x_high, x_low
-    if y_low > y_high:
-        y_low, y_high = y_high, y_low
-    return (y_low, y_high, x_low, x_high)
+class Rect(object):
+    __slots__ = ('y_min', 'y_max', 'x_min', 'x_max')
+    def __init__(self, y_min, y_max, x_min, x_max):
+        self.y_min = y_min
+        self.y_max = y_max
+        self.x_min = x_min
+        self.x_max = x_max
 
-def Crop_TranslatePP(im, p1, p2):
+    def __repr__(self):
+        return '[({0}, {1}), ({2}, {3})]'.format(self.x_min, self.y_min, self.x_max, self.y_max)
+
+    @property
+    def p1(self):
+        return(self.x_min, self.y_min)
+
+    @property
+    def p2(self):
+        return(self.x_max, self.y_max)
+
+def RectFromSymbolicYX(im, y_range, x_range):
     height, width, channels = im.shape
-    x_low = Crop_TranslateSym(p1[0], width)
-    y_low = Crop_TranslateSym(p1[1], height)
-    x_high = Crop_TranslateSym(p2[0], width, x_low)
-    y_high = Crop_TranslateSym(p2[1], height, y_low)
-    if x_low > x_high:
-        x_low, x_high = x_high, x_low
-    if y_low > y_high:
-        y_low, y_high = y_high, y_low
-    return (y_low, y_high, x_low, x_high)
+    y_min = ResolveSymbolicIndex(y_range[0], height)
+    y_max = ResolveSymbolicIndex(y_range[1], height)
+    x_min = ResolveSymbolicIndex(x_range[0], width)
+    x_max = ResolveSymbolicIndex(x_range[1], width)
+    if x_min > x_max:
+        x_min, x_max = x_max, x_min
+    if y_min > y_max:
+        y_min, y_max = y_max, y_min
+    return Rect(y_min, y_max, x_min, x_max)
+
+def RectFromSymbolicPP(im, p1, p2):
+    height, width, channels = im.shape
+    x_min = ResolveSymbolicIndex(p1[0], width)
+    y_min = ResolveSymbolicIndex(p1[1], height)
+    x_max = ResolveSymbolicIndex(p2[0], width, x_min)
+    y_max = ResolveSymbolicIndex(p2[1], height, y_min)
+    if x_min > x_max:
+        x_min, x_max = x_max, x_min
+    if y_min > y_max:
+        y_min, y_max = y_max, y_min
+    return Rect(y_min, y_max, x_min, x_max)
 
 class Robogames(object):
     def __init__(self, image, colors):
