@@ -65,7 +65,10 @@ class Image(object):
         self.ReplaceImage(im, colorcode)
 
     def copy(self):
-        return Image(im=self._im.copy(), colorcode=self.colorcode)
+        if self._im is None:
+            return Image(im=None, colorcode=self.colorcode)
+        else:
+            return Image(im=self._im.copy(), colorcode=self.colorcode)
 
     def CopyAsBGR(self):
         if self.colorcode == IM_BGR:
@@ -84,6 +87,8 @@ class Image(object):
         return self._im
 
     def ImAsRGB(self):
+        if self._im is None:
+            return None
         if self.colorcode == IM_RGB:
             return self._im
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_RGB))
@@ -116,7 +121,7 @@ class Image(object):
                 self.colordepth = shape[2]
             else:
                 self.colordepth = 1
-            self.shape = (self.height, self.width, self.colordepth)
+        self.shape = (self.height, self.width, self.colordepth)
 
     def Write(self, fn):
         cv2.imwrite(fn, self._im)
@@ -423,55 +428,57 @@ def ColorMaskWhite(hsvChannels, threshold=50):
     filterMask = cv2.bitwise_and(saturationMask, valueMask)
     return filterMask
 
-def ColorMaskOneColor(hsvChannels, hueValue, huerange=25, threshold=50):
+def ColorMaskOneHue(hsvImage, hue, huerange=25, saturation=205, saturationrange=50, value=205, valuerange=50):
     # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to 179,
     # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
     # Red color, value 0,  is one of the special case where our selection range wraps 0/179.
-    assert (hueValue >= 0) and (hueValue <= 179)
+    assert (hue >= 0) and (hue <= 179)
 
-    minSaturation = threshold
-    minValue = threshold
+    hue_min = hue - huerange
+    hue_max = hue + huerange
+    hue_min_2 = None
+    hue_max_s = None
+    if hue_min < 0:
+        hue_min_2 = 127 + hue_min
+        hue_max_2 = 127
+        hue_min = 0
+    if hue_max > 127:
+        hue_min_2 = 0
+        hue_max_2 = hue_max - 127
+        hue_max = 127
 
-    hueArray = hsvChannels[0]
+    saturation_min = saturation - saturationrange
+    saturation_max = saturation + saturationrange
+    if saturation_min < 0:
+        saturation_min = 0
+    if saturation_max > 255:
+        saturation_max = 255
 
-    # is the color within the lower hue range?
-    hueMask = cv2.inRange(hueArray, hueValue - huerange, hueValue + huerange)
+    value_min = value - valuerange
+    value_max = value + valuerange
+    if value_min < 0:
+        value_min = 0
+    if value_max > 255:
+        value_max = 255
 
-    # If the color is near the limits of the 0 to 179 hue value range, check the overflow range.
-    hueWrapMask = None
-    if (hueValue - huerange) < 0:
-        hueWrapLowerValue = 179 - (hueValue - huerange)
-        hueWrapMask = cv2.inRange(hueArray, hueWrapLowerValue, 179)
-    elif (hueValue + huerange) > 179:
-        hueWrapUpperValue = (hueValue + huerange) - 179
-        hueWrapMask = cv2.inRange(hueArray, 0, hueWrapUpperValue)
-    if hueWrapMask is not None:
-        hueMask = cv2.bitwise_or(hueMask, hueWrapMask)
+    hueMask = cv2.inRange(hsvImage, np.array([hue_min, saturation_min, value_min], np.uint8), np.array([hue_max, saturation_max, value_max], np.uint8))
+    if hue_min_2 is not None:
+        hueMask_2 = cv2.inRange(hsvImage, np.array([hue_min_2, saturation_min, value_min], np.uint8), np.array([hue_max_2, saturation_max, value_max], np.uint8))
+        hueMask = cv2.bitwise_or(hueMask, hueMask_2)
 
-    # Now we have to filter pixels where saturation and value do not fit the limits:
-    ret, saturationMask = cv2.threshold(hsvChannels[1], minSaturation, 255, cv2.THRESH_BINARY)
-    ret, valueMask = cv2.threshold(hsvChannels[2], minValue, 255, cv2.THRESH_BINARY)
-
-    print("HUE SHAPE", hueMask.shape, hueMask.dtype)
-    print("SAT SHAPE", saturationMask.shape, saturationMask.dtype)
-    print("VAL SHAPE", valueMask.shape, valueMask.dtype)
-    filterMask = cv2.bitwise_and(saturationMask, valueMask)
-    print("FIL SHAPE", filterMask.shape)
-    hueMask = cv2.bitwise_and(hueMask, filterMask)
-    print("FINAL SHAPE", hueMask.shape)
     return hueMask
 
-def ColorMask(hsvImage, colors=[0], huerange=25, threshold=50, wthreshold=50):
+def ColorMask(hsvImage, colors=[0], huerange=25, saturation=205, saturationrange=50, value=205, valuerange=50):
     # adapted from http://stackoverflow.com/questions/35866411/opencv-how-to-detect-lines-of-a-specific-colour
-    # convert to HSV color space
-    hsvChannels = cv2.split(hsvImage)
+    # input is an HSV image. Output is a monochrome image
+    print("ColorMask()", colors, huerange)
 
     result = None
     for this_hue in colors:
         if this_hue < 0:
             this_result = ColorMaskWhite(hsvChannels, threshold=wthreshold)
         else:
-            this_result = ColorMaskOneColor(hsvChannels, this_hue, huerange=huerange, threshold=threshold)
+            this_result = ColorMaskOneHue(hsvImage, this_hue, huerange, saturation, saturationrange, value, valuerange)
         if result is None:
             result = this_result
         else:

@@ -18,7 +18,7 @@ import numpy as np
 
 import cameraman
 import easytk
-from easytk import SAME_ROW, NEXT_ROW, SAME_COL, NEXT_COL, LEFT_COL, RIGHT_COL
+from easytk import SAME_ROW, NEXT_ROW, OVERLAY_ROW, SAME_COL, NEXT_COL, LEFT_COL, RIGHT_COL, OVERLAY_COL
 import OpticChiasm
 import vnavs_mqtt
 import vnavs_const as vconst
@@ -33,11 +33,15 @@ BOT_1_MAP_TRANSPOSE = [
 BOT_1_H = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class FilterParm(object):
-    __slots__ = ('caption', 'default', 'name')
-    def __init__(self, name, default, click_point=False):
+    __slots__ = ('caption', 'default', 'name', 'max_value', 'min_value', 'use_slider')
+    def __init__(self, name, default, click_point=False, 
+				min_value=None, max_value=None, use_slider=False):
         self.name = name
         self.default = default
         self.click_point = click_point
+        self.min_value = min_value
+        self.max_value = max_value
+        self.use_slider = use_slider
         if self.click_point:
             self.caption = self.name + ' (PP)'
         else:
@@ -99,10 +103,15 @@ class FilterParmPointSym(FilterParm):
 SRC_LOCAL_CAMERA = 'local'
 SRC_BOT_CAMERA = 'bot'
 
-FILTER_NAME_FILEIMAGE		= 'FileImage'
-FILTER_NAME_CAPTUREDIMAGE	= 'CapturedImage'
 FILTER_NAME_ANALYZER		= 'Analyzer'
+FILTER_NAME_CAPTUREDIMAGE	= 'CapturedImage'
+FILTER_NAME_COLORMASK_MULTI	= 'ColorMaskMulti'
+FILTER_NAME_COLORMASK_SINGLE	= 'ColorMaskSingle'
 FILTER_NAME_CROPPP		= 'CropPP'
+FILTER_NAME_FILEIMAGE		= 'FileImage'
+
+FLAG_ISBASE = 'isbase'
+FLAG_SLIDERS = 'sliders'
 
 class ImageFilter(object):
     __slots__ = ('annotate_code', 'filter_names', 'filters', 'flags', 'code', 'name', 'parms')
@@ -129,17 +138,33 @@ ImageFilter(FILTER_NAME_CAPTUREDIMAGE,
 			[],
 			Flags=['isbase'])
 
-ImageFilter('ColorMask',
+ImageFilter(FILTER_NAME_COLORMASK_MULTI,
 			'xstep.exec_im = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={huerange}, threshold={threshold}),\n' \
 				+ '	colorcode=oc.IM_GRAY)',
-                        [FilterParmInt('huerange', '25'), FilterParmInt('threshold', '50'), FilterParmInt('wthreshold', '50'),
+                        [FilterParmInt('huerange', '25', min_value=0, max_value=127, use_slider=True), 
+				FilterParmInt('threshold', '50', min_value=0, max_value=127, use_slider=True), 
+				FilterParmInt('wthreshold', '50', min_value=0, max_value=127, use_slider=True),
                                 FilterParmStr('colors', 'oc.HSV_WHITE, oc.HSV_RED')],
                         Flags=[])
+
+ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
+			'xstep.exec_im = oc.Image(oc.ColorMaskOneHue(im_in.ImAsHSV(), hue={hue}, huerange={hueRange},' \
+				+ ' saturation={saturation}, saturationrange={saturationRange},' \
+				+ ' value={value}, valuerange={valueRange}),\n' \
+				+ '	colorcode=oc.IM_GRAY)',
+                        [FilterParmInt('hue', '25', min_value=0, max_value=127, use_slider=True), 
+                        	FilterParmInt('hueRange', '25', min_value=0, max_value=127, use_slider=True), 
+                        	FilterParmInt('saturation', '205', min_value=0, max_value=127, use_slider=True), 
+                        	FilterParmInt('saturationRange', '50', min_value=0, max_value=127, use_slider=True), 
+                        	FilterParmInt('value', '205', min_value=0, max_value=127, use_slider=True), 
+				FilterParmInt('valueRange', '50', min_value=0, max_value=255, use_slider=True)
+			],
+                        Flags=[FLAG_SLIDERS])
 
 ImageFilter(FILTER_NAME_FILEIMAGE,
 			"xstep.exec_im = oc.Image(opencv_fn='{opencv_fn}')",
 			[FilterParmStr('opencv_fn', '')],
-			Flags=['isbase'])
+			Flags=[FLAG_ISBASE])
 
 
 filter = ImageFilter(FILTER_NAME_CROPPP,
@@ -147,7 +172,7 @@ filter = ImageFilter(FILTER_NAME_CROPPP,
 				+ 'xstep.exec_im = im_in.Crop(r)\n'
 				+ 'print(im_in.shape, r)\n',
 			[FilterParmPointSym('p1', 'm-50,m+50'), FilterParmPointSym('p2', '-100,e')],
-			Flags=['isbase'])
+			Flags=[FLAG_ISBASE])
 filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
 				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
@@ -156,7 +181,7 @@ filter = ImageFilter('CropYX',
 				+ 'xstep.exec_im = im_in.Crop(r)\n'
 				+ 'print(im_in.shape, r)\n',
 			[FilterParmPointSym('y_range', '-100,'), FilterParmPointSym('x_range', 'm-50,m+50')], 
-			Flags=['isbase'])
+			Flags=[FLAG_ISBASE])
 filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
 				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
@@ -221,7 +246,8 @@ filter = ImageFilter(FILTER_NAME_ANALYZER,
 			[FilterParmPointSym('p1', 'm-3,m-3'), FilterParmPointSym('p2', 'p+3,p+3')],
 			Flags=[])
 filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
-				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
+				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n' \
+				+ 'xstep.SetInfo(0, "Hue", im_in.Crop(r).AverageHue())\n'
 
 filter = ImageFilter('HoughLinesP',
 			'xstep.exec_lines = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
@@ -273,17 +299,24 @@ class ProcessStep(object):
         self.filter_selection = self.input_panel.AddListbox('Filters', ImageFilter.filter_names, Selection=FilterName, command=self.NewFilter, rowspan=4)
         self.info_data = []
         self.info_widgets = []
-        for ix in range(4):
+        for ix in range(6):
             info_label = self.input_panel.AddLabel('', row=NEXT_ROW, col=LEFT_COL)
             info_value = self.input_panel.AddLabel('', row=SAME_ROW, col=NEXT_COL)
             self.info_widgets.append((info_label, info_value))
         self.parm_widgets = []
-        self.parm_widgets.append(self.input_panel.AddEntryField('Parm1', row=self.filter_selection.row, col=NEXT_COL, OnDoubleClick=self.OnPickPoint))
-        parm_col = self.parm_widgets[0].col
-        self.parm_widgets.append(self.input_panel.AddEntryField('Parm2', col=parm_col, OnDoubleClick=self.OnPickPoint))
-        self.parm_widgets.append(self.input_panel.AddEntryField('Parm3', col=parm_col))
-        self.parm_widgets.append(self.input_panel.AddEntryField('Parm4', col=parm_col))
-        self.input_panel.AddButton('Update', command=self.OnUpdateStep, col=parm_col)
+        for ix in range(6):
+            if ix == 0:
+                parm_row = self.filter_selection.row
+                parm_col = NEXT_COL
+            else:
+                parm_row = NEXT_ROW
+                parm_col = self.parm_widgets[0][1].col
+            parm_caption = 'Parm{0}'.format(ix+1)
+            entry_label = self.input_panel.AddLabel(parm_caption, row=parm_row, col=parm_col)
+            entry_box = self.input_panel.AddEntryField(row=SAME_ROW, col=NEXT_COL, OnDoubleClick=self.OnPickPoint)
+            entry_slider = self.input_panel.AddSliderField(col=OVERLAY_COL)
+            self.parm_widgets.append([entry_box, entry_label, entry_box, entry_slider])
+        self.input_panel.AddButton('Run', command=self.OnExecuteStep, col=parm_col)
         self.input_panel.AddButton('Delete Step', command=self.OnDeleteStep, row=SAME_ROW, col=NEXT_COL)
         #
         # output_panel
@@ -296,32 +329,49 @@ class ProcessStep(object):
         self.point_target = None
         self.SetFilter()
 
+
+    #
+    # info_data are display fields under the image.
+    # They are generally outputs from the step processing.
+    #
     def ClearInfo(self):
         self.info_data = []
 
     def AddInfo(self, label, value):
+        ix = len(self.info_data)
         self.info_data.append((label, value))
+        return ix
 
+    def AddInfoSliders(self):
+        for ix, this in enumerate(self.parm_widgets):
+            if self.parms_specs[ix].use_slider:
+                self.AddInfo(self.parms_specs[ix].caption, this[0].Value())
+
+    def SetInfo(self, ix, label, value):
+        while len(self.info_data) < (ix + 1):
+            self.info_data.append(('', ''))
+        self.info_data[ix] = (label, value)
+            
     def OnPickPoint(self, event):
         # This configures OnImageClick() to save the clicked point in a parm.
         # event.widget is the tkw object. We could use that to use this
         # method for multiple points.
         self.point_target = None
         for ix, this in enumerate(self.parm_widgets):
-            if this.tkw == event.widget:
+            if this[0].tkw == event.widget:
                 # this is the tkeasy widget that was double-clicked
                 if self.parms_specs[ix].click_point:
                     # the parm_spec indicates the paramter is a point in the image
                     # that can be slected by clicking on the image.
-                    self.point_target = this
+                    self.point_target = this[0]
         if self.point_target is not None:
             self.point_target.ReplaceValue('<click image>')
 
-    def OnUpdateStep(self):
+    def OnExecuteStep(self):
         # Click this to refresh after changing a parameter. We don't automatically do
         # that in case intermediate updates might fail when make several changes.
         self.SetFilter()			# This saves the parameter values
-        self.UpdateAll()			# this processes all steps
+        self.ExecuteAllSteps()			# this processes all steps
 
     def OnDeleteStep(self):
         # This event is here because it is associated with the step and
@@ -367,26 +417,26 @@ class ProcessStep(object):
         canvas.UpdateImage(pil_fn='zoom.jpeg')
 
     @classmethod
-    def UpdateAll(cls):
+    def ExecuteAllSteps(cls):
         for this_step in cls.steps:
-            this_step.Update()
+            this_step.ExecuteStep()
 
     def SaveParameters(self):
         for ix, this_widget in enumerate(self.parm_widgets):
-            if this_widget.parm_id is not None:
+            if this_widget[0].parm_id is not None:
                 # save prior value
-                self.parm_values[this_widget.parm_id] = this_widget.Value()
+                self.parm_values[this_widget[0].parm_id] = this_widget[0].Value()
 
     def NewFilter(self, *args):
         # TK callbacks seem to incude *args
         self.SetFilter()
-        self.UpdateAll()
+        self.ExecuteAllSteps()
 
     def SetFilter(self, FilterName=None, NewParms=None):
         self.SaveParameters()
         if NewParms is not None:
             for key, value in NewParms.items():
-                self.parm_values[key] = value
+                self.parm_values[FilterName + '_' + key] = value
         if FilterName is None:
             new_filter_name = self.filter_selection.Value()
         else:
@@ -405,14 +455,29 @@ class ProcessStep(object):
                     if parm_name not in self.parm_values:
                         self.parm_values[parm_name] = parm_default_value
                     parm_value = self.parm_values[parm_name]
+                    if self.parms_specs[ix].use_slider:
+                        slider = this_widget[3]
+                        this_widget[0] = slider				# use slider widget
+                        min_value = self.parms_specs[ix].min_value
+                        if min_value is None:
+                            min_value = 0
+                        max_value = self.parms_specs[ix].max_value
+                        if max_value is None:
+                            max_value = 0
+                        slider.tkw.config(from_=min_value, to=max_value)
+                    else:
+                        this_widget[0] = this_widget[2]			# use entry box widget
                 else:
                     parm_name = None
                     parm_caption = "Parm" + str(ix+1)
                     parm_value = ""
-                this_widget.ReplaceValue(parm_value, Caption=parm_caption)
-                this_widget.parm_id = parm_name
+                    this_widget[0] = this_widget[2]			# use entry box widget
+                this_widget[1].ReplaceValue(parm_caption)
+                this_widget[0].tkw.lift()				# make active control visible (top of stack)
+                this_widget[0].ReplaceValue(parm_value)
+                this_widget[0].parm_id = parm_name
 
-    def Update(self):
+    def ExecuteStep(self):
         exec_global_vars = {}
         exec_global_vars['__builtins__'] = __builtins__
         exec_global_vars['cv2'] = cv2
@@ -426,7 +491,7 @@ class ProcessStep(object):
                 break
             if this.exec_im is not None:
                 exec_global_vars['im_in'] = this.exec_im
-                if 'isbase' in this.cv_specs.flags:
+                if FLAG_ISBASE in this.cv_specs.flags:
                     exec_global_vars['im_base'] = this.exec_im
                     base_image = this.exec_im
             if this.exec_contours is not None:
@@ -443,6 +508,7 @@ class ProcessStep(object):
                 this[1].ReplaceValue('')
 
         code_substitutions = {}
+        self.SaveParameters()
         for this_parm in self.parms_specs:
             raw_value = self.parm_values[self.cv_filter_name + '_' + this_parm.name]
             code_substitutions[this_parm.name] = this_parm.GetValue(raw_value)
@@ -465,15 +531,25 @@ class ProcessStep(object):
             except:
                 trace = traceback.format_exc()
                 print(trace)
-        if self.cv_specs.annotate_code is None:
-            if self.exec_im is None:
-                self.exec_annotated = base_image
-            else:
-                self.exec_annotated = self.exec_im.copy()
+        #
+        # Step code has been executed, now update step tab to show results.
+        #
         if trace is not None:
             deposition = trace + "\n\n" + deposition
             self.deposition.ReplaceValue(deposition)
-        self.image_widget.UpdateImage(source_im=self.exec_annotated)
+        if FLAG_SLIDERS in self.cv_specs.flags:
+            self.ClearInfo()
+            self.AddInfoSliders()
+        if self.exec_annotated is not None:
+            step_display_image = self.exec_annotated
+        else:
+            # maybe assert an error if there was annotation code which
+            # didn't create an image
+            if self.exec_im is None:
+                step_display_image = base_image
+            else:
+                step_display_image = self.exec_im
+        self.image_widget.UpdateImage(source_im=step_display_image.im)
         return
 
 
@@ -484,7 +560,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 				'last_pic_payload', 'load_filter_name', 'load_new_filter_ct', 'load_parms', 'load_process_file_name',
 				'loading', 'local_cam',
 				'new_step', 'notebook', 'notebook_add_id',
-				'pic_continuous', 'pic_fn', 'pic_get', 'pic_needed', 'pic_source',
+				'pic_continuous', 'pic_fn', 'pic_needed', 'pic_source',
 				'scriptsDir', 'source_widget', 'statusFrame', 'thumbnailFrame', 'tk'
 		)
     def __init__(self):
@@ -528,11 +604,8 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.local_cam = None
         self.pic_needed = False
         self.pic_continuous = True
-        self.pic_get = True
         self.pic_fn = None
         self.pic_source = None
-        if vnavs_mqtt.ARG_IMAGE_GET in self.args:
-            self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
 
         self.source_widget = self.statusFrame.AddDropDown(s_items=[SRC_LOCAL_CAMERA, SRC_BOT_CAMERA], command=self.OnSelectSource, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Capture', command=self.OnCaptureImage, row=SAME_ROW, col=NEXT_COL)
@@ -562,11 +635,13 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             ProcessStep.steps[0].SetFilter(FilterName=new_filter_name, NewParms=new_parms)
         ProcessStep.steps[0].source_im = new_image
         ProcessStep.steps[0].ClearInfo()
+        if path is not None:
+            ProcessStep.steps[0].AddInfo('Path', path)
         if iso is not None:
             ProcessStep.steps[0].AddInfo('ISO', iso)
         if shutter_speed is not None:
             ProcessStep.steps[0].AddInfo('Shutter', shutter_speed)
-        ProcessStep.steps[0].UpdateAll()
+        ProcessStep.steps[0].ExecuteAllSteps()
 
     def OpenProcessFile(self):
         self.load_process_file_name = self.statusFrame.DoFileNameDialog(Dir=self.scriptsDir, FileTypes=ProcessStep.process_file_types)
@@ -622,8 +697,8 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             ix = len(ProcessStep.steps) - 1
             print("XXXX", ix)
             self.DeleteProcessStep(ix)
-        self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)	# temporary - needs more optrions
-        ProcessStep.UpdateAll()
+        self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)	# temporary - needs more options
+        ProcessStep.ExecuteAllSteps()
         self.loading = False
 
     def SaveProcessFile(self):
@@ -692,6 +767,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
     def rmsg_cameraman_pic_ready(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
+        #print("rmsg_cameraman_pic_ready()", payload)
         self.last_pic_payload = payload
 
     def DeleteProcessStep(self, ix):
@@ -737,18 +813,15 @@ class Darkroom(vnavs_mqtt.mqtt_node):
                     self.pic_needed = False			# if single frame mode, mark done
                     payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
                     self.pic_fn = payload['filename']
-                    #print("ProcessImage()", self.pic_fn, path)
-                    if self.pic_get:
-                        path = os.path.join(self.downloadDir, self.pic_fn)
-                        if not self.file_client.GetFile(self.pic_fn, path=path):
-                            print("Unable to fetch PIC", self.pic_fn)
-                            return
-                    else:
-                        path = os.path.join(self.imageDir, self.pic_fn)
+                    path = os.path.join(self.downloadDir, self.pic_fn)
+                    if not self.file_client.GetFile(self.pic_fn, path=path):
+                        print("Unable to fetch PIC", self.pic_fn)
+                        return
                     iso = payload['iso']
                     shutter_speed = payload['shutter_speed']
                     print("CAM", iso, shutter_speed)
             if (new_image is not None) or (path is not None):
+                print("DoLoop() process image ", path, new_image is not None)
                 new_parms = {}
                 if path is None:
                     self.ConfigureImageSource(FILTER_NAME_CAPTUREDIMAGE, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)

@@ -31,11 +31,13 @@ SAME_ROW = -1
 NEXT_ROW = -2
 BOTTOM_ROW = -3
 EXTEND_ROW = -4
+OVERLAY_ROW = -5
 SAME_COL = -1
 NEXT_COL = -2
 RIGHT_COL = -3
 LEFT_COL = -1
 EXTEND_COL = -4
+OVERLAY_COL = -5
 COL_SPAN_ALL = -1
 
 class TkWidgetDef(object):
@@ -130,6 +132,10 @@ class TkWidgetDef(object):
         # SAME_ROW/COL and NEXT_ROW/COL are relative to last component placed, which may 
         # not be sequential. The others are relative to the extents of component.
         # This is called in the context of a container for the component thas is about to be created.
+        if (row == OVERLAY_ROW) or (col == OVERLAY_COL):
+            # an overlay is an overlay. This is a convenience so you don't have to specify both row and col
+            row = OVERLAY_ROW
+            col = OVERLAY_COL
         if row == SAME_ROW:
             # same row as the previous item, fixup initial value for first row.
             if self.last_used_row < 0:
@@ -147,6 +153,9 @@ class TkWidgetDef(object):
         elif row == EXTEND_ROW:
             # row below everything else
             row = self.bottom_row + 1
+        elif row == OVERLAY_ROW:
+            # row & col in same place, to swap widgets with lift / lower
+            row = self.last_used_row
         if col == SAME_COL:
             # use current column, fixup initial value for first column.
             if self.last_used_col < 0:
@@ -162,6 +171,9 @@ class TkWidgetDef(object):
             # use next column to right of everything else.
             # If components are placed sequentially, this is the same as NEXT_COL.
             col = self.right_col + 1
+        elif col == OVERLAY_COL:
+            # row & col in same place, to swap widgets with lift / lower
+            col = self.last_used_col
         return (row, col)
 
     def RememberPosition(self, new_TkWidgetDef, row, col, colspan=1, rowspan=1):
@@ -190,6 +202,7 @@ class TkWidgetDef(object):
         if self.debug_this:
             print("RememberPosition/new", new_TkWidgetDef.ReprPos())
             print("RememberPosition/parent", self.ReprPos())
+
     def ReplaceValue(self, new_value, Caption=None):
         debug = "ReplaceValue({0}): tkw {1} '{2}' -- ".format(new_value, self.tkw.__class__.__name__, self.Value())
         if self.tkd is None:
@@ -212,6 +225,8 @@ class TkWidgetDef(object):
             ix = self.list_items.index(new_value)
             self.tkw.selection_set(ix)
             self.tkw.see(ix)
+        elif isinstance(self.tkw, Tkinter.Scale):
+            self.tkw.set(new_value)
         else:
             # For many/most widgets, the value is in the self.tkd StringVar
             if isinstance(self.tkd, Tkinter.StringVar):
@@ -228,6 +243,8 @@ class TkWidgetDef(object):
             # This works for now.
             ix = self.tkw.curselection()
             return self.tkw.get(ix)
+        if isinstance(self.tkw, Tkinter.Scale):
+            return self.tkw.get()
         # For many/most widgets, the value is in the self.tkd StringVar
         if isinstance(self.tkd, Tkinter.StringVar):
             v = self.tkd.get()
@@ -248,22 +265,28 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def AddEntryField(self, caption, width=10, value='', row=NEXT_ROW, col=SAME_COL, OnDoubleClick=None):
+    def AddEntryField(self, caption=None, width=10, value='', row=NEXT_ROW, col=SAME_COL, OnDoubleClick=None):
         if self.debug_this:
             print("AddEntryField", row, col, caption)
         row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
 
         tk_data = Tkinter.StringVar()
         tk_data.set(value)
-        tk_label = ttk.Label(self.tkw, text=caption)
-        tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+        if caption is None:
+            col_span = 1
+            tk_label = None
+            refname = "EntryBox"
+        else:
+            tk_label = ttk.Label(self.tkw, text=caption)
+            tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+            col_span = 2
+            refname = caption.lower().replace(' ', '_')
         tk_entry = ttk.Entry(self.tkw, width=width, textvariable=tk_data)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
         if OnDoubleClick is not None:
             tk_entry.bind('<Double-Button-1>', OnDoubleClick)
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
-        self.RememberPosition(frame, row, col, colspan=2)
+        self.RememberPosition(frame, row, col, colspan=col_span)
         self.children.append(frame)
         return frame
 
@@ -281,6 +304,33 @@ class TkWidgetDef(object):
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
         self.RememberPosition(frame, row, col, colspan=2, rowspan=height)
+        self.children.append(frame)
+        return frame
+
+    def AddSliderField(self, caption=None, width=10, value=None, MinValue=0, MaxValue=100, orient=Tkinter.HORIZONTAL,
+					row=NEXT_ROW, col=SAME_COL):
+        if self.debug_this:
+          print("AddSliderField", row, col, caption)
+        print('Slider', row, col, self.last_used_row, self.last_used_col)
+        row, col = self.Position(row=row, col=col)
+        print('Slider', row, col, self.last_used_row, self.last_used_col)
+        if caption is None:
+            refname = "Slider"
+            tk_label = None
+        else:
+            refname = caption.lower().replace(' ', '_')
+            tk_label = ttk.Label(self.tkw, text=caption)
+            tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+        # there is also a ttk.Scale, which doesn't support many options
+        # if specified, label appears above the slider
+        # the default showvalue=1 displays the value above the slider, moving with tthe cursor
+        tk_entry = Tkinter.Scale(self.tkw, length=width, from_=MinValue, to=MaxValue, orient=orient)
+        tk_entry.config(showvalue=0)
+        if value is not None:
+            tk_entry.set(value)
+        tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label)
+        self.RememberPosition(frame, row, col, colspan=2)
         self.children.append(frame)
         return frame
 
@@ -479,6 +529,15 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
+    def CreateSubstituteImage(self, width, height, caption=None, textcolor=(255,255,255), TextStartXY=(10,10)):
+        blank_image = np.zeros((height, width, 3), np.uint8)
+        if caption is not None:
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 4
+            line_thickness = 2
+            cv2.putText(blank_image, caption, TextStartXY, font, font_scale, textcolor, line_thickness, cv2.LINE_AA)
+        return blank_image
+
     def UpdateImage(self, pil_fn=None, source_im=None, opencv_fn=None, rgb_im=None):
         # Replaces image in Canvas and Label widgets
         # We can have up to 3 stages of image buffers. We keep references to all
@@ -500,8 +559,13 @@ class TkWidgetDef(object):
             self.rgb_im = rgb_im
             self.pil_im = Image.fromarray(self.rgb_im)
         elif source_im is not None:
+            print("UpdateImage() source_im", source_im.__class__.__name__, source_im.shape)
             if (OpticChiasm is None) or (not isinstance(source_im, OpticChiasm.Image)):
-                self.rgb_im = cv2.cvtColor(source_im, cv2.COLOR_BGR2RGB)
+                # this is an OpenCv image
+                if len(source_im.shape) > 2:
+                    self.rgb_im = cv2.cvtColor(source_im, cv2.COLOR_BGR2RGB)
+                else:
+                    self.rgb_im = cv2.cvtColor(source_im, cv2.COLOR_GRAY2RGB)
             else:
                 self.rgb_im = source_im.ImAsRGB()
             self.pil_im = Image.fromarray(self.rgb_im)
