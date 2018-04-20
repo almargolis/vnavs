@@ -2,6 +2,10 @@ import serial
 from sys import version_info
 
 PY2 = version_info[0] == 2   #Running Python 2.x?
+if PY2:
+    print "Python 2"
+else:
+    print "Python 3"
 
 #
 #---------------------------
@@ -28,7 +32,7 @@ class Controller:
     # assumes.  If two or more controllers are connected to different serial
     # ports, or you are using a Windows OS, you can provide the tty port.  For
     # example, '/dev/ttyACM2' or for Windows, something like 'COM3'.
-    def __init__(self,ttyStr='/dev/ttyACM0',device=0x0c):
+    def __init__(self,ttyStr='/dev/ttyACM1',device=0x0c):
         # Open the command port
         self.usb = serial.Serial(ttyStr)
         # Command lead-in and device number are sent for each Pololu serial command.
@@ -52,6 +56,8 @@ class Controller:
             self.usb.write(cmdStr)
         else:
             self.usb.write(bytes(cmdStr,'latin-1'))
+        self.usb.flush()
+        print "COMMAND SENT"
 
     # Set channels min and max value range.  Use this as a safety to protect
     # from accidentally moving outside known safe parameters. A setting of 0
@@ -127,6 +133,15 @@ class Controller:
         self.sendCmd(cmd)
         lsb = ord(self.usb.read())
         msb = ord(self.usb.read())
+        return (msb << 8) + lsb
+
+    def getErrors(self):
+        cmd = chr(0x21)
+        self.sendCmd(cmd)
+        lsb = ord(self.usb.read())
+        print "LSB", lsb
+        msb = ord(self.usb.read())
+        print "Errs", lsb, msb
         return (msb << 8) + lsb
 
     # Test to see if a servo has reached the set target position.  This only provides
