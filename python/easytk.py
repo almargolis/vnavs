@@ -27,6 +27,7 @@ try:
 except:
     OpticChiasm = None
 
+FIRST_ROW = 0
 SAME_ROW = -1
 NEXT_ROW = -2
 BOTTOM_ROW = -3
@@ -138,8 +139,8 @@ class TkWidgetDef(object):
             col = OVERLAY_COL
         if row == SAME_ROW:
             # same row as the previous item, fixup initial value for first row.
-            if self.last_used_row < 0:
-                self.last_used_row = 0
+            if self.last_used_row < FIRST_ROW:
+                self.last_used_row = FIRST_ROW
             row = self.last_used_row
         elif row == NEXT_ROW:
             # next sequential row
