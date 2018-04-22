@@ -6,9 +6,10 @@ from operator import itemgetter
 import sys
 import re
 
-# OpenCv uses a range of 0 to 179 instead of 0 to 360.
+# OpenCv uses a range of 0 to HSV_MAX_HUE instead of 0 to 360.
 # old, non-working values were yellow=30, orange=12, blue=120, red=178
-HSV_RATIO = 179.0 / 360.0
+HSV_MAX_HUE = 179
+HSV_RATIO = float(HSV_MAX_HUE) / 360.0
 HSV_WHITE = -1
 HSV_YELLOW = int(70.0 * HSV_RATIO)
 HSV_ORANGE = int(60.0 * HSV_RATIO)
@@ -16,10 +17,11 @@ HSV_BLUE = int(240.0 * HSV_RATIO)
 HSV_RED = int(350.0 * HSV_RATIO)
 
 IM_BGR = 'BGR'
-IM_RGB = 'RGB'
 IM_GRAY = 'GRAY'
+IM_HSL = 'HSL'
 IM_HSV = 'HSV'
-COLORCODES = [IM_BGR, IM_GRAY, IM_RGB, IM_HSV]
+IM_RGB = 'RGB'
+IM_COLORCODES = [IM_BGR, IM_GRAY, IM_HSL, IM_HSV, IM_RGB]
 
 DRAW_BGR_RED = (0, 0, 255)
 DRAW_BGR_MAGENTA = (255, 0, 255)
@@ -106,8 +108,17 @@ class Image(object):
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_GRAY))
         return cv2.cvtColor(self._im, transform)
 
+    def ImAsAny(self, colorcode):
+        colorcode = colorcode.upper()
+        if not colorcode in IM_COLORCODES:
+            return None
+        if self.colorcode == colorcode:
+            return self._im
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_HSV))
+        return cv2.cvtColor(self._im, transform)
+
     def ReplaceImage(self, im, colorcode):
-        assert colorcode in COLORCODES
+        assert colorcode in IM_COLORCODES
         self._im = im
         self.colorcode = colorcode
         self.width = 0
@@ -146,15 +157,20 @@ class Image(object):
     def RectFromSymbolicPP(self, p1, p2):
         return RectFromSymbolicPP(self._im, p1, p2)
 
+#
+# This is an interesting example of line locating
+# https://github.com/naokishibuya/car-finding-lane-lines
+#
 # automatically set threshold using technique from
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
 # just saw URL, and have seen it before, so that's re-assuring that I like it
-def auto_canny(grayscale_im, auto_canny_sigma):
+def AutoCanny(grayscale_im, auto_canny_sigma):
     grayscale_im_median = np.median(grayscale_im)
     lower_canny_thresh = int(max(0, (1 - auto_canny_sigma) * grayscale_im_median ))
-    upper_canny_thresh = int(max(255, (1 + auto_canny_sigma) * grayscale_im_median ))
-    lower_canny_thresh = 100
-    upper_canny_thresh = 130
+    upper_canny_thresh = int(min(255, (1 + auto_canny_sigma) * grayscale_im_median ))
+    print("AutoCanny()", grayscale_im_median, lower_canny_thresh, upper_canny_thresh)
+    #lower_canny_thresh = 100
+    #upper_canny_thresh = 130
     return cv2.Canny(grayscale_im, lower_canny_thresh, upper_canny_thresh)
 
 #
@@ -429,23 +445,23 @@ def ColorMaskWhite(hsvChannels, threshold=50):
     return filterMask
 
 def ColorMaskOneHue(hsvImage, hue, huerange=25, saturation=205, saturationrange=50, value=205, valuerange=50):
-    # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to 179,
+    # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to HSV_MAX_HUE,
     # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
-    # Red color, value 0,  is one of the special case where our selection range wraps 0/179.
-    assert (hue >= 0) and (hue <= 179)
+    # Red color, value 0,  is one of the special case where our selection range wraps 0/HSV_MAX_HUE.
+    assert (hue >= 0) and (hue <= HSV_MAX_HUE)
 
     hue_min = hue - huerange
     hue_max = hue + huerange
     hue_min_2 = None
     hue_max_s = None
     if hue_min < 0:
-        hue_min_2 = 127 + hue_min
-        hue_max_2 = 127
+        hue_min_2 = HSV_MAX_HUE + hue_min
+        hue_max_2 = HSV_MAX_HUE
         hue_min = 0
-    if hue_max > 127:
+    if hue_max > HSV_MAX_HUE:
         hue_min_2 = 0
-        hue_max_2 = hue_max - 127
-        hue_max = 127
+        hue_max_2 = hue_max - HSV_MAX_HUE
+        hue_max = HSV_MAX_HUE
 
     saturation_min = saturation - saturationrange
     saturation_max = saturation + saturationrange
@@ -461,6 +477,7 @@ def ColorMaskOneHue(hsvImage, hue, huerange=25, saturation=205, saturationrange=
     if value_max > 255:
         value_max = 255
 
+    print("ColorMaskOneHue()", hue_min, hue_max, saturation_min, saturation_max, value_min, value_max)
     hueMask = cv2.inRange(hsvImage, np.array([hue_min, saturation_min, value_min], np.uint8), np.array([hue_max, saturation_max, value_max], np.uint8))
     if hue_min_2 is not None:
         hueMask_2 = cv2.inRange(hsvImage, np.array([hue_min_2, saturation_min, value_min], np.uint8), np.array([hue_max_2, saturation_max, value_max], np.uint8))

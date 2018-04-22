@@ -18,7 +18,7 @@ import numpy as np
 
 import cameraman
 import easytk
-from easytk import SAME_ROW, NEXT_ROW, OVERLAY_ROW, SAME_COL, NEXT_COL, LEFT_COL, RIGHT_COL, OVERLAY_COL
+from easytk import FIRST_ROW, SAME_ROW, NEXT_ROW, OVERLAY_ROW, SAME_COL, NEXT_COL, LEFT_COL, RIGHT_COL, OVERLAY_COL
 import OpticChiasm
 import vnavs_mqtt
 import vnavs_const as vconst
@@ -148,16 +148,17 @@ ImageFilter(FILTER_NAME_COLORMASK_MULTI,
                         Flags=[])
 
 ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
-			'xstep.exec_im = oc.Image(oc.ColorMaskOneHue(im_in.ImAsHSV(), hue={hue}, huerange={hueRange},' \
+			'xstep.exec_im = oc.Image(oc.ColorMaskOneHue(im_in.ImAsAny("{colorcode}"), hue={hue}, huerange={hueRange},' \
 				+ ' saturation={saturation}, saturationrange={saturationRange},' \
 				+ ' value={value}, valuerange={valueRange}),\n' \
 				+ '	colorcode=oc.IM_GRAY)',
-                        [FilterParmInt('hue', '25', min_value=0, max_value=127, use_slider=True), 
-                        	FilterParmInt('hueRange', '25', min_value=0, max_value=127, use_slider=True), 
-                        	FilterParmInt('saturation', '205', min_value=0, max_value=127, use_slider=True), 
-                        	FilterParmInt('saturationRange', '50', min_value=0, max_value=127, use_slider=True), 
-                        	FilterParmInt('value', '205', min_value=0, max_value=127, use_slider=True), 
-				FilterParmInt('valueRange', '50', min_value=0, max_value=255, use_slider=True)
+                        [FilterParmInt('hue', '25', min_value=0, max_value=OpticChiasm.HSV_MAX_HUE, use_slider=True), 
+                        	FilterParmInt('hueRange', '25', min_value=0, max_value=OpticChiasm.HSV_MAX_HUE, use_slider=True), 
+                        	FilterParmInt('saturation', '205', min_value=0, max_value=255, use_slider=True), 
+                        	FilterParmInt('saturationRange', '50', min_value=0, max_value=255, use_slider=True), 
+                        	FilterParmInt('value', '205', min_value=0, max_value=255, use_slider=True), 
+				FilterParmInt('valueRange', '50', min_value=0, max_value=255, use_slider=True),
+				FilterParmStr('colorcode', OpticChiasm.IM_HSV)
 			],
                         Flags=[FLAG_SLIDERS])
 
@@ -195,8 +196,23 @@ ImageFilter('Blur',
 			[FilterParmPoint('ksize', '3,3')],
 			Flags=[])
 
+ImageFilter('BlurGaussian',
+			'xstep.exec_im = oc.Image(im=cv2.GaussianBlur(im_in.im, {ksize}, {sigmaX}), colorcode=im_in.colorcode)',
+			[FilterParmPoint('ksize', '3,3'), FilterParmFloat('sigmaX', '0.0')],
+			Flags=[])
+
+ImageFilter('BlurMedian',
+			'xstep.exec_im = oc.Image(im=cv2.medianBlur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
+			[FilterParmInt('ksize', '3')],
+			Flags=[])
+
+ImageFilter('Canny',
+			'xstep.exec_im = oc.Image(im=cv2.Canny(im_in.ImAsGray(), {threshold1}, {threshold2}), colorcode=oc.IM_GRAY)',
+			[FilterParmFloat('threshold1', '100'), FilterParmFloat('threshold2', '300')],
+			Flags=[])
+
 ImageFilter('CannyAuto',
-			'xstep.exec_im = oc.Image(im=oc.auto_canny(im_in.ImAsGray(), {sigma}), colorcode=oc.IM_GRAY)',
+			'xstep.exec_im = oc.Image(im=oc.AutoCanny(im_in.ImAsGray(), {sigma}), colorcode=oc.IM_GRAY)',
 			[FilterParmFloat('sigma', '0.33')],
 			Flags=[])
 
@@ -304,7 +320,7 @@ class ProcessStep(object):
             info_value = self.input_panel.AddLabel('', row=SAME_ROW, col=NEXT_COL)
             self.info_widgets.append((info_label, info_value))
         self.parm_widgets = []
-        for ix in range(6):
+        for ix in range(8):
             if ix == 0:
                 parm_row = self.filter_selection.row
                 parm_col = NEXT_COL
@@ -321,8 +337,9 @@ class ProcessStep(object):
         #
         # output_panel
         #
-        self.image_widget = self.output_panel.AddCanvas(OnClick=self.OnImageClick)
-        self.deposition = self.output_panel.AddLabel(row=0, col=2)
+        self.image_widget = self.output_panel.AddCanvas(OnClick=self.OnImageClick, rowspan=2)
+        self.execution_time = self.output_panel.AddLabel(row=FIRST_ROW, col=NEXT_COL)
+        self.deposition = self.output_panel.AddLabel(row=NEXT_ROW, col=SAME_COL)
         self.thumbnail = self.app.thumbnailFrame.AddLabelImage(thumbnailof=self.image_widget, row=0, col=NEXT_COL)
         self.thumbnail.tkw.bind("<Button-1>", self.SelectTab)
         self.source_im = None			# captured image
@@ -344,7 +361,7 @@ class ProcessStep(object):
 
     def AddInfoSliders(self):
         for ix, this in enumerate(self.parm_widgets):
-            if self.parms_specs[ix].use_slider:
+            if (ix < len(self.parms_specs)) and (self.parms_specs[ix].use_slider):
                 self.AddInfo(self.parms_specs[ix].caption, this[0].Value())
 
     def SetInfo(self, ix, label, value):
@@ -484,6 +501,7 @@ class ProcessStep(object):
         exec_global_vars['np'] = np
         exec_global_vars['oc'] = OpticChiasm
         exec_global_vars['xstep'] = self
+        execution_start = time.time()
         #
         base_image = None
         for ix, this in enumerate(self.steps):
@@ -550,6 +568,7 @@ class ProcessStep(object):
             else:
                 step_display_image = self.exec_im
         self.image_widget.UpdateImage(source_im=step_display_image.im)
+        self.execution_time.ReplaceValue("{:f}ms".format((time.time() - execution_start) / 1000))
         return
 
 
