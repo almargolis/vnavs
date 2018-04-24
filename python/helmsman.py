@@ -3,6 +3,7 @@ from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
 import json
+import math
 import traceback
 import io
 import Queue as queue			# queue in v3
@@ -55,7 +56,7 @@ class vehicle(object):
         # mot_jump_f and mot_jump_r are SPEEDS, they are an increment above the pulse dead zone
         self.mot_jump_f = 3			# This is the minimum speed to start moving from stop
         self.mot_jump_r = -1			# This is the minimum speed to start moving from stop
-        self.mot_ramp = 0			# Current ramping increment
+        self.mot_ramp_increment = 0			# Current ramping increment
         self.mot_this_pulse = 0
         self.mot_this_tick = 0
         self.mot_last_pulse = 0
@@ -66,7 +67,7 @@ class vehicle(object):
         self.mot_speed_goal = SPEED_STOP	# we may be ramping toward this
         self.mot_speed_ramp = SPEED_STOP	# current speed, on way to goal
         self.speed_max = 13411			# 30mph / 13.4112 meters/second
-        self.speed_max = 90			# servo speed request
+        self.speed_max = 40			# servo speed request
         #
         self.steering = self.board.get_pin('d:10:s')
         self.steering_offset = 90
@@ -112,55 +113,55 @@ class vehicle(object):
             # We want to stop.
             # This is all hardwired ZERO to avoid ambiguity about stopping.
             self.mot_speed_ramp = SPEED_STOP
-            self.mot_ramp = SPEED_STOP
+            self.mot_ramp_increment = RAMP_NONE
             return
         if self.mot_speed_ramp == SPEED_STOP:
             # we are starting to move from a stop
             if self.mot_speed_goal >= self.mot_jump_f:
                 # we are starting fast (forward), so just do it
                 self.mot_speed_ramp = self.mot_speed_goal
-                self.mot_ramp = SPEED_STOP
+                self.mot_ramp_increment = RAMP_NONE
                 return
             elif self.mot_speed_goal <= self.mot_jump_r:
                 # we are starting fast (reverse), so just do it
                 self.mot_speed_ramp = self.mot_speed_goal
-                self.mot_ramp = SPEED_STOP
+                self.mot_ramp_increment = RAMP_NONE
                 return
             elif self.mot_speed_goal > SPEED_STOP:
                 # we are want to go slow slow (forward), need to make an initial jump to overcome standing inertia
                 self.mot_speed_ramp = self.mot_jump_f
-                self.mot_ramp = -1
+                self.mot_ramp_increment = RAMP_DOWN
                 return
             else:
                 # we are want to go slow slow (reverse), need to make an initial jump to overcome standing inertia
                 self.mot_speed_ramp = self.mot_jump_r
-                self.mot_ramp = +1
+                self.mot_ramp_increment = RAMP_UP
                 return
         # this is speed change while moving
         self.mot_speed_ramp = self.mot_speed_goal
-        self.mot_ramp = SPEED_STOP
+        self.mot_ramp_increment = RAMP_NONE
 
     def RampSpeeed(self):
-        self.mot_speed_ramp += self.mot_ramp
-        print("Ramp:", self.mot_speed_ramp, self.mot_ramp, self.mot_speed_goal)
+        self.mot_speed_ramp += self.mot_ramp_increment
+        print("Ramp:", self.mot_speed_ramp, self.mot_ramp_increment, self.mot_speed_goal)
         if self.mot_speed_goal > SPEED_STOP:
-            if self.mot_ramp > SPEED_STOP:
+            if self.mot_ramp_increment > RAMP_NONE:
                 if self.mot_speed_ramp >= self.mot_speed_goal:
                     self.mot_speed_ramp = self.mot_speed_goal
-                    self.mot_ramp = SPEED_STOP 
+                    self.mot_ramp_increment = RAMP_NONE 
             else:
                 if self.mot_speed_ramp <= self.mot_speed_goal:
                     self.mot_speed_ramp = self.mot_speed_goal
-                    self.mot_ramp = SPEED_STOP
+                    self.mot_ramp_increment = RAMP_NONE
         else:
-            if self.mot_ramp > SPEED_STOP:		# positive ramp, slowing down toward zero
+            if self.mot_ramp_increment > RAMP_NONE:		# positive ramp, slowing down toward zero
                 if self.mot_speed_ramp >= self.mot_speed_goal:
                     self.mot_speed_ramp = self.mot_speed_goal
-                    self.mot_ramp = SPEED_STOP
+                    self.mot_ramp_increment = RAMP_NONE
             else:
                 if self.mot_speed_ramp <= self.mot_speed_goal:
                     self.mot_speed_ramp = self.mot_speed_goal
-                    self.mot_ramp = SPEED_STOP
+                    self.mot_ramp_increment = RAMP_NONE
 
     def Estop(self):
         self.motor.write(self.mot_offset)	# Stop motor if on
@@ -183,19 +184,23 @@ class vehicle(object):
         # This is fragile. Need to soften states to avoid race conditions.
         # This must be called frequently in order to maintain control of the
         # vehicle. Maybe it should be in its own thread.
-        print("M-Tick", self.mot_ramp, self.mot_speed_goal)
-        if self.mot_ramp != SPEED_STOP:
-            self.RampSpeeed()
-            self.mot_this_pulse, self.mot_this_tick = self.ConvertSpeedToPulseParameter(self.mot_speed_ramp)
+        #print("M-Tick", self.mot_ramp_increment, self.mot_speed_goal)
+        #
+        # self.mot_speed_goal is how fast we want to go
+        # self.mot_speed_ramp is current speed setting, which ramps toward the goal
+        #
         if self.mot_speed_goal == SPEED_STOP:
             self.motor.write(self.mot_offset)	# Stop motor if on
             return
+        if self.mot_ramp_increment != RAMP_NONE:
+            self.RampSpeeed()
+        self.mot_this_pulse, self.mot_this_tick = self.ConvertSpeedToPulseParameter(self.mot_speed_ramp)
         # we know our pulse requirement, tell the hardware
         # self.mot_this_pulse and self.mot_this_tick is how fast we are driving now.
         # self.mot_goal_pulse and self.mot_goal_tick are the speed we are ramping towards.
         # In reality, they are the same most of the time.
         tick_pattern = TICK_PATTERNS[self.tickBits][self.mot_this_tick]
-        print("Pattern @", self.mot_tick_clock, self.tickBits, self.mot_this_tick, tick_pattern)
+        #print("Pattern @", self.mot_tick_clock, self.tickBits, self.mot_this_tick, tick_pattern)
         tick_rule = tick_pattern[self.mot_tick_clock]
         if tick_rule:
             # we want to move on this tick
@@ -211,8 +216,7 @@ class vehicle(object):
             # we want to "coast" on this tick -- maintain speed
             self.actualPulse = self.mot_offset
         self.motor.write(self.actualPulse)
-        if (self.mot_last_pulse != self.mot_this_pulse) or (self.mot_last_tick != self.mot_this_tick):
-            print("Motor:", self.actualPulse, "@", self.mot_tick_clock, "(", self.mot_speed_ramp, "->", self.mot_speed_goal,"Spec:", self.mot_this_pulse, ":", self.mot_this_tick)
+        print("Motor:", self.actualPulse, "@", self.mot_tick_clock, "(", self.mot_speed_ramp, "->", self.mot_speed_goal,"Spec:", self.mot_this_pulse, ":", self.mot_this_tick)
         self.mot_tick_clock += 1
         if self.mot_tick_clock > self.tickMask:
             self.mot_tick_clock = 0
@@ -286,6 +290,10 @@ class vehicle(object):
         if direction != self.steering_last:
             print("Steer:", direction)
 
+RAMP_NONE = 0
+RAMP_UP = 1
+RAMP_DOWN = -1
+
 STATE_DEADMAN = 'd'			# d=deadman active
 STATE_CONTINUOUS = 'c'			# c=continuous-no timer
 STATE_TIMED_OUT = 't'			# t=time out
@@ -302,7 +310,6 @@ class helmsman(vnavs_mqtt.mqtt_node):
         self.orders_q = queue.Queue(10)
         super().__init__(Subscriptions=[vconst.helmsman_orders_topic], SingleThreaded=False, BrokerType='F')
         self.v = vehicle()
-        self.speed_goal = 0		# (int) mm/sec
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
         self.deadman_time = 0		# E-Stop if time.time() exceeds this
         self.state = STATE_DEADMAN
@@ -317,7 +324,7 @@ class helmsman(vnavs_mqtt.mqtt_node):
                 return
 
     def rmsg_helmsman_orders(self, payload):
-        print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
+        #print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
         if 'state' in payload:
             print("--------------------")
             new_state = payload['state']
@@ -346,17 +353,17 @@ class helmsman(vnavs_mqtt.mqtt_node):
             else:
                 speed_request = payload['speed']	# Note: alphanumeric
             self.v.NewSpeedGoal(speed_request)
-            print("SPEED", speed_request)
+            #print("SPEED", speed_request)
             #self.GetGoalSpeed(speed_request)
         if 'heading' in payload:
             if 'heading_scale_min' in payload:
                 heading_raw = int(payload['heading'])
                 heading_scale_min = int(payload['heading_scale_min'])
                 heading_scale_max = int(payload['heading_scale_max'])
-                heading_request = self.ScaleRequest(heading_raw, heading_scale_min, heading_scale_max, -self.v.steering_max, self.v.steering_max)
+                heading_request = self.ScaleRequest(heading_raw, heading_scale_min, heading_scale_max, -self.v.steering_max, self.v.steering_max, sensitivity=None)
             else:
                 heading_request = payload['heading']	# Note: alphanumeric
-            print ("STEER", heading_request)
+            #print ("STEER", heading_request)
             self.v.NewSteeringGoal(heading_request)
             #self.GetGoalSteering(heading_request)
         if 'timer' in payload:
@@ -369,7 +376,7 @@ class helmsman(vnavs_mqtt.mqtt_node):
             # end timeout when new command arrives
             self.state = STATE_DEADMAN
 
-    def ScaleRequest(self, raw_value, raw_min, raw_max, target_min, target_max):
+    def ScaleRequest(self, raw_value, raw_min, raw_max, target_min, target_max, sensitivity=0.05):
         # return an integer value within target range proportional to raw value in raw range
         if raw_max >= raw_min:
             raw_range = raw_max - raw_min
@@ -378,8 +385,20 @@ class helmsman(vnavs_mqtt.mqtt_node):
             raw_range = raw_min - raw_max
             raw_inversion = -1.0
         raw_range_pct = float(raw_value - raw_min) / float(raw_range)
-        target_range = float(target_max - target_min)
-        request_value = ((target_range * raw_range_pct) + float(target_min)) * raw_inversion
+        if sensitivity is None:
+            # linear scaling
+            target_range = float(target_max - target_min)
+            request_value = ((target_range * raw_range_pct) + float(target_min)) * raw_inversion
+        else:
+            # parabolic scaling
+            # This assumes target range is symetrial around zero.
+            assert (target_min + target_max) == 0
+            target_max_x = math.sqrt(float(target_max) / sensitivity)
+            target_x_value = ((target_max_x * 2) * raw_range_pct) - target_max_x
+            request_value = (sensitivity * math.pow(target_x_value, 2.0)) * raw_inversion
+            if target_x_value < 0:
+                request_value = 0 - request_value
+            print("SCALE", raw_value, request_value, target_x_value)
         return int(request_value)
 
     def DoLoop(self):
@@ -395,27 +414,29 @@ class helmsman(vnavs_mqtt.mqtt_node):
         if self.state == STATE_ESTOPPED:
             self.v.Estop()
             return
-        # The following will process all orders, one per loop.
-        # Maybe we should empty queue and just process the last one.
-        try:
-            payload = self.orders_q.get_nowait()
-        except queue.Empty:
-            payload = None
+        # Process just the nost recent order if we have multiples.
+        payload = None
+        while True:
+            try:
+                payload = self.orders_q.get_nowait()
+            except queue.Empty:
+                break
         if payload is not None:
             self.InterpretOrders(payload)
 
         if self.state in STATES_MOVING:
             # Speed and Steering goals are set asynchronously via MQTT messages
             self.v.Tick()
-        sleep_secs = 0.1			# This was my first try, slow speeds choppy
         sleep_secs = 2				# This is very slow, for testing
-        sleep_secs = 0.001
         sleep_secs = 0.02
+        sleep_secs = 0.001
+        sleep_secs = 0.1			# This was my first try, slow speeds choppy
+        sleep_secs = 0.01
         time.sleep(sleep_secs)
 
     def CleanupLoop(self):
         self.v.Estop()
-
+"""
     def SpeedRequestStr(self, speed_request):
         speed_goal = None
         if speed_request in '+=':
@@ -485,6 +506,8 @@ class helmsman(vnavs_mqtt.mqtt_node):
                 steering_goal = -self.v.steering_max
         else:
           self.steering_goal = steering_goal
+
+"""
 
 def Test_Helmsman_Node():
     h = helmsman()

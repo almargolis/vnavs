@@ -6,9 +6,10 @@ from operator import itemgetter
 import sys
 import re
 
-# OpenCv uses a range of 0 to 179 instead of 0 to 360.
+# OpenCv uses a range of 0 to HSV_MAX_HUE instead of 0 to 360.
 # old, non-working values were yellow=30, orange=12, blue=120, red=178
-HSV_RATIO = 179.0 / 360.0
+HSV_MAX_HUE = 179
+HSV_RATIO = float(HSV_MAX_HUE) / 360.0
 HSV_WHITE = -1
 HSV_YELLOW = int(70.0 * HSV_RATIO)
 HSV_ORANGE = int(60.0 * HSV_RATIO)
@@ -16,10 +17,11 @@ HSV_BLUE = int(240.0 * HSV_RATIO)
 HSV_RED = int(350.0 * HSV_RATIO)
 
 IM_BGR = 'BGR'
-IM_RGB = 'RGB'
 IM_GRAY = 'GRAY'
+IM_HSL = 'HSL'
 IM_HSV = 'HSV'
-COLORCODES = [IM_BGR, IM_GRAY, IM_RGB, IM_HSV]
+IM_RGB = 'RGB'
+IM_COLORCODES = [IM_BGR, IM_GRAY, IM_HSL, IM_HSV, IM_RGB]
 
 DRAW_BGR_RED = (0, 0, 255)
 DRAW_BGR_MAGENTA = (255, 0, 255)
@@ -42,6 +44,12 @@ RACE_THRESHOLD = 130
 RACE_THRESHOLD = 50
 RACE_THRESHOLD = 150
 
+
+#
+# OpenCv images are numpy arrays
+#   [0,0] is the upper, left corner of the image
+#   The image is stored as an array of horizontal lines, so the index is [y, x]
+#
 class Image(object):
     """
 	Image is a wrapper around OpenCv images. Its main unique value is adding colorcode as a property
@@ -49,7 +57,7 @@ class Image(object):
         OpenCv and numpy operations that I find non-intuitive.
     """
     __slots__ = (
-	'colorcode', 'colordepth', 'height', '_im', 'width' 
+	'colorcode', 'colordepth', 'height', '_im', 'shape', 'width' 
     )
 
     def __init__(self, im=None, colorcode=None, opencv_fn=None):
@@ -59,7 +67,10 @@ class Image(object):
         self.ReplaceImage(im, colorcode)
 
     def copy(self):
-        return Image(im=self._im.copy(), colorcode=self.colorcode)
+        if self._im is None:
+            return Image(im=None, colorcode=self.colorcode)
+        else:
+            return Image(im=self._im.copy(), colorcode=self.colorcode)
 
     def CopyAsBGR(self):
         if self.colorcode == IM_BGR:
@@ -78,6 +89,8 @@ class Image(object):
         return self._im
 
     def ImAsRGB(self):
+        if self._im is None:
+            return None
         if self.colorcode == IM_RGB:
             return self._im
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_RGB))
@@ -95,8 +108,17 @@ class Image(object):
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_GRAY))
         return cv2.cvtColor(self._im, transform)
 
+    def ImAsAny(self, colorcode):
+        colorcode = colorcode.upper()
+        if not colorcode in IM_COLORCODES:
+            return None
+        if self.colorcode == colorcode:
+            return self._im
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_HSV))
+        return cv2.cvtColor(self._im, transform)
+
     def ReplaceImage(self, im, colorcode):
-        assert colorcode in COLORCODES
+        assert colorcode in IM_COLORCODES
         self._im = im
         self.colorcode = colorcode
         self.width = 0
@@ -110,17 +132,45 @@ class Image(object):
                 self.colordepth = shape[2]
             else:
                 self.colordepth = 1
-    
+        self.shape = (self.height, self.width, self.colordepth)
 
+    def Write(self, fn):
+        cv2.imwrite(fn, self._im)
+
+    def AverageHue(self, rect=None):
+        if rect is None:
+            hsv = self.ImAsHSV()
+        else:
+            hsv = self.Crop(rect).ImAsHSV()
+        average_color = hsv[:, :, 0].mean()
+        return average_color
+
+    def Crop(self, rect):
+        return Image(im=self._im[rect.y_min:rect.y_max+1, rect.x_min:rect.x_max+1], colorcode=self.colorcode)
+
+    def DrawRectangle(self, rect, color=DRAW_BGR_GREEN, thickness=2):
+        cv2.rectangle(self._im, rect.p1, rect.p2, color, thickness)
+    
+    def RectFromSymbolicYX(self, y_range, x_range):
+        return RectFromSymbolicYX(self._im, y_range, x_range)
+
+    def RectFromSymbolicPP(self, p1, p2):
+        return RectFromSymbolicPP(self._im, p1, p2)
+
+#
+# This is an interesting example of line locating
+# https://github.com/naokishibuya/car-finding-lane-lines
+#
 # automatically set threshold using technique from
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
 # just saw URL, and have seen it before, so that's re-assuring that I like it
-def auto_canny(grayscale_im, auto_canny_sigma):
+def AutoCanny(grayscale_im, auto_canny_sigma):
     grayscale_im_median = np.median(grayscale_im)
     lower_canny_thresh = int(max(0, (1 - auto_canny_sigma) * grayscale_im_median ))
-    upper_canny_thresh = int(max(255, (1 + auto_canny_sigma) * grayscale_im_median ))
-    lower_canny_thresh = 100
-    upper_canny_thresh = 130
+    upper_canny_thresh = int(min(255, (1 + auto_canny_sigma) * grayscale_im_median ))
+    print("AutoCanny()", grayscale_im_median, lower_canny_thresh, upper_canny_thresh)
+    #lower_canny_thresh = 100
+    #upper_canny_thresh = 130
     return cv2.Canny(grayscale_im, lower_canny_thresh, upper_canny_thresh)
 
 #
@@ -394,55 +444,58 @@ def ColorMaskWhite(hsvChannels, threshold=50):
     filterMask = cv2.bitwise_and(saturationMask, valueMask)
     return filterMask
 
-def ColorMaskOneColor(hsvChannels, hueValue, huerange=25, threshold=50):
-    # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to 179,
+def ColorMaskOneHue(hsvImage, hue, huerange=25, saturation=205, saturationrange=50, value=205, valuerange=50):
+    # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to HSV_MAX_HUE,
     # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
-    # Red color, value 0,  is one of the special case where our selection range wraps 0/179.
-    assert (hueValue >= 0) and (hueValue <= 179)
+    # Red color, value 0,  is one of the special case where our selection range wraps 0/HSV_MAX_HUE.
+    assert (hue >= 0) and (hue <= HSV_MAX_HUE)
 
-    minSaturation = threshold
-    minValue = threshold
+    hue_min = hue - huerange
+    hue_max = hue + huerange
+    hue_min_2 = None
+    hue_max_s = None
+    if hue_min < 0:
+        hue_min_2 = HSV_MAX_HUE + hue_min
+        hue_max_2 = HSV_MAX_HUE
+        hue_min = 0
+    if hue_max > HSV_MAX_HUE:
+        hue_min_2 = 0
+        hue_max_2 = hue_max - HSV_MAX_HUE
+        hue_max = HSV_MAX_HUE
 
-    hueArray = hsvChannels[0]
+    saturation_min = saturation - saturationrange
+    saturation_max = saturation + saturationrange
+    if saturation_min < 0:
+        saturation_min = 0
+    if saturation_max > 255:
+        saturation_max = 255
 
-    # is the color within the lower hue range?
-    hueMask = cv2.inRange(hueArray, hueValue - huerange, hueValue + huerange)
+    value_min = value - valuerange
+    value_max = value + valuerange
+    if value_min < 0:
+        value_min = 0
+    if value_max > 255:
+        value_max = 255
 
-    # If the color is near the limits of the 0 to 179 hue value range, check the overflow range.
-    hueWrapMask = None
-    if (hueValue - huerange) < 0:
-        hueWrapLowerValue = 179 - (hueValue - huerange)
-        hueWrapMask = cv2.inRange(hueArray, hueWrapLowerValue, 179)
-    elif (hueValue + huerange) > 179:
-        hueWrapUpperValue = (hueValue + huerange) - 179
-        hueWrapMask = cv2.inRange(hueArray, 0, hueWrapUpperValue)
-    if hueWrapMask is not None:
-        hueMask = cv2.bitwise_or(hueMask, hueWrapMask)
+    print("ColorMaskOneHue()", hue_min, hue_max, saturation_min, saturation_max, value_min, value_max)
+    hueMask = cv2.inRange(hsvImage, np.array([hue_min, saturation_min, value_min], np.uint8), np.array([hue_max, saturation_max, value_max], np.uint8))
+    if hue_min_2 is not None:
+        hueMask_2 = cv2.inRange(hsvImage, np.array([hue_min_2, saturation_min, value_min], np.uint8), np.array([hue_max_2, saturation_max, value_max], np.uint8))
+        hueMask = cv2.bitwise_or(hueMask, hueMask_2)
 
-    # Now we have to filter pixels where saturation and value do not fit the limits:
-    ret, saturationMask = cv2.threshold(hsvChannels[1], minSaturation, 255, cv2.THRESH_BINARY)
-    ret, valueMask = cv2.threshold(hsvChannels[2], minValue, 255, cv2.THRESH_BINARY)
-
-    print("HUE SHAPE", hueMask.shape, hueMask.dtype)
-    print("SAT SHAPE", saturationMask.shape, saturationMask.dtype)
-    print("VAL SHAPE", valueMask.shape, valueMask.dtype)
-    filterMask = cv2.bitwise_and(saturationMask, valueMask)
-    print("FIL SHAPE", filterMask.shape)
-    hueMask = cv2.bitwise_and(hueMask, filterMask)
-    print("FINAL SHAPE", hueMask.shape)
     return hueMask
 
-def ColorMask(hsvImage, colors=[0], huerange=25, threshold=50, wthreshold=50):
+def ColorMask(hsvImage, colors=[0], huerange=25, saturation=205, saturationrange=50, value=205, valuerange=50):
     # adapted from http://stackoverflow.com/questions/35866411/opencv-how-to-detect-lines-of-a-specific-colour
-    # convert to HSV color space
-    hsvChannels = cv2.split(hsvImage)
+    # input is an HSV image. Output is a monochrome image
+    print("ColorMask()", colors, huerange)
 
     result = None
     for this_hue in colors:
         if this_hue < 0:
             this_result = ColorMaskWhite(hsvChannels, threshold=wthreshold)
         else:
-            this_result = ColorMaskOneColor(hsvChannels, this_hue, huerange=huerange, threshold=threshold)
+            this_result = ColorMaskOneHue(hsvImage, this_hue, huerange, saturation, saturationrange, value, valuerange)
         if result is None:
             result = this_result
         else:
@@ -805,72 +858,104 @@ class ReflexEntities(object):
         self.slope_ct = ct_slope
         cv2.imwrite('temp/ann.jpeg', self.annotated)
 
-def Raw_Crop_TranslateSym(c, ext, p1=None):
-    if isinstance(c, basestring):
-        if c[0] == 'm':
-            if c == 'm':
-                return ext / 2
+#
+# Translate an image axis index c
+#   c:
+#	if positive integer: simply the index
+#       if negative integer: index backwards from ext
+#       Otherwise a simple symbolic math operation +/- where the first operand can be:
+#               b: beginning / 0 / zero
+#		e: extent / end of axis
+#		m: middle of axis
+#               p: relative to index p1, used to specify end index as an offset (ususally lenght/width)
+#
+#   ext: (extent) maximum index value for that axis (integer)
+def ResolveSymbolicIndex(c, ext, p1=None):
+    def Raw_ResolveSymbolicIndex(c, ext, p1=None):
+        print('Raw_ResolveSymbolicIndex', `c`, ext, p1)
+        if isinstance(c, basestring):
+            if c[0] == 'm':
+                if c == 'm':
+                    return ext / 2
+                else:
+                    return (ext / 2) + int(c[1:])
+            elif c[0] == 'e':
+                if c == 'e':
+                    return ext
+                else:
+                    return ext + int(c[1:])
+            elif (c[0] == 'p') and (p1 is not None):
+                if c == 'p':
+                    return p1
+                else:
+                    return p1 + int(c[1:])		# c[1:] begins with plus or minus sign
+            elif c[0] == 'b':
+                if c == 'b':
+                    return 0
+                else:
+                    return int(c[1:])
             else:
-                return (ext / 2) + int(c[1:])
-        elif c[0] == 'e':
-            if c == 'e':
-                return ext
-            else:
-                return ext + int(c[1:])
-        elif (c[0] == 'p') and (p1 is not None):
-            if c == 'p':
-                return p1
-            else:
-                return p1 + int(c[1:])
-        elif c[0] == 'b':
-            if c == 'b':
-                return 0
-            else:
-                return int(c[1:])
+                print("CROP-T", c, int(c))
+                c = int(c)
+                if c < 0:
+                    return ext + c
+                else:
+                    return c
         else:
-            print("CROP-T", c, int(c))
-            c = int(c)
             if c < 0:
                 return ext + c
             else:
                 return c
-    else:
-        if c < 0:
-            return ext + c
-        else:
-            return c
-
-def Crop_TranslateSym(c, ext, p1=None):
-    res = Raw_Crop_TranslateSym(c=c, ext=ext, p1=p1)
+    # Main part of function, limits raw calcualtaion to image extents
+    res = Raw_ResolveSymbolicIndex(c=c, ext=ext, p1=p1)
     if res < 0:
         return 0
     if res > ext:
         return ext
     return res
 
-def Crop_TranslateYX(im, y_range, x_range):
-    height, width, channels = im.shape
-    y_low = Crop_TranslateSym(y_range[0], height)
-    y_high = Crop_Translat_Sym(y_range[1], height)
-    x_low = Crop_TranslateSym(x_range[0], width)
-    x_high = Crop_TranslateSym(x_range[1], width)
-    if x_low > x_high:
-        x_low, x_high = x_high, x_low
-    if y_low > y_high:
-        y_low, y_high = y_high, y_low
-    return (y_low, y_high, x_low, x_high)
+class Rect(object):
+    __slots__ = ('y_min', 'y_max', 'x_min', 'x_max')
+    def __init__(self, y_min, y_max, x_min, x_max):
+        self.y_min = y_min
+        self.y_max = y_max
+        self.x_min = x_min
+        self.x_max = x_max
 
-def Crop_TranslatePP(im, p1, p2):
+    def __repr__(self):
+        return '[({0}, {1}), ({2}, {3})]'.format(self.x_min, self.y_min, self.x_max, self.y_max)
+
+    @property
+    def p1(self):
+        return(self.x_min, self.y_min)
+
+    @property
+    def p2(self):
+        return(self.x_max, self.y_max)
+
+def RectFromSymbolicYX(im, y_range, x_range):
     height, width, channels = im.shape
-    x_low = Crop_TranslateSym(p1[0], width)
-    y_low = Crop_TranslateSym(p1[1], height)
-    x_high = Crop_TranslateSym(p2[0], width, x_low)
-    y_high = Crop_TranslateSym(p2[1], height, y_low)
-    if x_low > x_high:
-        x_low, x_high = x_high, x_low
-    if y_low > y_high:
-        y_low, y_high = y_high, y_low
-    return (y_low, y_high, x_low, x_high)
+    y_min = ResolveSymbolicIndex(y_range[0], height)
+    y_max = ResolveSymbolicIndex(y_range[1], height)
+    x_min = ResolveSymbolicIndex(x_range[0], width)
+    x_max = ResolveSymbolicIndex(x_range[1], width)
+    if x_min > x_max:
+        x_min, x_max = x_max, x_min
+    if y_min > y_max:
+        y_min, y_max = y_max, y_min
+    return Rect(y_min, y_max, x_min, x_max)
+
+def RectFromSymbolicPP(im, p1, p2):
+    height, width, channels = im.shape
+    x_min = ResolveSymbolicIndex(p1[0], width)
+    y_min = ResolveSymbolicIndex(p1[1], height)
+    x_max = ResolveSymbolicIndex(p2[0], width, x_min)
+    y_max = ResolveSymbolicIndex(p2[1], height, y_min)
+    if x_min > x_max:
+        x_min, x_max = x_max, x_min
+    if y_min > y_max:
+        y_min, y_max = y_max, y_min
+    return Rect(y_min, y_max, x_min, x_max)
 
 class Robogames(object):
     def __init__(self, image, colors):
