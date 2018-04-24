@@ -32,6 +32,17 @@ BOT_1_MAP_TRANSPOSE = [
 
 BOT_1_H = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
+#
+# FilterParm.GetValue() must be exception-safe. 
+# The application runs in multiple threads (tkinter, vnavs_mqtt and main().
+# Step execution may be called while the user is editing, so a partially edited
+# value may be picked up.
+#
+# This is probably a bug, not a feature. Execution should be orderly and only
+# in the main() thread. But maintining this rule keeps the system as user friendly
+# as possible in the event of errors and doesn't really have a downside except
+# perhaps a flash of odd results if the step is executed while the user is editing.
+#
 class FilterParm(object):
     __slots__ = ('caption', 'default', 'name', 'max_value', 'min_value', 'use_slider')
     def __init__(self, name, default, click_point=False, 
@@ -57,7 +68,11 @@ class FilterParmInt(FilterParm):
     def GetValue(self, raw_value):
         if isinstance(raw_value, str):
             raw_value = raw_value.strip()
-        return str(int(raw_value))
+        try:
+            i = int(raw_value)
+        except:
+            i = 0
+        return str(i)
 
 class FilterParmStr(FilterParm):
     def GetValue(self, raw_value):
@@ -87,8 +102,13 @@ class FilterParmPointSym(FilterParm):
         # The defaults of 'b' and 'e' works well for ranges like CropYX.
         # Not so much for points like CropPP.
         v = raw_value.split(',')
-        x = v[0].strip()
-        y = v[1].strip()
+        x = ''
+        y = ''
+        if len(v) >= 1:
+            x = v[0].strip()
+        if len(v) >= 2:
+            y = v[1].strip()
+            
         if x == '':
             x = 'b'
         if y == '':
@@ -104,11 +124,10 @@ SRC_LOCAL_CAMERA = 'local'
 SRC_BOT_CAMERA = 'bot'
 
 FILTER_NAME_ANALYZER		= 'Analyzer'
-FILTER_NAME_CAPTUREDIMAGE	= 'CapturedImage'
 FILTER_NAME_COLORMASK_MULTI	= 'ColorMaskMulti'
 FILTER_NAME_COLORMASK_SINGLE	= 'ColorMaskSingle'
 FILTER_NAME_CROPPP		= 'CropPP'
-FILTER_NAME_FILEIMAGE		= 'FileImage'
+FILTER_NAME_IMAGE		= 'Image'
 
 FLAG_ISBASE = 'isbase'
 FLAG_SLIDERS = 'sliders'
@@ -133,7 +152,7 @@ class ImageFilter(object):
 #	previous step exec_im and its shape as im, h, w and c,
 #	xstep is the current ProcessStep() with exec_im set to None.
 #
-ImageFilter(FILTER_NAME_CAPTUREDIMAGE,
+ImageFilter(FILTER_NAME_IMAGE,
 			'xstep.exec_im = xstep.source_im.copy()',
 			[],
 			Flags=['isbase'])
@@ -161,12 +180,6 @@ ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
 				FilterParmStr('colorcode', OpticChiasm.IM_HSV)
 			],
                         Flags=[FLAG_SLIDERS])
-
-ImageFilter(FILTER_NAME_FILEIMAGE,
-			"xstep.exec_im = oc.Image(opencv_fn='{opencv_fn}')",
-			[FilterParmStr('opencv_fn', '')],
-			Flags=[FLAG_ISBASE])
-
 
 filter = ImageFilter(FILTER_NAME_CROPPP,
 			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n'
@@ -290,7 +303,8 @@ class ProcessStep(object):
 			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_im', 'exec_lines',
 			'filter_selection',
 			'image_widget', 'info_data', 'info_widgets', 'input_panel', 'ix', 'output_panel', 
-			'parm_widgets', 'parm_values', 'parms_specs', 'point_target', 'source_im', 'tab', 'tab_title', 'thumbnail',
+			'parm_widgets', 'parm_values', 'parms_specs', 'point_target', 'source_im',
+			'tab', 'tab_title', 'thumbnail',
 			'zoom_popup'
 		)
     app = None
@@ -388,7 +402,7 @@ class ProcessStep(object):
         # Click this to refresh after changing a parameter. We don't automatically do
         # that in case intermediate updates might fail when make several changes.
         self.SetFilter()			# This saves the parameter values
-        self.ExecuteAllSteps()			# this processes all steps
+        self.app.step_execution_needed = True
 
     def OnDeleteStep(self):
         # This event is here because it is associated with the step and
@@ -447,7 +461,7 @@ class ProcessStep(object):
     def NewFilter(self, *args):
         # TK callbacks seem to incude *args
         self.SetFilter()
-        self.ExecuteAllSteps()
+        self.app.step_execution_needed = True
 
     def SetFilter(self, FilterName=None, NewParms=None):
         self.SaveParameters()
@@ -580,7 +594,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 				'loading', 'local_cam',
 				'new_step', 'notebook', 'notebook_add_id',
 				'pic_continuous', 'pic_fn', 'pic_needed', 'pic_source',
-				'scriptsDir', 'source_widget', 'statusFrame', 'thumbnailFrame', 'tk'
+				'scriptsDir', 'source_widget', 'statusFrame',
+ 				'step_execution_needed',
+				'thumbnailFrame', 'tk'
 		)
     def __init__(self):
         super().__init__(Subscriptions=[vconst.cameraman_pic_ready_topic],
@@ -598,6 +614,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.load_parms = {}
         self.load_new_filter_ct = 0
         self.loading = False
+        self.step_execution_needed = False
 
         self.image = OpticChiasm.ImageAnalyzer()
         self.image.img_crop=(300,200)
@@ -645,14 +662,19 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             print(payload)
             self.Publish(vconst.cameraman_orders_topic, payload)
 
-    def ConfigureImageSource(self, new_filter_name, path=None, new_image=None, iso=None, shutter_speed=None):
+    def ConfigureImageSource(self, path=None, new_image=None, iso=None, shutter_speed=None, colorcode=None):
         new_parms = {}
-        new_parms['opencv_fn'] = path
         if len(ProcessStep.steps) == 0:
-            ProcessStep(new_filter_name, Parms=new_parms, Where=self.notebook_add_id)
+            ProcessStep(FILTER_NAME_IMAGE, Parms=new_parms, Where=self.notebook_add_id)
         else:
-            ProcessStep.steps[0].SetFilter(FilterName=new_filter_name, NewParms=new_parms)
-        ProcessStep.steps[0].source_im = new_image
+            ProcessStep.steps[0].SetFilter(FilterName=FILTER_NAME_IMAGE, NewParms=new_parms)
+        if (new_image is None) and (path is not None):
+            new_image = cv2.imread(path)
+            colorcode = OpticChiasm.IM_BGR
+        if isinstance(new_image, OpticChiasm.Image):
+            ProcessStep.steps[0].source_im = new_image
+        else:
+            ProcessStep.steps[0].source_im = OpticChiasm.Image(im=new_image, colorcode=colorcode)
         ProcessStep.steps[0].ClearInfo()
         if path is not None:
             ProcessStep.steps[0].AddInfo('Path', path)
@@ -660,7 +682,9 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             ProcessStep.steps[0].AddInfo('ISO', iso)
         if shutter_speed is not None:
             ProcessStep.steps[0].AddInfo('Shutter', shutter_speed)
-        ProcessStep.steps[0].ExecuteAllSteps()
+        if colorcode is not None:
+            ProcessStep.steps[0].AddInfo('Colorcode', colorcode)
+        self.step_execution_needed = True
 
     def OpenProcessFile(self):
         self.load_process_file_name = self.statusFrame.DoFileNameDialog(Dir=self.scriptsDir, FileTypes=ProcessStep.process_file_types)
@@ -717,7 +741,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             print("XXXX", ix)
             self.DeleteProcessStep(ix)
         self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)	# temporary - needs more options
-        ProcessStep.ExecuteAllSteps()
+        self.step_execution_needed = True
         self.loading = False
 
     def SaveProcessFile(self):
@@ -733,28 +757,24 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 
     def OnCaptureImage(self):
         print("OnCaptureImage()")
-        self.ConfigureCamera()					# we don't wait for this to take effect
         self.pic_needed = True
         self.pic_continuous = False
         if self.source_widget.Value() is None:
             print("On Capture update source")
             self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
-        self.ConfigureImageSource(FILTER_NAME_CAPTUREDIMAGE)
-        print("SOURCE", self.source_widget.Value())
-        print("FILTER", ProcessStep.steps[0].filter_selection.Value())
+        self.ConfigureCamera()					# we don't wait for this to take effect
 
     def OnContinuousImage(self):
-        self.ConfigureCamera()					# we don't wait for this to take effect
         self.pic_continuous = True
         if self.source_widget.Value() is None:
             self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
-        self.ConfigureImageSource(FILTER_NAME_CAPTUREDIMAGE)
+        self.ConfigureCamera()					# we don't wait for this to take effect
 
     def OnOpenImageFile(self):
         self.pic_continuous = False
         self.pic_needed = False
         fn = self.statusFrame.DoFileNameDialog()
-        self.ConfigureImageSource(FILTER_NAME_FILEIMAGE, path=fn)
+        self.ConfigureImageSource(path=fn)
 
     def OnSelectSource(self, *args):
         self.pic_source = self.source_widget.Value()
@@ -797,7 +817,13 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             this_step.tab_title = "Step %d" % (this_step.ix)
             self.notebook.tkw.tab(ix, text=this_step.tab_title)
         ProcessStep.steps[ix-1].SelectTab(None)
+        self.step_execution_needed = True
 
+    #
+    # All work gets done here in DoLoop() in the main thread.
+    # Methods in the Tkinter and VnavsMqtt threads should just set flags
+    # and return quickly.
+    #
     def DoLoop(self):
         if self.loading:
             # This was added in order to avoid crashes due to trying to load images
@@ -817,16 +843,23 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         if self.new_step is not None:
             self.new_step.SelectTab(None)
             self.new_step = None
+
+        #
+        # Get a new image if needed.
+        #
         new_image = None
         path = None
         iso = None
         shutter_speed = None
+        colorcode = None
         if self.pic_continuous or self.pic_needed:
+            # We need a new image
             if self.pic_source == SRC_LOCAL_CAMERA:
                 self.pic_needed = False				# don't process others until requested
                 new_image = self.local_cam.capture_image()
                 iso = self.local_cam.iso
                 shutter_speed = self.local_cam.shutter_speed
+                colorcode = self.local_cam.colorcode
             elif self.pic_source == SRC_BOT_CAMERA:
                 if self.last_pic_payload is not None:
                     self.pic_needed = False			# if single frame mode, mark done
@@ -840,12 +873,14 @@ class Darkroom(vnavs_mqtt.mqtt_node):
                     shutter_speed = payload['shutter_speed']
                     print("CAM", iso, shutter_speed)
             if (new_image is not None) or (path is not None):
+                # We have a new image. We might not. We don't get a picture if Capture hasn't been
+                # clicked or if this loop is running faster than new images are published in
+                # continuous SRC_BOT_CAMERA mode.
                 print("DoLoop() process image ", path, new_image is not None)
-                new_parms = {}
-                if path is None:
-                    self.ConfigureImageSource(FILTER_NAME_CAPTUREDIMAGE, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)
-                else:
-                    self.ConfigureImageSource(FILTER_NAME_FILEIMAGE, path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed)
+                self.ConfigureImageSource(path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed, colorcode=colorcode)
+        if self.step_execution_needed:
+            ProcessStep.ExecuteAllSteps()
+            self.step_execution_needed = False
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

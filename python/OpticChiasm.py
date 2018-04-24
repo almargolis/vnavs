@@ -109,6 +109,9 @@ class Image(object):
         return cv2.cvtColor(self._im, transform)
 
     def ImAsAny(self, colorcode):
+        print("ImAsAny()", self.colorcode, colorcode, self._im.__class__.__name__)
+        if self._im is None:
+            return None
         colorcode = colorcode.upper()
         if not colorcode in IM_COLORCODES:
             return None
@@ -946,7 +949,11 @@ def RectFromSymbolicYX(im, y_range, x_range):
     return Rect(y_min, y_max, x_min, x_max)
 
 def RectFromSymbolicPP(im, p1, p2):
-    height, width, channels = im.shape
+    if len(im.shape) > 2:
+        height, width, channels = im.shape
+    else:
+        height, width = im.shape
+        channels = 1
     x_min = ResolveSymbolicIndex(p1[0], width)
     y_min = ResolveSymbolicIndex(p1[1], height)
     x_max = ResolveSymbolicIndex(p2[0], width, x_min)

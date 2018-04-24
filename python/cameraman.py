@@ -44,12 +44,13 @@ class macbook_camera(object):
     # built-in camera work like a picamera as closely as I need to.
     # This likely works on the pi too, but is probably slower because it
     # doesn't take full advantage of the hardwre for continuous reads.
-    __slots__ = ('device_id', 'hflip', '_iso', 'vflip',
+    __slots__ = ('colorcode', 'device_id', 'hflip', '_iso', 'vflip',
                         'resolution', 'shutter_speed', 'source_fn',
                         '_video'
                         )
     def __init__(self, device_id=0, resolution=(640,480), source_fn=None):
         # macbook default resolution was 1280x720
+        self.colorcode = OpticChiasm.IM_RGB
         self._iso = 0
         self.hflip = False
         self.vflip = False
