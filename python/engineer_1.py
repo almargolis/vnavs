@@ -31,8 +31,17 @@ GPS_BAUD_RATES = (GPS_BAUD_9600, GPS_BAUD_38400)
 class GpsDevice(object):
     def __init__(self):
         self.gps_buffer = ''			# read buffer
-        self.next_eol_ix = -1		# index of first <cr><lf>
+        self.next_eol_ix = -1			# index of first <cr><lf>
         self.gps_inited = False
+        self.gps_mode = '1'			# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites
+        self.gps_quality = 'F'			# A=good, F=bad
+        self.longitude = 0
+        self.latitude = 0
+        self.gps_status = 'X'			# A=valid, V=invalid
+        self.gps_speed = 0
+        self.gps_differential = 'X'		# A=autonomous, D=differeential GPS
+        self.timestamp = 0
+        self.last_sentence_str = None
         self.OpenPort()
 
     def OpenPort(self, baudrate=GPS_BAUD_9600):
@@ -53,12 +62,12 @@ class GpsDevice(object):
             self.gps_buffer += self.gps_port.read(size=1024)
             self.next_eol_ix = self.gps_buffer.find('\r\n')
         if self.next_eol_ix < 0:
-            gps_sentence = None
+            last_sentence_str = None
         else:
-            gps_sentence = self.gps_buffer[:self.next_eol_ix+2]
+            self.last_sentence_str = self.gps_buffer[:self.next_eol_ix+2]
             self.gps_buffer = self.gps_buffer[self.next_eol_ix+2:]
             self.next_eol_ix = self.gps_buffer.find('\r\n')
-        return gps_sentence
+        return self.last_sentence_str
 
     def DetectBaudrate(self):
         print(GPS_BAUD_RATES)
@@ -96,27 +105,107 @@ class GpsDevice(object):
         print("SendGpsCommand", `msg_str`)
         self.gps_port.write(msg_str.encode())				# convert to bytes and write
 
+    def UpdateGsaSentence(self, parsed_sentence):
+        # This might help determine if readings are meaningful
+        # https://en.wikipedia.org/wiki/Dilution_of_precision_(navigation)
+        # wikipedia numbers seem off. Indoors getting garbage with numbers just over 1.5
+        # need to consider mode (prefer D), number ot satelites and dilution.
+        # Outdoors, maybe only when moving, some of the dilution numbers dropped below 1.
+        cksum_mark = self.last_sentence_str.rfind('*')
+        gps_data = self.last_sentence_str[:cksum_mark].split(',')
+        mode1 = gps_data[1]		# A(utomatic) or M(anual 2D/3D - s/b A
+        mode2 = gps_data[2]		# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites
+        satCt = 0
+        for ix in range(3,15):
+            if gps_data[ix] != '':
+                satCt += 1
+        # DOP: Dilution of Precision < 1.0 is ideal but hard to get
+        posDOP = float(gps_data[15])		# position (overall ?)
+        horzDOP = float(gps_data[16])		# horizontal
+        vertDOP = float(gps_data[17])		# vertical
+        if mode2 == '3':
+            if (posDOP < 1.0) or (horzDOP < 1.0) or (vertDOP < 1.0):
+                self.gps_quality = 'A'
+            else:
+                self.gps_quality = 'B'
+        elif mode2 == '2':
+            self.gps_quality = 'C'
+        else:
+            self.gps_quality = 'F'
+        self.gps_mode = mode2
+
+    def UpdateRmcSentence(self, parsed_sentence):
+        self.longitude = parsed_sentence.longitude
+        self.latitude = parsed_sentence.latitude
+        try:
+            self.timestamp = parsed_sentence.datetime
+        except:
+            # this sometimes fails. Maybe just indoors.
+            self.timestamp = None
+        self.gps_status = parsed_sentence.data[1]	# A=valid, V=invalid
+        speedRaw = parsed_sentence.data[6].strip()
+        try:
+            speedKnots = float(speedRaw)
+            self.gps_speed = speedKnots * METERS_PER_SECOND_PER_KNOT
+        except ValueError:
+            print("Invalid RMC speed", `speedRaw`)
+        heading_raw = parsed_sentence.data[7].strip()
+        if heading_raw == '':
+            pass				# None? only saw it at startup now
+        else:
+            try:
+                self.heading = float(heading_raw)	# degrees clockwise from North
+            except ValueError:
+                print("Invalid RMC heading", `heading_raw`)
+        self.gps_differential = parsed_sentence.data[11]	# A=autonomous, D=differeential GPS
+        """
+        print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
+					self.gps_status, parsed_sentence.data[2], parsed_sentence.data[3], self.latitude,
+					parsed_sentence.data[4], parsed_sentence.data[5], self.longitude,
+					self.heading, self.gps_quality))
+        """
+
+    def UpdateGpsInfo(self):
+        # Reads one GPS sentence if available and updates position information
+        gps_sentence = self.Read()
+        if gps_sentence is None:
+            return False
+        parsed_sentence = None
+        try:
+            print("DoLoop()", `gps_sentence`)
+            parsed_sentence = pynmea2.parse(gps_sentence)
+        except pynmea2.ParseError:
+            print("PARSE ERROR")
+            parsed_sentence = None
+        if parsed_sentence is None:
+            return False
+
+        try:
+            if parsed_sentence.sentence_type == 'GSA':
+                pass
+        except AttributeError:
+            # This happened after configuring GPS due to returned '$PMTK001,220,2*31\r\n' message.
+            # I'm guessing due to the NEMA module not knowing about configuration
+            parsed_sentence = None
+        if parsed_sentence is None:
+            return False
+
+        if parsed_sentence.sentence_type == 'GSA':
+            self.UpdateGsaSentence(parsed_sentence)
+        elif parsed_sentence.sentence_type == 'RMC':
+            self.UpdateRmcSentence(parsed_sentence)
+            return True				# True if we have new position info
+
+        return False
 
 class engineer_1(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[], SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.heading = 0
-        self.longitude = 0
-        self.latitude = 0
         self.goal_longitude = None
         self.goal_latitude = None
-        self.goal_run = False
         self.gps_device = GpsDevice()
         self.gps_device.IncreaseUpdateRate()
-        self.gps_quality = 'F'			# A=good, F=bad
-        self.gps_speed = 0
-        self.gps_status = 'X'			# A=valid, V=invalid
-        self.gps_differential = 'X'		# A=autonomous, D=differeential GPS
-        self.gps_mode = '1'			# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites
-        self.timestamp = 0
-        self.newGpsData = False
-        #self.SendGpsCommand('PM', 'TK', ('220,500'))		# configure 2hz
-        #self.SendGpsCommand('PM', 'TK', ('220', '200'))		# configure 5hz
         self.sense = SenseHat()
         self.sense.set_imu_config(False, True, False)
         self.last_position_message_time = time.time()
@@ -129,15 +218,6 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and proper shutdown.
         #
 
-        gps_sentence = self.gps_device.Read()
-        gps_parsed = None
-        if gps_sentence is not None:
-            try:
-                print("DoLoop()", `gps_sentence`)
-                gps_parsed = pynmea2.parse(gps_sentence)
-            except pynmea2.ParseError:
-                print("PARSE ERROR")
-                gps_parsed = None
         #
         # Estimate speed using accelerometer
         #
@@ -146,7 +226,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         now = time.time()
         acc_interval = now - self.acc_speed_last_time
         self.acc_speed_last_time = now
-        if self.gps_speed < 0.03:
+        if self.gps_device.gps_speed < 0.03:
             self.acc_speed_forward = 0
             self.acc_speed_sideways = 0
         else:
@@ -154,79 +234,10 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             self.acc_speed_forward += (accel['x'] * acc_interval)
             self.acc_speed_sideways += (accel['y'] * acc_interval)
         self.acc_dist_forward += self.acc_speed_forward * acc_interval
-        #
-        if gps_parsed is not None:
-            try:
-                if gps_parsed.sentence_type == 'GSA':
-                    pass
-            except AttributeError:
-                # This happened after configuring GPS due to returned '$PMTK001,220,2*31\r\n' message.
-                # I'm guessing due to the NEMA module not knowing about configuration
-                gps_parsed = None
-        if gps_parsed is not None:
-            if gps_parsed.sentence_type == 'GSA':
-                # This might help determine if readings are meaningful
-                # https://en.wikipedia.org/wiki/Dilution_of_precision_(navigation)
-                # wikipedia numbers seem off. Indoors getting garbage with numbers just over 1.5
-                # need to consider mode (prefer D), number ot satelites and dilution.
-                # Outdoors, maybe only when moving, some of the dilution numbers dropped below 1.
-                cksum_mark = gps_sentence.rfind('*')
-                gps_data = gps_sentence[:cksum_mark].split(',')
-                mode1 = gps_data[1]		# A(utomatic) or M(anual 2D/3D - s/b A
-                mode2 = gps_data[2]		# 1=no fix, 2=2D < 4 satelites, 3=3D >= 4 satelites
-                satCt = 0
-                for ix in range(3,15):
-                    if gps_data[ix] != '':
-                        satCt += 1
-                # DOP: Dilution of Precision < 1.0 is ideal but hard to get
-                posDOP = float(gps_data[15])		# position (overall ?)
-                horzDOP = float(gps_data[16])		# horizontal
-                vertDOP = float(gps_data[17])		# vertical
-                if mode2 == '3':
-                    if (posDOP < 1.0) or (horzDOP < 1.0) or (vertDOP < 1.0):
-                        self.gps_quality = 'A'
-                    else:
-                        self.gps_quality = 'B'
-                elif mode2 == '2':
-                    self.gps_quality = 'C'
-                else:
-                    self.gps_quality = 'F'
-                self.gps_mode = mode2
 
-            elif gps_parsed.sentence_type == 'RMC':
-                self.longitude = gps_parsed.longitude
-                self.latitude = gps_parsed.latitude
-                try:
-                    self.timestamp = gps_parsed.datetime
-                except:
-                    # this sometimes fails. Maybe just indoors.
-                    self.timestamp = None
-                self.gps_status = gps_parsed.data[1]	# A=valid, V=invalid
-                speedRaw = gps_parsed.data[6].strip()
-                try:
-                    speedKnots = float(speedRaw)
-                    self.gps_speed = speedKnots * METERS_PER_SECOND_PER_KNOT
-                except ValueError:
-                    print("Invalid RMC speed", `speedRaw`)
-                heading_raw = gps_parsed.data[7].strip()
-                if heading_raw == '':
-                    pass				# None? only saw it at startup now
-                else:
-                    try:
-                        self.heading = float(heading_raw)	# degrees clockwise from North
-                    except ValueError:
-                        print("Invalid RMC heading", `heading_raw`)
-                self.gps_differential = gps_parsed.data[11]	# A=autonomous, D=differeential GPS
-                self.newGpsData = True
-                """
-                print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
-					self.gps_status, gps_parsed.data[2], gps_parsed.data[3], self.latitude,
-					gps_parsed.data[4], gps_parsed.data[5], self.longitude,
-					self.heading, self.gps_quality))
-                """
-                if self.goal_run:
-                    self.PathToGoal(gps_parsed)
-        if self.newGpsData or ((time.time() - self.last_position_message_time) > SEND_POSITION_PERIOD):
+        have_new_position_data = self.gps_device.UpdateGpsInfo()
+
+        if have_new_position_data or ((time.time() - self.last_position_message_time) > SEND_POSITION_PERIOD):
             # always send accelerometer data
             self.orientation = self.sense.get_orientation_degrees()
             payload = {}
@@ -237,18 +248,17 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             payload['acc_speed_s'] = self.acc_speed_sideways
             payload['acc_dist_f'] = self.acc_dist_forward
             payload['acc_interval'] = acc_interval
-            if self.newGpsData:
+            if have_new_position_data:
                 # we have new GPS Data
-                #print(self.gps_speed, self.longitude, self.latitude)
-                payload['gps_speed'] = self.gps_speed
-                payload['heading'] = self.heading
-                payload['quality'] = self.gps_quality
-                payload['longitude'] = self.longitude
-                payload['latitude'] = self.latitude
-                payload['gps_time'] = `self.timestamp`
-                payload['gps_mode'] = self.gps_mode
-                payload['gps_differential'] = self.gps_differential
-                self.newGpsData = False
+                #print(self.gps_device.gps_speed, self.gps_device.longitude, self.gps_device.latitude)
+                payload['gps_speed'] = self.gps_device.gps_speed
+                payload['heading'] = self.gps_device.heading
+                payload['quality'] = self.gps_device.gps_quality
+                payload['longitude'] = self.gps_device.longitude
+                payload['latitude'] = self.gps_device.latitude
+                payload['gps_time'] = `self.gps_device.timestamp`
+                payload['gps_mode'] = self.gps_device.gps_mode
+                payload['gps_differential'] = self.gps_device.gps_differential
                 topic = vconst.engineer_1_gps_topic
             else:
                 topic = vconst.engineer_1_imu_topic
@@ -315,10 +325,10 @@ def TestGps():
     #return
     gps_device.IncreaseUpdateRate()
     while True:
-        sentence = gps_device.Read()
-        if sentence is not None:
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if gps_device.last_sentence_str is not None:
             print("GPS", gps_device.gps_port.baudrate)
-            print("GPS", `sentence`)
+            print("GPS", `gps_device.last_sentence_str`)
 
 def RunNode():
     h = engineer_1()
