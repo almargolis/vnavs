@@ -28,7 +28,9 @@ class game(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[],
 					Readers=[],
-					SingleThreaded=False, BlockIfNotConnected=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+					SingleThreaded=True, BlockIfNotConnected=False, 
+					SelectTimeoutSecs=0.01,
+					BrokerType='F', Streamer=False, Verbose=Verbose)
         self.system =  platform.system()
         if self.system == 'Linux':
             pass
