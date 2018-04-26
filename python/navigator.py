@@ -3,6 +3,7 @@ from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
 import cv2
+import json
 import math
 import numpy as np
 import os
@@ -33,6 +34,38 @@ MAX_TIMED_MANUEVER_SECONDS = 10
 Y_TURN_LIMIT = 160
 INITIAL_GPS_WAIT = 3
 OVERSTEER_ADJUSTMENT = 0.5
+
+def DistanceToWaypoint(position, waypoint):
+    waypoint_latitude = waypoint[0]
+    waypoint_longitude = waypoint[1]
+    position_latitude = position[0]
+    position_longitude = position[1]
+    deltaY = great_circle((position_latitude, position_longitude), (waypoint_latitude, position_longitude)).meters
+    deltaX = great_circle((position_latitude, position_longitude), (position_latitude, waypoint_longitude)).meters
+    hypotenuse = great_circle(position, waypoint).meters
+    if deltaY < 0.00001:		# about 1 meter
+        waypointHeading = 90
+    else:
+        tan = deltaX / deltaY
+        atan = math.atan(tan)
+        heading_to_waypoint = math.degrees(atan)
+        ##print("tan=%f, WH=%f" % (tan, heading_to_waypoint))
+    if position_latitude > waypoint_latitude:
+        deltaY = -deltaY
+    if position_longitude > waypoint_longitude:
+        deltaX = -deltaX
+        if deltaY >= 0:
+            heading_to_waypoint = 360 - heading_to_waypoint		# quadrant IV
+        else:
+            heading_to_waypoint = 180 + heading_to_waypoint		# quadrant III
+    else:
+        if deltaY >= 0:
+            pass							# quadrant I
+        else:
+            heading_to_waypoint = 180 - heading_to_waypoint		# quadrant II
+    o = object()
+    setattr(o, 'heading_to_waypoint', heading_to_waypoint)
+    setattr(o, 'distance_to_waypoint',  hypotenuse)
 
 class MissionStep(object):
     def __init__(self, mission, section):
@@ -315,6 +348,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
+        self.persistent_data = None
 
     def NavigateTowardWaypoint(self, ix):
         # should be reworked using GeographicLib ??
@@ -328,32 +362,9 @@ class navigator(vnavs_mqtt.mqtt_node):
             print("NO HEADING - can't navigate.")
             return None
         w = self.mission.waypoints[ix][1]			# Assume this is a navigation waypoint W
-        waypointLatitude = w[0]
-        waypointLongitude = w[1]
-        deltaY = great_circle((self.latitude, self.longitude), (w[0], self.longitude)).meters
-        deltaX = great_circle((self.latitude, self.longitude), (self.latitude, w[1])).meters
-        hypotenuse = great_circle((self.latitude, self.longitude), w).meters
-        if deltaY < 0.00001:		# about 1 meter
-            waypointHeading = 90
-        else:
-            tan = deltaX / deltaY
-            atan = math.atan(tan)
-            waypointHeading = math.degrees(atan)
-            ##print("tan=%f, WH=%f" % (tan, waypointHeading))
-        if self.latitude > waypointLatitude:
-            deltaY = -deltaY
-        if self.longitude > waypointLongitude:
-            deltaX = -deltaX
-            if deltaY >= 0:
-                waypointHeading = 360 - waypointHeading		# quadrant IV
-            else:
-                waypointHeading = 180 + waypointHeading		# quadrant III
-        else:
-            if deltaY >= 0:
-                pass						# quadrant I
-            else:
-                waypointHeading = 180 - waypointHeading		# quadrant II
-        deltaHeading = waypointHeading - self.heading
+        d = DistanceToWaypoint((self.latitude, self.longitude), w)
+
+        deltaHeading = d.heading_to_waypoint - self.heading
         if deltaHeading < -180:
             deltaHeading = deltaHeading + 360
         elif deltaHeading > 180:
@@ -361,7 +372,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         if abs(deltaHeading) < STEER_STRAIGHT_HEADING:
             self.nav.Init()
             self.nav.steering = "A0"
-            if hypotenuse > 10:
+            if d.distance_to_waypoint > 10:
                 self.nav.speed = FORWARD_FAST
             else:
                 self.nav.speed = FORWARD_SLOW
@@ -374,7 +385,7 @@ class navigator(vnavs_mqtt.mqtt_node):
                 # make the direct turn
                 self.nav.Init()
                 self.nav.steering = 'A' + str(int(deltaHeading / 3))
-                if (hypotenuse > 10) and (abs(deltaHeading) < 20):
+                if (d.distance_to_waypoint > 10) and (abs(deltaHeading) < 20):
                     self.nav.speed = FORWARD_FAST
                 else:
                     self.nav.speed = FORWARD_SLOW
@@ -415,9 +426,27 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.PublishNavigation()
         self.mission.navpoints.append(((self.latitude, self.longitude), self.nav.steering))
         print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.mission.waypoints[self.mission.mission_step_ix]))
-        print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, hypotenuse,
+        print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, d.distance_to_waypoint,
 					deltaHeading, self.heading, waypointHeading, self.mission.mission_step_ix))
-        return hypotenuse
+        return d.distance_to_waypoint
+
+    def DumpPersistentData(self):
+        if self.persistent_data is None:
+            return					# its was never loaded
+        path = os.path.expanduser('~/vnavs.data')
+        d = json.dumps(self.persistent_data)
+        f = open(path, 'w')
+        f.write(d)
+        f.close()
+
+    def LoadPersistentData(self):
+        if self.persistent_data is not None:
+            return					# its already loaded
+        path = os.path.expanduser('~/vnavs.data')
+        f = open(path, 'r')
+        d = f.read()
+        f.close()
+        self.persistent_data = json.loads(d)
 
     def PublishNavigation(self):
         payload = {}
@@ -458,6 +487,13 @@ class navigator(vnavs_mqtt.mqtt_node):
         # This should be filled in to verify that we have semt this normally.
         # If we think the mission is still running, we need to do something.
         pass
+
+    def rmsg_data_save(self, payload):
+        key = payload['key']
+        value = payload['value']
+        self.LoadPersistentData()
+        self.persistent_data[key] = value
+        self.DumpPersistentData()
 
     def rmsg_navigator_mode(self, payload):
         print("MODE_MSG", payload)
