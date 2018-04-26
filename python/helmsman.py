@@ -431,7 +431,7 @@ class helmsman(vnavs_mqtt.mqtt_node):
         sleep_secs = 0.02
         sleep_secs = 0.001
         sleep_secs = 0.1			# This was my first try, slow speeds choppy
-        sleep_secs = 0.3
+        sleep_secs = 0.01
         time.sleep(sleep_secs)
 
     def CleanupLoop(self):
