@@ -166,7 +166,9 @@ class cameraman(vnavs_mqtt.mqtt_node):
         else:
                 self.camera = macbook_camera(resolution=self.camera_resolution)
         self.camera.vflip = True
+        self.camera.vflip = False
         self.camera.hflip = True
+        self.camera.hflip = False
         self.camera.iso = self.iso
         self.do_auto_iso = False
         self.idle_image_id = 0

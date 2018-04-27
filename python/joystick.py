@@ -24,11 +24,13 @@ def PrintCapability(gamepad):
         else:
             print("XXX", thisType, thisCap)
 
-class game(vnavs_mqtt.mqtt_node):
+class joystick(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[],
 					Readers=[],
-					SingleThreaded=False, BlockIfNotConnected=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+					SingleThreaded=True, BlockIfNotConnected=False, 
+					SelectTimeoutSecs=0.01,
+					BrokerType='F', Streamer=False, Verbose=Verbose)
         self.system =  platform.system()
         if self.system == 'Linux':
             pass
@@ -97,8 +99,8 @@ class game(vnavs_mqtt.mqtt_node):
                 pass
 
 if __name__ == '__main__':
-    if sys.argv[1] == 'run':
-        vnavs_mqtt.LaunchNode(game)
+    if sys.argv[1] == 'node':
+        vnavs_mqtt.LaunchNode(joystick)
 
 
 
