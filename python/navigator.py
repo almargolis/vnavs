@@ -75,14 +75,34 @@ def DistanceToWaypoint(position, waypoint):
     return o
 
 class MissionStep(object):
+    __slots__ = ('mission', 'nav', 'navigator', 'parms', 'section')
     def __init__(self, mission, section):
         self.mission = mission
+        self.nav = NavStep()
+        self.navigator = mission.navigator
         self.section = section
         self.parms = {}
 
-def StepGpsWaypoint(MissionStep):
-    def __init__(self, mission, waypoint):
-        super().__init__(mission)
+    def PublishNavigation(self):
+        payload = {}
+        payload['heading'] = self.nav.steering
+        payload['speed'] = self.nav.speed
+        payload['timer'] = 6
+        self.navigator.Publish(vconst.helmsman_orders_topic, payload)
+        if self.nav.untrustedGpsUpdates < 0:
+            # this could be dangerous, skipping navigation indefinately
+            if self.nav.hardKeepSeconds <= 0:
+                # we intend to end the manuever with IMU yaw, this keeps us safe
+                self.nav.hardKeepSeconds = MAX_TIMED_MANUEVER_SECONDS
+        if self.nav.softKeepSeconds > 0:
+            self.nav.softTimeLimit = time.time() + self.nav.softKeepSeconds
+        if self.nav.hardKeepSeconds > 0:
+            self.nav.hardTimeLimit = time.time() + self.nav.hardKeepSeconds
+        print("PublishNavigation", payload)
+
+class StepGpsWaypoint(MissionStep):
+    def __init__(self, mission, section, waypoint):
+        super().__init__(mission, section)
         self.waypoint = waypoint		(latitude, longitude)
 
     def Load(self, parts):
@@ -116,47 +136,57 @@ def StepGpsWaypoint(MissionStep):
             self.nav.speed = FORWARD_SLOW
             self.PublishNavigation()
 
-def StepMagic(MissionStep):
-    def __init__(self, mission, waypoint):
-        super().__init__(mission)
+class StepMagic(MissionStep):
+    __slots__ = ('last_imageFn', 'movement_started')
 
-    def Load(self, parts):
-        self.magic = parts[1]
+    def __init__(self, mission, section):
+        super().__init__(mission, section)
+        self.last_imageFn = None
+        self.movement_started = False
 
-    def DoMissionStep(self, nav):
-            if self.imageFn is None:
-                if (self.imageRequested is None) or ((time.time() - self.imageRequested) > 1.0):
-                    print("REQUEST IMAGE")
-                    self.Publish('ask_last', {}, source='cameraman')
-                    self.imageRequested = time.time()
+    def DoMissionStep(self):
+        if self.navigator.imageFn is None:
+            # Don't do anything till navigator gets an image.
+            # This is safe at start of mission but dangerous if moving
+            return
+        if self.last_imageFn is not None:
+            if self.last_imageFn == self.navigator.imageFn:
+                # No new image / information
                 return
-            fp = os.path.join(self.imageDir, self.imageFn)
-            print("image", fp)
+        self.last_imageFn = self.navigator.imageFn
+        fp = os.path.join(self.navigator.imageDir, self.last_imageFn)
+        print("image", fp)
+        im = cv2.imread(fp)
+        if im is None:
+            print("IM RETRY")
+            time.sleep(0.5)
             im = cv2.imread(fp)
             if im is None:
-                print("IM RETRY")
-                time.sleep(0.5)
-                im = cv2.imread(fp)
-                if im is None:
-                    return
-            r = OpticChiasm.Robogames(im, [OpticChiasm.HSV_MASK_YELLOW])
-            r.ProcessLines()
-            r.FilterLines()
-            r.SelectLines()
-            outFn = 'X' + self.imageFn[1:]
-            outFp = os.path.join(self.imageDir, outFn)
-            cv2.imwrite(outFp, r.annotated)
-            payload = {}
-            payload['filename'] = outFn
-            self.Publish('pic_ready', payload, source='cameraman')
-            if len(r.rectangles) > 0:
-                self.nav.speed = FORWARD_VERY_SLOW
-            else:
-                self.nav.speed = STOP_SPEED
+                return
+        r = OpticChiasm.Robogames(im, [OpticChiasm.HSV_YELLOW])
+        r.ProcessLines()
+        r.FilterLines()
+        r.SelectLines()
+        outFn = 'X' + self.last_imageFn[1:]
+        outFp = os.path.join(self.navigator.imageDir, outFn)
+        cv2.imwrite(outFp, r.annotated)
+        payload = {}
+        payload['filename'] = outFn
+        #self.Publish('pic_ready', payload, source='cameraman')
+        if len(r.rectangles) > 0:
+            print("move")
+            self.nav.speed = FORWARD_VERY_SLOW
             self.PublishNavigation()
-            self.imageFn = None
-            self.imageRequested = False
-            return
+            self.movement_started = True
+        else:
+            if self.movement_started:
+                print("BOX GONE")
+                self.nav.speed = STOP_SPEED
+                self.PublishNavigation()
+                return True			# end mission steo
+            else:
+                print("WAIT")
+        return
 
 
 class StepAccMotion(MissionStep):
@@ -232,6 +262,8 @@ class Mission(object):
                     section = 'run'
                 elif step_type == 'end':
                     section = 'end'
+                elif step_type == 'magic':
+                    step = StepMagic(self, section)
                 elif step_type == 'msg':
                     step = StepMessage(self, section, parts[1].strip())
                 elif step_type == 'sleep':
@@ -245,17 +277,24 @@ class Mission(object):
                 value = line[pos+1:].strip()
                 step.parms[key] = value
 
-    def DoLoop(self):
+    def DoMission(self):
+        if not self.running:
+            return False
         if self.mission_step_ix >= len(self.mission_steps):
             self.EndMission()
             return False
         step = self.mission_steps[self.mission_step_ix]
         if step.DoMissionStep():
+            # The step returns true to indicate that it is done.
+            # Otherwise it repeats on the next DoMission().
             self.mission_step_ix += 1
         return True
 
     def StartWrapup(self):
-        pass
+        # This should insert some steps to (optionally?) halt the vehicle
+        # and wait for physical operations to wind down. For now its a
+        # hard stop.
+        self.EndMission()
 
     def Waypoints(self):
         waypoints = []
@@ -265,6 +304,7 @@ class Mission(object):
         return waypoints
 
     def EndMission(self):
+        # This is a hard stop, closing all operations and data collection.
         self.running = False
         # Putting the camera in idle mode may be redundant but doesn't do any harm.
         # Making sure we are in idle mode helps avoid crashes due to running out of
@@ -312,7 +352,7 @@ class NavStep(object):
         # When we have multiple steps, all the intermediate steps must either have
         # hardKeepSeconds > 0 or untrustedGpsUpdates < 0 with yaw settings to cancel
         # the operation.
-        self.steering = 'A0'
+        self.steering = '0'
         self.speed = 0
         self.startingYaw = None
         self.deltaYawGoal = None
@@ -334,7 +374,7 @@ class navigator(vnavs_mqtt.mqtt_node):
 						vconst.mission_cancel_topic,
 						vconst.mission_end_topic,
 						vconst.navigator_service_topic,
-						'cameraman/last'
+						vconst.cameraman_pic_ready_topic
 					],
 					Readers=[],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
@@ -455,28 +495,10 @@ class navigator(vnavs_mqtt.mqtt_node):
         f.close()
         self.persistent_data = json.loads(d)
 
-    def PublishNavigation(self):
-        payload = {}
-        payload['heading'] = self.nav.steering
-        payload['speed'] = self.nav.speed
-        payload['timer'] = 6
-        self.Publish(vconst.helmsman_orders_topic, payload)
-        if self.nav.untrustedGpsUpdates < 0:
-            # this could be dangerous, skipping navigation indefinately
-            if self.nav.hardKeepSeconds <= 0:
-                # we intend to end the manuever with IMU yaw, this keeps us safe
-                self.nav.hardKeepSeconds = MAX_TIMED_MANUEVER_SECONDS
-        if self.nav.softKeepSeconds > 0:
-            self.nav.softTimeLimit = time.time() + self.nav.softKeepSeconds
-        if self.nav.hardKeepSeconds > 0:
-            self.nav.hardTimeLimit = time.time() + self.nav.hardKeepSeconds
-        print("PublishNavigation", payload)
 
-    def rmsg_cameraman_last(self, payload):
+    def rmsg_cameraman_pic_ready(self, payload):
         self.imageFn = payload['filename']
-        if self.imageFn == '':
-            self.imageFn
-        print("LAST", payload)
+        #print("LAST", payload)
 
     def rmsg_engineer_1_imu(self, payload):
         self.new_imu_payload = payload
@@ -491,7 +513,9 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.new_mission_cancel_payload = payload
 
     def rmsg_mission_end(self, payload):
-        # This should be filled in to verify that we have semt this normally.
+        # This message is sent by the mission to let other nodes know that
+        # the mission has ended.
+        # This should function should verify that we have sent this normally.
         # If we think the mission is still running, we need to do something.
         pass
 
@@ -613,6 +637,7 @@ class navigator(vnavs_mqtt.mqtt_node):
     def DoLoop(self):
         if self.mission is None:
             if self.new_mission_begin_payload is None:
+                # No navigation. No active mission. None to load.
                 return
             mission_payload = self.new_mission_begin_payload
             self.new_mission_begin_payload = None
@@ -620,11 +645,13 @@ class navigator(vnavs_mqtt.mqtt_node):
             self.mission = Mission(self, mission_payload)
         if self.mission is not None:
             if self.new_mission_begin_payload is not None:
+                # A new mission has been received, cancel the existing mission
                 self.mission.StartWrapup()
             elif self.new_mission_cancel_payload is not None:
+                # The current mission is being cancelled
                 self.new_mission_cancel_payload = None
                 self.mission.StartWrapup()
-            self.mission.DoLoop()
+            self.mission.DoMission()			# do mission work
             if not self.mission.running:
                 self.mission = None
             return
