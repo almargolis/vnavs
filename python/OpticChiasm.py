@@ -167,10 +167,10 @@ class Image(object):
 # automatically set threshold using technique from
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
 # just saw URL, and have seen it before, so that's re-assuring that I like it
-def AutoCanny(grayscale_im, auto_canny_sigma):
+def AutoCanny(grayscale_im, AutoCanny_sigma):
     grayscale_im_median = np.median(grayscale_im)
-    lower_canny_thresh = int(max(0, (1 - auto_canny_sigma) * grayscale_im_median ))
-    upper_canny_thresh = int(min(255, (1 + auto_canny_sigma) * grayscale_im_median ))
+    lower_canny_thresh = int(max(0, (1 - AutoCanny_sigma) * grayscale_im_median ))
+    upper_canny_thresh = int(min(255, (1 + AutoCanny_sigma) * grayscale_im_median ))
     print("AutoCanny()", grayscale_im_median, lower_canny_thresh, upper_canny_thresh)
     #lower_canny_thresh = 100
     #upper_canny_thresh = 130
@@ -544,7 +544,7 @@ def thinning_example(src):
 def HoughLines(img, gray):
   contoured_image = img.copy()
   #edges = cv2.Canny(gray.copy() ,100,200,apertureSize = 3)	# app size is 3, 5 or 7
-  edges = auto_canny(gray.copy(), 0.33)
+  edges = AutoCanny(gray.copy(), 0.33)
 
   minLineLength = 30
   maxLineGap = 5
@@ -586,7 +586,7 @@ def DrawContourLines(img, contours, color):
 
 def ContourLines(img, gray, Drawlines=False, DrawBoth=False):
   # canny edge detection
-  #bw_edged = auto_canny(gray, 0.33)
+  #bw_edged = AutoCanny(gray, 0.33)
   bw_edged = cv2.Canny(gray, 30, 200)
   cont2, contours, hierarchy = cv2.findContours(bw_edged.copy(),cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
   #cont2, contours, hierarchy = cv2.findContours(bw_edged.copy(),cv2.RETR_TREE,cv2.CHAIN_APPROX_TC89_L1)
@@ -655,7 +655,7 @@ def CrayolaFilter2(im, bw_threshold=20, mix_threshold=50):
     out = cv2.bitwise_and(hsv, mask)
     im = cv2.cvtColor(out, cv2.COLOR_HSV2BGR)
     bw = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-    canny_image = auto_canny(bw, 0.33)
+    canny_image = AutoCanny(bw, 0.33)
     (imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     im = cv2.drawContours(im, opencv_contours, -1, (255, 0, 255), 1)
     #return canny_image
@@ -772,7 +772,7 @@ class ReflexEntities(object):
                 self.image = BGR2GRAY(self.image)
             elif this == 'Y':
                 #print("Canny")
-                self.image = auto_canny(self.image.copy(), 0.1)		# ben's sigma was 0.33
+                self.image = AutoCanny(self.image.copy(), 0.1)		# ben's sigma was 0.33
         self.h_lines = cv2.HoughLinesP(self.image, 1, np.pi/180, 15, minLineLength=30, maxLineGap=10)
         #if self.h_lines is None:
         #    print("LINES -- NONE")
@@ -985,13 +985,13 @@ class Robogames(object):
             image = image[c_y:height, c_x:c_x+c_w]
         self.annotated = image.copy()
         #image = simplest_cb(self.original, 20)
-        image = ColorMask(image, colors=colors, threshold=RACE_THRESHOLD, wthreshold=RACE_WTHRESHOLD)		# red, white
+        image = ColorMask(image, colors=colors)
         #bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         #bw_image = cv2.blur(bw_image.copy(), (5,5))
         if RACE_BLUR:
             image = cv2.GaussianBlur(image.copy(), (5,5), 0)
         if RACE_CANNY:
-            image = auto_canny(image, 0.33)
+            image = AutoCanny(image, 0.33)
         #(imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         self.h_lines = cv2.HoughLinesP(image, 1, np.pi/180, 15, minLineLength=50, maxLineGap=30)
         self.map_lines = []
@@ -1049,7 +1049,7 @@ class Robogames(object):
                 self.filteredLines.append((middleX, this))
 
     def SelectLines(self):
-            print("FI:TERED", len(self.filteredLines))
+            print("FILTERED", len(self.filteredLines))
             self.rectangles = []
             self.selectedLines = []
             Allpoints = []
@@ -1178,7 +1178,7 @@ class ImageAnalyzer(object):
         self.Snapshot(bw_image, 'Blurred')
 
         if self.img_canny_method == 1:
-            canny_image = auto_canny(bw_image, 0.33)
+            canny_image = AutoCanny(bw_image, 0.33)
         elif self.img_canny_method == 2:
             # based on pyimagesearch method
             canny_image = cv2.Canny(bw_image, 30, 200)
@@ -1476,7 +1476,7 @@ def test_Cone():
 
     #bw = ColorMask(im, colors=[HSV_RED], threshold=150)
     #bw = np.bitwise_xor(bw, 255)
-    #canny_image = auto_canny(bw, 0.33)
+    #canny_image = AutoCanny(bw, 0.33)
     #edges, im = HoughLines(im, bw)
     #(imgxx, opencv_contours, hierarchy) = cv2.findContours(bw.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     #(opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
