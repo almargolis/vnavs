@@ -58,6 +58,10 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
 						Verbose=Verbose)
+
+        self.downloadDir = self.config.get("FileClient", "DownloadDir")
+        self.downloadDir = os.path.expanduser(self.downloadDir)               # this expands tilde in path
+
         self.scriptsDir = self.config.get("MissionControl", "Scripts")
         self.file_client = vnavs_mqtt.FileClient(Verbose=False)
 
@@ -248,7 +252,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         if self.pic_fn is None:
             print("NO PIC AVAILABLE")
             return
-        path = os.path.join(self.imageDir, self.pic_fn)
+        path = os.path.join(self.downloadDir, self.pic_fn)
         print("ProcessImage()", self.pic_fn, path)
         if self.pic_get:
             if not self.file_client.GetFile(self.pic_fn, path=path):
