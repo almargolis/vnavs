@@ -15,6 +15,7 @@ import numpy
 
 import easytk
 from easytk import SAME_ROW, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+import engineer_1
 import OpticChiasm
 import vnavs_mqtt
 import vnavs_const as vconst
@@ -253,4 +254,27 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
-vnavs_mqtt.LaunchNode(MissionControl)
+def RunGps():
+    gps_device = engineer_1.GpsDevice()
+    #gps_device.DetectBaudrate()
+    #return
+    #gps_device.IncreaseUpdateRate()
+    start_position = None
+    while start_position is None:
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if have_new_position_data:
+            start_position = (gps_device.latitude, gps_device.longitude)
+            print("Start", start_position)
+
+    while True:
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if have_new_position_data:
+            new_position = (gps_device.latitude, gps_device.longitude)
+            d = navigation.DistanceToWaypoint(start_position, new_position)
+            print("Distance", d.distance_to_waypoint, "Heading:", d.heading_to_waypoint)
+
+if __name__ == '__main__':
+    if sys.argv[1] == 'gui':
+        vnavs_mqtt.LaunchNode(MissionControl)
+    elif sys.argv[1] == 'gps':
+        RunGps()

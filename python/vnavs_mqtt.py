@@ -908,6 +908,14 @@ class Counters(object):
 #		connections and exceptions are handled properly. Since Loop()
 #		is non-blocking, DoLoop() needs to check self.mqttcConnected.
 #
+# (The following is a draft. May not be quite correct)
+# Where do I put my code for a node?
+#
+# rmsg* handlers (callbacks) get called as messages arrive and run in the socket thread.
+# It is possible for all code to live in these handlers. This makes for easy coding,
+# but can lead to poor performance if the handlers take a long time to complete,
+# either due to CPU intensive operations or waiting for external events (like database selects).
+#
 def LaunchNode(node_class):
     n = node_class()
     n.Loop()
