@@ -2,10 +2,17 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
-import cv2
+try:
+    import numpy as np
+    import cv2
+    import OpticChiasm
+except ImportError:
+    cv2 = None
+    np = None
+    OpticChiasm = None
+
 import json
 import math
-import numpy as np
 import os
 from geopy.distance import great_circle
 import sys
@@ -13,7 +20,6 @@ import time
 
 import vnavs_mqtt
 import vnavs_const as vconst
-import OpticChiasm
 
 WAYPOINT_WINDOW_METERS = 2.0
 STEER_STRAIGHT_HEADING = 10.0
@@ -44,7 +50,7 @@ def DistanceToWaypoint(position, waypoint):
     deltaX = great_circle((position_latitude, position_longitude), (position_latitude, waypoint_longitude)).meters
     hypotenuse = great_circle(position, waypoint).meters
     if deltaY < 0.00001:		# about 1 meter
-        waypointHeading = 90
+        heading_to_waypoint = 90
     else:
         tan = deltaX / deltaY
         atan = math.atan(tan)
@@ -66,6 +72,7 @@ def DistanceToWaypoint(position, waypoint):
     o = object()
     setattr(o, 'heading_to_waypoint', heading_to_waypoint)
     setattr(o, 'distance_to_waypoint',  hypotenuse)
+    return o
 
 class MissionStep(object):
     def __init__(self, mission, section):

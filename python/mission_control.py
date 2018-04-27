@@ -5,18 +5,33 @@ from builtins import (bytes, str, open, super, range,
 import json
 import sys
 import os
-from PIL import ImageTk, Image
+
+try:
+    from PIL import ImageTk, Image
+except ImportError:
+    ImageTk = None
+    Image = None
 
 import threading
 import time
 
-import cv2
-import numpy
+try:
+    import numpy
+    import cv2
+    import OpticChiasm
+except ImportError:
+    cv2 = None
+    numpy = None
+    OpticChiasm = None
 
-import easytk
-from easytk import SAME_ROW, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+try:
+    import easytk
+    from easytk import SAME_ROW, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+except ImportError:
+    easytk = None
+
 import engineer_1
-import OpticChiasm
+import navigator
 import vnavs_mqtt
 import vnavs_const as vconst
 import paho.mqtt.client as mqtt
@@ -28,7 +43,7 @@ BOT_1_MAP_TRANSPOSE = [
 			[ -2.95275685e-18,  -3.83178162e-03,   1.00000000e+00]
 		]
 
-BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
+# BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
@@ -270,8 +285,9 @@ def RunGps():
         have_new_position_data = gps_device.UpdateGpsInfo()
         if have_new_position_data:
             new_position = (gps_device.latitude, gps_device.longitude)
-            d = navigation.DistanceToWaypoint(start_position, new_position)
-            print("Distance", d.distance_to_waypoint, "Heading:", d.heading_to_waypoint)
+            d = navigator.DistanceToWaypoint(start_position, new_position)
+            print("Distance:", d.distance_to_waypoint, "Heading:", d.heading_to_waypoint,
+			"Speed:", gps_device.gps_speed, "Quality:", gps_device.gps_quality)
 
 if __name__ == '__main__':
     if sys.argv[1] == 'gui':

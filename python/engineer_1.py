@@ -9,9 +9,10 @@ import serial
 import sys
 import time
 
-from sense_hat import SenseHat
-#import sense_hat.sense_hat
-#import SenseHat
+try:
+    from sense_hat import SenseHat
+except:
+    SenseHat = None
 
 
 import vnavs_mqtt
@@ -172,7 +173,7 @@ class GpsDevice(object):
             return False
         parsed_sentence = None
         try:
-            print("DoLoop()", `gps_sentence`)
+            #print("DoLoop()", `gps_sentence`)
             parsed_sentence = pynmea2.parse(gps_sentence)
         except pynmea2.ParseError:
             print("PARSE ERROR")
@@ -323,7 +324,7 @@ def TestGps():
     gps_device = GpsDevice()
     #gps_device.DetectBaudrate()
     #return
-    gps_device.IncreaseUpdateRate()
+    #gps_device.IncreaseUpdateRate()
     while True:
         have_new_position_data = gps_device.UpdateGpsInfo()
         if gps_device.last_sentence_str is not None:
