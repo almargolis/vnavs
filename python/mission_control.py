@@ -289,8 +289,24 @@ def RunGps():
             print("Distance:", d.distance_to_waypoint, "Heading:", d.heading_to_waypoint,
 			"Speed:", gps_device.gps_speed, "Quality:", gps_device.gps_quality)
 
+def SaveGps(waypoint):
+    gps_device = engineer_1.GpsDevice()
+    gps_readings = []
+    while len(gps_readings) < 1:
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if have_new_position_data:
+            this_position = "{},{}".format(gps_device.latitude, gps_device.longitude)
+            gps_readings.append(this_position)
+            payload = {}
+            payload['key'] = waypoint
+            payload['value'] = this_position
+            vnavs_mqtt.Publish('data/save', payload)
+
 if __name__ == '__main__':
     if sys.argv[1] == 'gui':
         vnavs_mqtt.LaunchNode(MissionControl)
     elif sys.argv[1] == 'gps':
         RunGps()
+    elif sys.argv[1] == 'save':
+        waypoint = sys.argv[2]
+        SaveGps(waypoint)

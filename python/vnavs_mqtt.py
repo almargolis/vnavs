@@ -196,6 +196,7 @@ class SocketWrapper(object):
         self.config.readfp(open(config_file_path))
         self.socket_host = Host
         self.socket_port = Port
+        self.sent_ct = 0
         if IniSection is not None:
             try:
                 self.socket_host = self.config.get(IniSection, "Host")
@@ -369,6 +370,7 @@ class SocketWrapper(object):
             else:
                 try:
                     s.send(next_msg)
+                    self.sent_ct += 1
                     if self.verbose:
                         print("SEND", next_msg)
                 except socket.error as e:
@@ -748,7 +750,7 @@ class FastMqttServer(SocketWrapperServer):
 class FastMqttClient(SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.
     def __init__(self, Verbose=False):
-        super().__init__(IniSection="MqttBroker", Verbose=Verbose)
+        super().__init__(IniSection="MqttFast", Verbose=Verbose)
         self.on_message = None
         self.on_connect = None
 
@@ -920,6 +922,14 @@ def LaunchNode(node_class):
     n = node_class()
     n.Loop()
 
+def Publish(topic, payload):
+    node = mqtt_node(BrokerType='F', SingleThreaded=True) 
+    print("BrokerType", node.broker_type)
+    node.ConnectToMqttServer()
+    node.Publish(topic, payload)
+    while node.mqttc.sent_ct < 1:
+        node.CheckMqttPendingActivity()
+
 class mqtt_node(object):
     __slots__ = ('args', 'arrivedReads', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'debug', 'exception_ct', 'exception_last_time',
@@ -928,7 +938,7 @@ class mqtt_node(object):
 					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
 
     def __init__(self, node_name=None, Subscriptions=[], Readers=[],
-				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='F', Streamer=False, Verbose=True):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         #	switch between cameras / bots manually.
         # BlockIfNotConnected is for nodes that only need to run when connected to a message server. DoLoop() is what is blocked.
@@ -992,6 +1002,7 @@ class mqtt_node(object):
             print("Non-Blocking Mode")
 
     def InitMqttClient(self):
+        print("InitMqttClient()", self.broker_type)
         if self.broker_type == 'M':
             iniSection = 'MqttBroker'		# Mosquitto
             self.mqttc = PahoClient()
