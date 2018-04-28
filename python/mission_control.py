@@ -58,6 +58,10 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
 						Verbose=Verbose)
+
+        self.downloadDir = self.config.get("FileClient", "DownloadDir")
+        self.downloadDir = os.path.expanduser(self.downloadDir)               # this expands tilde in path
+
         self.scriptsDir = self.config.get("MissionControl", "Scripts")
         self.file_client = vnavs_mqtt.FileClient(Verbose=False)
 
@@ -248,7 +252,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         if self.pic_fn is None:
             print("NO PIC AVAILABLE")
             return
-        path = os.path.join(self.imageDir, self.pic_fn)
+        path = os.path.join(self.downloadDir, self.pic_fn)
         print("ProcessImage()", self.pic_fn, path)
         if self.pic_get:
             if not self.file_client.GetFile(self.pic_fn, path=path):
@@ -289,8 +293,24 @@ def RunGps():
             print("Distance:", d.distance_to_waypoint, "Heading:", d.heading_to_waypoint,
 			"Speed:", gps_device.gps_speed, "Quality:", gps_device.gps_quality)
 
+def SaveGps(waypoint):
+    gps_device = engineer_1.GpsDevice()
+    gps_readings = []
+    while len(gps_readings) < 1:
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if have_new_position_data:
+            this_position = "{},{}".format(gps_device.latitude, gps_device.longitude)
+            gps_readings.append(this_position)
+            payload = {}
+            payload['key'] = waypoint
+            payload['value'] = this_position
+            vnavs_mqtt.Publish('data/save', payload)
+
 if __name__ == '__main__':
     if sys.argv[1] == 'gui':
         vnavs_mqtt.LaunchNode(MissionControl)
     elif sys.argv[1] == 'gps':
         RunGps()
+    elif sys.argv[1] == 'save':
+        waypoint = sys.argv[2]
+        SaveGps(waypoint)
