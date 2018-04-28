@@ -250,6 +250,7 @@ class vehicle(object):
             direction = STEER_STRAIGHT
         else:
             direction = self.steering_plan[0].direction
+        print("SteeringTick()", self.steering_offset, direction, self.steering_plan)
         self.steering.write(self.steering_offset + direction)
         self.steering_last = direction
         return
@@ -308,7 +309,7 @@ STEER_STRAIGHT = 0
 class helmsman(vnavs_mqtt.mqtt_node):
     def __init__(self):
         self.orders_q = queue.Queue(10)
-        super().__init__(Subscriptions=[vconst.helmsman_orders_topic], SingleThreaded=False, BrokerType='F')
+        super().__init__(Subscriptions=[vconst.helmsman_orders_topic], SingleThreaded=False, BrokerType='F', Verbose=False)
         self.v = vehicle()
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
         self.deadman_time = 0		# E-Stop if time.time() exceeds this
@@ -353,7 +354,7 @@ class helmsman(vnavs_mqtt.mqtt_node):
             else:
                 speed_request = payload['speed']	# Note: alphanumeric
             self.v.NewSpeedGoal(speed_request)
-            #print("SPEED", speed_request)
+            print("SPEED", speed_request)
             #self.GetGoalSpeed(speed_request)
         if 'heading' in payload:
             if 'heading_scale_min' in payload:
@@ -362,7 +363,7 @@ class helmsman(vnavs_mqtt.mqtt_node):
                 heading_scale_max = int(payload['heading_scale_max'])
                 heading_request = self.ScaleRequest(heading_raw, heading_scale_min, heading_scale_max, -self.v.steering_max, self.v.steering_max, sensitivity=None)
             else:
-                heading_request = payload['heading']	# Note: alphanumeric
+                heading_request = int(payload['heading'])	# Note: alphanumeric
             #print ("STEER", heading_request)
             self.v.NewSteeringGoal(heading_request)
             #self.GetGoalSteering(heading_request)
@@ -402,7 +403,7 @@ class helmsman(vnavs_mqtt.mqtt_node):
         return int(request_value)
 
     def DoLoop(self):
-        #print("STATE", self.state)
+        print("STATE", self.state)
         if not self.mqttc.connected:
             self.v.Estop()
             return

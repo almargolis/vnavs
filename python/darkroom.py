@@ -155,7 +155,7 @@ class ImageFilter(object):
 ImageFilter(FILTER_NAME_IMAGE,
 			'xstep.exec_im = xstep.source_im.copy()',
 			[],
-			Flags=['isbase'])
+			Flags=[FLAG_ISBASE])
 
 ImageFilter(FILTER_NAME_COLORMASK_MULTI,
 			'xstep.exec_im = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={huerange}, threshold={threshold}),\n' \
@@ -243,7 +243,7 @@ ImageFilter('Erode',
 			Flags=[])
 
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
-filter = ImageFilter('FindContours',
+filter = ImageFilter('ContoursFind',
 			'cont2, xstep.exec_contours, xstep.exec_hierarchy = cv2.findContours(im_in.ImAsGray(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
 			[FilterParmInt('MaxLevel', '-1')],
 			Flags=[])
@@ -255,13 +255,13 @@ filter.annotate_code = 'xstep.exec_annotated = im_base.CopyAsGray().CopyAsBGR()\
 		#		+ '    color = (np.random.uniform(0, 255), np.random.uniform(0, 255), np.random.uniform(0, 255))\n'
 		#		+ '    cv2.drawContours(xstep.exec_im, xstep.exec_contours, 1, color, 1)\n',
 
-ImageFilter('DrawContours',
-			'cv2.drawContours(im, contours, -1, (0, 0, 255))',
+ImageFilter('ContoursDraw',
+			'xstep.exec_annotated = oc.Image(im=cv2.drawContours(im_in.im, in_contours, -1, (0, 0, 255)), colorcode=im_in.colorcode)',
 			[],
 			Flags=['incont'])
 
 ImageFilter('EqualizeHistogram',
-			'xstep.exec_im = cv2.equalizeHist(im)',
+			'xstep.exec_im = oc.Image(im=cv2.equalizeHist(im_in.ImAsGray()), colorcode=oc.IM_GRAY)',
 			[],
 			Flags=[])
 
@@ -558,6 +558,11 @@ class ProcessStep(object):
         if code != '':
             exec_code_str = code.format(**code_substitutions)
             print("EXEC", exec_code_str)
+            if 'im_in' in exec_global_vars:
+                print("XXXX-vv", exec_global_vars['im_in'].__class__.__name__)
+                ximin = exec_global_vars['im_in']
+                if isinstance(ximin, OpticChiasm.Image):
+                    print("XXXX-im", ximin._im.__class__.__name__)
             try:
                 exec(exec_code_str, exec_global_vars)
             except:
