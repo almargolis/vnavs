@@ -212,7 +212,7 @@ class TkWidgetDef(object):
             debug += "StringVar '{0}".format(self.tkd.get())
         else:
             debug += "{0} '{1}'".format(self.tkd.__class__.__name__, `self.tkd`)
-        print(debug)
+        #print(debug)
         
         if isinstance(self.tkw, ScrolledText.ScrolledText):
             self.tkw.delete("1.0", Tkinter.END)
@@ -252,7 +252,7 @@ class TkWidgetDef(object):
             if isinstance(self.tkw, Tkinter.OptionMenu) and (v == 'None'):
                 # I'm not sure if its me or Tkinter that turned no selection to a string
                 v = None
-            print("Value() tkd '{0}'".format(v))
+            #print("Value() tkd '{0}'".format(v))
             return v
 
     def AddButton(self, caption, command, row=NEXT_ROW, col=SAME_COL):

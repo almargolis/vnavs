@@ -586,7 +586,9 @@ class ProcessStep(object):
                 step_display_image = base_image
             else:
                 step_display_image = self.exec_im
-        self.image_widget.UpdateImage(source_im=step_display_image.im)
+        if step_display_image is not None:
+            # This can happen while steps are being changed
+            self.image_widget.UpdateImage(source_im=step_display_image.im)
         self.execution_time.ReplaceValue("{:f}ms".format((time.time() - execution_start) / 1000))
         return
 

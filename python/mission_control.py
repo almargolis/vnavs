@@ -93,7 +93,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         mission_tab = self.notebook.AddTab('Mission')
         self.f1_helmsman_entry = mission_tab.AddEntryField('Helmsman', width=75)
         self.f1_engineer_1_entry = mission_tab.AddEntryField('Engineer_1', width=75)
-        self.mission_name_entry = mission_tab.AddEntryField('Mission', width=15, value='test')
+        self.mission_name_entry = mission_tab.AddEntryField('Mission', width=15, value='table')
         buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         buttonframe.AddButton('Start', command=self.StartMission, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Cancel', command=self.CancelMission, row=SAME_ROW, col=NEXT_COL)
@@ -188,12 +188,12 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.f1_helmsman_entry.ReplaceValue(self.filter_payload(payload))
 
     def rmsg_navigator_status(self, payload):
-        print("NAV STAT", payload)
+        #print("NAV STAT", payload)
         self.f1_helmsman_status.set(payload)
         if 'filename' in payload:
             self.pic_fn = payload['filename']
             self.pic_processed = False
-            print("NAV FILE", self.pic_fn)
+            #print("NAV FILE", self.pic_fn)
 
     def ClearWaypoints(self):
         payload = {}
@@ -253,7 +253,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             print("NO PIC AVAILABLE")
             return
         path = os.path.join(self.downloadDir, self.pic_fn)
-        print("ProcessImage()", self.pic_fn, path)
+        #print("ProcessImage()", self.pic_fn, path)
         if self.pic_get:
             if not self.file_client.GetFile(self.pic_fn, path=path):
                 print("Unable to fetch PIC", self.pic_fn)
