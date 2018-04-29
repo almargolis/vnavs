@@ -1267,7 +1267,7 @@ class mqtt_node(object):
         # Acks get sent automagically as needed.
         # Only a small percentage of messages get ack-ed, based on
         # the state of error and the _ack payload property.
-        self.PublishAck(payload, error=error)
+        #self.PublishAck(payload, error=error)
 
     def on_log(self, client, userdata, level, buf):
         print(buf)
