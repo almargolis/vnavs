@@ -1235,6 +1235,8 @@ class mqtt_node(object):
         sourceSender = payload['_sender']
         payload['_ackSourceTopic'] = sourceTopic
         payload['_ackSourceSender'] = sourceSender
+        if '_topic' in payload:
+            payload['_ack'] = payload['_topic']
         if '_sendPid' in payload:
             payload['_ackPid'] = payload['_sendPid']
         if '_sendSeq' in payload:

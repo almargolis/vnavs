@@ -24,7 +24,7 @@ import vnavs_const as vconst
 WAYPOINT_WINDOW_METERS = 2.0
 STEER_STRAIGHT_HEADING = 10.0
 STEER_SHARP_HEADING = 90.0
-FORWARD_VERY_SLOW = 6
+FORWARD_VERY_SLOW = 2
 FORWARD_SLOW = 6		# OK slow for court
 FORWARD_SLOW = 16		# this is what it took to move well on grass at robogames
 FORWARD_SLOW = 4		# too slow for court (maybe depends on battery)
@@ -83,11 +83,11 @@ class MissionStep(object):
         self.section = section
         self.parms = {}
 
-    def PublishNavigation(self):
+    def PublishNavigation(self, timer=6):
         payload = {}
         payload['heading'] = self.nav.steering
         payload['speed'] = self.nav.speed
-        payload['timer'] = 6
+        payload['timer'] = timer
         self.navigator.Publish(vconst.helmsman_orders_topic, payload)
         if self.nav.untrustedGpsUpdates < 0:
             # this could be dangerous, skipping navigation indefinately
@@ -136,6 +136,22 @@ class StepGpsWaypoint(MissionStep):
             self.nav.speed = FORWARD_SLOW
             self.PublishNavigation()
 
+class StepMove(MissionStep):
+    __slots__ = ('speed', 'timer')
+
+    def __init__(self, mission, section):
+        super().__init__(mission, section)
+        self.speed = 0
+        self.timer = 1
+
+    def Load(self, parts):
+        self.speed = int(parts[0])
+        self.timer = float(parts[1])
+
+    def DoMissionStep(self):
+        self.nav.speed = self.speed
+        self.PublishNavigation(timer=self.timer)
+
 class StepMagic(MissionStep):
     __slots__ = ('last_imageFn', 'movement_started')
 
@@ -143,6 +159,9 @@ class StepMagic(MissionStep):
         super().__init__(mission, section)
         self.last_imageFn = None
         self.movement_started = False
+
+    def Load(self, parts):
+        pass
 
     def DoMissionStep(self):
         if self.navigator.imageFn is None:
@@ -163,7 +182,7 @@ class StepMagic(MissionStep):
             im = cv2.imread(fp)
             if im is None:
                 return
-        r = OpticChiasm.Robogames(im, [OpticChiasm.HSV_YELLOW])
+        r = OpticChiasm.Robogames(im, [25])
         r.ProcessLines()
         r.FilterLines()
         r.SelectLines()
@@ -264,11 +283,18 @@ class Mission(object):
                     section = 'end'
                 elif step_type == 'magic':
                     step = StepMagic(self, section)
+                elif step_type == 'move':
+                    step = StepMove(self, section)
                 elif step_type == 'msg':
                     step = StepMessage(self, section, parts[1].strip())
                 elif step_type == 'sleep':
                     step = StepSleep(self, section, parts[1].strip())
                 if step is not None:
+                    if len(parts) > 1:
+                        posparms = parts[1:]
+                    else:
+                        posparms = []
+                    step.Load(posparms)
                     self.mission_steps.append(step)
             else:
                 # This is a parameter of the step being loaded
@@ -374,7 +400,9 @@ class navigator(vnavs_mqtt.mqtt_node):
 						vconst.mission_cancel_topic,
 						vconst.mission_end_topic,
 						vconst.navigator_service_topic,
-						vconst.cameraman_pic_ready_topic
+						vconst.cameraman_pic_ready_topic,
+						'data/save',
+						'data/get'
 					],
 					Readers=[],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
@@ -480,20 +508,34 @@ class navigator(vnavs_mqtt.mqtt_node):
     def DumpPersistentData(self):
         if self.persistent_data is None:
             return					# its was never loaded
+        self.persistent_data['test'] = 'test'
+        
         path = os.path.expanduser('~/vnavs.data')
         d = json.dumps(self.persistent_data)
         f = open(path, 'w')
-        f.write(d)
+        f.write(d.decode("utf-8"))
         f.close()
 
     def LoadPersistentData(self):
         if self.persistent_data is not None:
             return					# its already loaded
         path = os.path.expanduser('~/vnavs.data')
-        f = open(path, 'r')
+        try:
+            f = open(path, 'r')
+        except IOError as e:
+            # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
+            if e.errno == 2:
+                self.persistent_data = {}
+                return
+            else:
+                raise
+
         d = f.read()
         f.close()
-        self.persistent_data = json.loads(d)
+        if d == "":
+            self.persistent_data = {}
+        else:
+            self.persistent_data = json.loads(d)
 
 
     def rmsg_cameraman_pic_ready(self, payload):
@@ -525,6 +567,14 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.LoadPersistentData()
         self.persistent_data[key] = value
         self.DumpPersistentData()
+
+    def rmsg_data_get(self, payload):
+        key = payload['key']
+        self.LoadPersistentData()
+        value = self.persistent_data[key]
+        self.PrepareResponse(payload)
+        payload['value'] = value
+        self.Publish('data/value', payload)
 
     def rmsg_navigator_mode(self, payload):
         print("MODE_MSG", payload)
