@@ -273,17 +273,24 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
-def RunGps():
+def RunGps(waypoint):
     gps_device = engineer_1.GpsDevice()
     #gps_device.DetectBaudrate()
     #return
     #gps_device.IncreaseUpdateRate()
     start_position = None
+    if waypoint is not None:
+        print("RunGps() requesting waypoint", waypoint)
+        payload = {}
+        payload['key'] = waypoint
+        value_payload = vnavs_mqtt.Publish('data/get', payload, ResponseTopic='data/value')
+        value = value_payload['value']
+        start_position = navigator.PositionStringToTuple(value)
     while start_position is None:
         have_new_position_data = gps_device.UpdateGpsInfo()
         if have_new_position_data:
             start_position = (gps_device.latitude, gps_device.longitude)
-            print("Start", start_position)
+    print("Start", start_position)
 
     while True:
         have_new_position_data = gps_device.UpdateGpsInfo()
@@ -310,7 +317,11 @@ if __name__ == '__main__':
     if sys.argv[1] == 'gui':
         vnavs_mqtt.LaunchNode(MissionControl)
     elif sys.argv[1] == 'gps':
-        RunGps()
+        if len(sys.argv) > 2:
+            waypoint = sys.argv[2]
+        else:
+            waypoint = None
+        RunGps(waypoint)
     elif sys.argv[1] == 'save':
         waypoint = sys.argv[2]
         SaveGps(waypoint)

@@ -1110,6 +1110,11 @@ def TestImuCancel():
                 r = "CONTINUE"
             print("IMU YAW {:+8.4f} Goal Delta: {:+8.4f} Progress: {}".format(h.yaw, h.nav.deltaYawGoal, r))
 
+def PositionStringToTuple(position):
+    parts = position.split(',')
+    waypoint = (float(parts[0]), float(parts[1]))
+    return waypoint
+
 def RunMap():
     waypoints = []
     navpoints = []

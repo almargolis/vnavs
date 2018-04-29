@@ -159,6 +159,7 @@ class GpsDevice(object):
             except ValueError:
                 print("Invalid RMC heading", `heading_raw`)
         self.gps_differential = parsed_sentence.data[11]	# A=autonomous, D=differeential GPS
+        print("RMC ------")
         """
         print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
 					self.gps_status, parsed_sentence.data[2], parsed_sentence.data[3], self.latitude,
@@ -206,7 +207,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.goal_longitude = None
         self.goal_latitude = None
         self.gps_device = GpsDevice()
-        self.gps_device.IncreaseUpdateRate()
+        # self.gps_device.IncreaseUpdateRate()
         self.sense = SenseHat()
         self.sense.set_imu_config(False, True, False)
         self.last_position_message_time = time.time()
@@ -260,6 +261,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
                 payload['gps_time'] = `self.gps_device.timestamp`
                 payload['gps_mode'] = self.gps_device.gps_mode
                 payload['gps_differential'] = self.gps_device.gps_differential
+                print(payload)
                 topic = vconst.engineer_1_gps_topic
             else:
                 topic = vconst.engineer_1_imu_topic
