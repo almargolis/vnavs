@@ -1313,7 +1313,8 @@ if __name__ == "__main__":
         n = TestReceiver()
         n.Connect()
     elif sys.argv[1] == 'f':
-        s = FileServer(Verbose=verbose)
+        #s = FileServer(Verbose=verbose)
+        s = FileServer(Verbose=True)
         s.Serve()
     elif sys.argv[1] == 'm':
         s = FastMqttServer(Verbose=verbose)
