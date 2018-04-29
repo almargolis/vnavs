@@ -196,6 +196,7 @@ class SocketWrapper(object):
         self.config.readfp(open(config_file_path))
         self.socket_host = Host
         self.socket_port = Port
+        self.sent_ct = 0
         if IniSection is not None:
             try:
                 self.socket_host = self.config.get(IniSection, "Host")
@@ -369,6 +370,7 @@ class SocketWrapper(object):
             else:
                 try:
                     s.send(next_msg)
+                    self.sent_ct += 1
                     if self.verbose:
                         print("SEND", next_msg)
                 except socket.error as e:
@@ -748,7 +750,7 @@ class FastMqttServer(SocketWrapperServer):
 class FastMqttClient(SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.
     def __init__(self, Verbose=False):
-        super().__init__(IniSection="MqttBroker", Verbose=Verbose)
+        super().__init__(IniSection="MqttFast", Verbose=Verbose)
         self.on_message = None
         self.on_connect = None
 
@@ -920,15 +922,43 @@ def LaunchNode(node_class):
     n = node_class()
     n.Loop()
 
+def Publish(topic, payload, ResponseTopic=None):
+    if ResponseTopic is None:
+        subscriptions = []
+        save_seq = False
+    else:
+        subscriptions = [ResponseTopic]
+        save_seq = True
+    node = mqtt_node(Subscriptions=subscriptions, BrokerType='F', SingleThreaded=True,
+			AckTopic=ResponseTopic) 
+    print("BrokerType", node.broker_type)
+    try:
+        node.ConnectToMqttServer()
+    except:
+        pass
+    while not node.mqttc.connected:
+        try:
+            node.ConnectToMqttServer()
+        except:
+            pass
+    node.Publish(topic, payload, SaveSeq=save_seq)
+    while node.mqttc.sent_ct < 1:
+        node.CheckMqttPendingActivity()
+    if ResponseTopic is None:
+        return
+    while node.ack_payload is None:
+        node.CheckMqttPendingActivity()
+    return node.ack_payload
+
 class mqtt_node(object):
-    __slots__ = ('args', 'arrivedReads', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
+    __slots__ = ('ack_pending', 'ack_payload', 'ack_topic', 'args', 'arrivedReads', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'debug', 'exception_ct', 'exception_last_time',
 					'handlers', 'imageDir', 'lastSocketError', 'loop_sleep', 'mqttc', 'node_name', 'pendingReads',
 					'readers', 'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
 					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
 
-    def __init__(self, node_name=None, Subscriptions=[], Readers=[],
-				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='M', Streamer=False, Verbose=True):
+    def __init__(self, node_name=None, Subscriptions=[], Readers=[], AckTopic=None,
+				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='F', Streamer=False, Verbose=True):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         #	switch between cameras / bots manually.
         # BlockIfNotConnected is for nodes that only need to run when connected to a message server. DoLoop() is what is blocked.
@@ -950,6 +980,9 @@ class mqtt_node(object):
                 self.args[key] = val
             else:
                 self.args[this] = True
+        self.ack_pending = None
+        self.ack_payload = None
+        self.ack_topic = AckTopic
         self.vnavs_pid = int(time.time())		# non-repeating with ~ 1 second
         self.vnavs_mid = 0				# Publish() sequence
         self.block_if_not_connected = BlockIfNotConnected
@@ -992,6 +1025,7 @@ class mqtt_node(object):
             print("Non-Blocking Mode")
 
     def InitMqttClient(self):
+        print("InitMqttClient()", self.broker_type)
         if self.broker_type == 'M':
             iniSection = 'MqttBroker'		# Mosquitto
             self.mqttc = PahoClient()
@@ -1138,6 +1172,8 @@ class mqtt_node(object):
             handler_name = handler_method_prefix + this_topic.replace('/', '_')
             handler_method = getattr(self, handler_name, None)
             if handler_method is None:
+                if (self.ack_topic is not None) and (self.ack_topic == this_topic):
+                    pass			# doesn't require handler
                 if self.wildcard_handler is None:
                     print("No message handler for topic '%s'" % (this_topic))
             self.handlers[this_topic] = handler_method
@@ -1171,7 +1207,7 @@ class mqtt_node(object):
         # error messages ???
         self.pendingReads[topic] = time.time()
 
-    def Publish(self, topic, payload, Ack_Topic=None):
+    def Publish(self, topic, payload, Ack_Topic=None, SaveSeq=False):
         # payload is a dict to be converted to JSON)
         if not self.mqttc.connected:
             # for now, silently ignore publish errors. Need to do better
@@ -1184,6 +1220,8 @@ class mqtt_node(object):
             payload['_ack'] = Ack_Topic
         self.vnavs_mid += 1
         payload['_sendSeq'] = self.vnavs_mid
+        if SaveSeq:
+            self.ack_pending = self.vnavs_mid
         res, mid = self.mqttc.publish(topic, json.dumps(payload))
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
@@ -1197,6 +1235,8 @@ class mqtt_node(object):
         sourceSender = payload['_sender']
         payload['_ackSourceTopic'] = sourceTopic
         payload['_ackSourceSender'] = sourceSender
+        if '_topic' in payload:
+            payload['_ack'] = payload['_topic']
         if '_sendPid' in payload:
             payload['_ackPid'] = payload['_sendPid']
         if '_sendSeq' in payload:
@@ -1247,6 +1287,11 @@ class mqtt_node(object):
         if handler_method is None:
             if self.wildcard_handler is not None:
                 error = self.wildcard_handler(message.topic, payload)
+            elif (self.ack_topic is not None) and (self.ack_topic == message.topic):
+                # No handler required. Save specific response.
+                if (self.ack_pending is not None) and ('_ackSeq' in payload) and (payload['_ackSeq'] == self.ack_pending):
+                    self.ack_payload = payload
+                    error = None
             else:
                 error = ' no handler for topic'
         else:
@@ -1254,7 +1299,7 @@ class mqtt_node(object):
         # Acks get sent automagically as needed.
         # Only a small percentage of messages get ack-ed, based on
         # the state of error and the _ack payload property.
-        self.PublishAck(payload, error=error)
+        #self.PublishAck(payload, error=error)
 
     def on_log(self, client, userdata, level, buf):
         print(buf)
@@ -1313,7 +1358,8 @@ if __name__ == "__main__":
         n = TestReceiver()
         n.Connect()
     elif sys.argv[1] == 'f':
-        s = FileServer(Verbose=verbose)
+        #s = FileServer(Verbose=verbose)
+        s = FileServer(Verbose=True)
         s.Serve()
     elif sys.argv[1] == 'm':
         s = FastMqttServer(Verbose=verbose)

@@ -21,10 +21,10 @@ import time
 import vnavs_mqtt
 import vnavs_const as vconst
 
-WAYPOINT_WINDOW_METERS = 2.0
+WAYPOINT_WINDOW_METERS = 4.0
 STEER_STRAIGHT_HEADING = 10.0
 STEER_SHARP_HEADING = 90.0
-FORWARD_VERY_SLOW = 6
+FORWARD_VERY_SLOW = 2
 FORWARD_SLOW = 6		# OK slow for court
 FORWARD_SLOW = 16		# this is what it took to move well on grass at robogames
 FORWARD_SLOW = 4		# too slow for court (maybe depends on battery)
@@ -74,6 +74,129 @@ def DistanceToWaypoint(position, waypoint):
     setattr(o, 'distance_to_waypoint',  hypotenuse)
     return o
 
+def CheckYawForCompletedManuever(current_yaw, nav):
+    ## ************** ##
+    # Need to track how far we have been moving in same direction. If we overshoot
+    # past folding point we get stuck in circle.
+    #
+    if nav.startingYaw is None:
+        return False				# there is nothing to complete
+    if self.yaw is None:
+        return False				# probably an error, no IMU data arriving
+    yawDeltaSoFar = current_yaw - nav.startingYaw
+    print("IMU YAW {:+8.4f} Goal Delta: {:+8.4f} Progress: {:+8.4f}".format(current_yaw, nav.deltaYawGoal, yawDeltaSoFar))
+    if nav.deltaYawGoal < 0:
+        # we are turning left. Heading going down in value.
+        # Possibly wrapping from 0 to 359
+        if current_yaw > nav.startingYaw:
+            # we have probably wrapped 0/360, but it could be noise or wind
+            try:
+                if (current_yaw - nav.startingYaw) > 30:
+                    # it's a significant difference, not noise
+                    yawDeltaSoFar -= 360
+            except TypeError:
+                # not sure how this happened!
+                print("TYPE ERROR")
+                pass
+        if yawDeltaSoFar <= nav.deltaYawGoal:
+            # we have gone more negative, further left
+            return True				# manuever completed
+        else:
+            return False			# manuever continuing
+    else:
+        # we are turning right, Heading going up in value.
+        # Possibly wrapping from 359 to 0
+        if current_yaw < nav.startingYaw:
+            if (current_yaw - nav.startingYaw) < -30:
+                yawDeltaSoFar += 360
+        if yawDeltaSoFar >= nav.deltaYawGoal:
+            return True				# manuever completed
+        else:
+            return False			# manuever continuing
+
+def NavigateTowardWaypoint(current_yaw, current_heading, current_position, waypoint, nav):
+    # should be reworked using GeographicLib ??
+    # Longitude are lines drawn between poles. +/- 180 degrees from Prime Meridian (Greenwich England)
+    # delta Longitude is deltaX.
+    # Latitude are lines drawn ~ perpendicular to longitude. Equator is 0 degrees, poles are +/- 90 degrees.
+    # delta Latitude is deltaY.
+    # geopy coordinates are (latitude, longitude) or (y, x)
+    if current_heading is None:
+        # we aren't receiving GPS info. Can't navigate.
+        print("NO HEADING - can't navigate.")
+        return None
+    d = DistanceToWaypoint(current_position, waypoint)
+
+    deltaHeading = d.heading_to_waypoint - current_heading
+    if deltaHeading < -180:
+        deltaHeading = deltaHeading + 360
+    elif deltaHeading > 180:
+        deltaHeading = deltaHeading - 360
+    if abs(deltaHeading) < STEER_STRAIGHT_HEADING:
+        nav.Init()
+        nav.steering = 0
+        if d.distance_to_waypoint > 10:
+            nav.speed = FORWARD_FAST
+        else:
+            nav.speed = FORWARD_SLOW
+    else:
+        # deltaHeading is +/- 180 degrees, map to +/- 60 steering order.
+        # this should query the helmsman for this bots range instead of assuming 60.
+        # The signs of headings and steering command are the same. Negative means
+        # the waypoint is to the left, positive is to the right.
+        if True:		# For now, just stear for all turns
+        #if abs(deltaHeading) <= Y_TURN_LIMIT:
+            # make the direct turn
+            nav.Init()
+            nav.steering = -int(deltaHeading / 3)
+            if (d.distance_to_waypoint > 10) and (abs(deltaHeading) < 20):
+                nav.speed = FORWARD_FAST
+            else:
+                nav.speed = FORWARD_SLOW
+            if abs(deltaHeading) > 45:
+                pass
+                #self.nav.untrustedGpsUpdates = 1		# give GPS time to settle after tight turn
+                nav.softKeepSeconds = 2
+                nav.speed = FORWARD_SLOW
+                nav.startingYaw = current_yaw
+                nav.deltaYawGoal = deltaHeading
+        """
+        *** This is a Y U-Turn which needs to be reimplimented ***
+        else:
+            self.nav.speed = STOP_SPEED
+            self.nav.hardKeepSeconds = STOP_SECONDS
+            step = NavStep()
+            # Note: this steering direction is reversed, but yaw is not.
+            step.steering = 'A' + str(int(-deltaHeading / 3))
+            step.gps_speed = REVERSE_SLOW
+            step.startingYaw = self.yaw
+            step.deltaYawGoal = deltaHeading * OVERSTEER_ADJUSTMENT
+            step.untrustedGpsUpdates = -1
+            self.navSteps = [step]
+            #
+            step = NavStep()
+            step.steering = 'A0'
+            step.gps_speed = STOP_SPEED
+            step.hardKeepSeconds = STOP_SECONDS
+            step.untrustedGpsUpdates = -1
+            self.navSteps.append(step)
+            #
+            step = NavStep()
+            step.steering = 'A' + str(int(deltaHeading / 3))
+            step.gps_speed = FORWARD_SLOW
+            step.startingYaw = self.yaw
+            step.deltaYawGoal = deltaHeading * OVERSTEER_ADJUSTMENT
+            step.untrustedGpsUpdates = 1
+            self.navSteps.append(step)
+        """
+    #self.PublishNavigation()
+    #self.mission.navpoints.append(((self.latitude, self.longitude), self.nav.steering))
+    #print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.mission.waypoints[self.mission.mission_step_ix]))
+    #print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, d.distance_to_waypoint,
+#					deltaHeading, self.heading, waypointHeading, self.mission.mission_step_ix))
+    return d.distance_to_waypoint
+
+
 class MissionStep(object):
     __slots__ = ('mission', 'nav', 'navigator', 'parms', 'section')
     def __init__(self, mission, section):
@@ -83,11 +206,11 @@ class MissionStep(object):
         self.section = section
         self.parms = {}
 
-    def PublishNavigation(self):
+    def PublishNavigation(self, timer=6):
         payload = {}
         payload['heading'] = self.nav.steering
         payload['speed'] = self.nav.speed
-        payload['timer'] = 6
+        payload['timer'] = timer
         self.navigator.Publish(vconst.helmsman_orders_topic, payload)
         if self.nav.untrustedGpsUpdates < 0:
             # this could be dangerous, skipping navigation indefinately
@@ -101,14 +224,37 @@ class MissionStep(object):
         print("PublishNavigation", payload)
 
 class StepGpsWaypoint(MissionStep):
-    def __init__(self, mission, section, waypoint):
+    __slots__ = ('next_time', 'speed', 'waypoint')
+    def __init__(self, mission, section):
         super().__init__(mission, section)
-        self.waypoint = waypoint		(latitude, longitude)
+        self.waypoint = None
+        self.next_time = None
 
     def Load(self, parts):
-        self.waypoint = (float(parts[1]), float(parts[2]))
+        key = parts[0]
+        self.navigator.LoadPersistentData()
+        value = self.navigator.persistent_data[key]
+        w_parts = value.split(',')
+        self.waypoint = (float(w_parts[0]), float(w_parts[1]))
+        self.speed = int(parts[1])
+        self.next_time = time.time()
 
-    def DoMissionStep(self, nav):
+    def DoMissionStep(self, loop_ct):
+        current_position = (self.navigator.latitude, self.navigator.longitude)
+        d = DistanceToWaypoint(current_position, self.waypoint)
+        if d.distance_to_waypoint <= WAYPOINT_WINDOW_METERS:
+            self.nav.Init()
+            self.PublishNavigation()
+            return True
+        if time.time() > self.next_time:
+            NavigateTowardWaypoint(self.navigator.yaw, self.navigator.heading, current_position, self.waypoint, self.nav)
+            self.PublishNavigation()
+            self.next_time = time.time() + 0.2
+        return False
+
+        #if check_yaw and CheckYawForCompletedManuever(self.navigator.yaw, self.nav):
+
+        return			# old code follows
         check_yaw = True
         if self.gpsReadyForNavigation:
             if self.nav.untrustedGpsUpdates != 0:
@@ -136,6 +282,29 @@ class StepGpsWaypoint(MissionStep):
             self.nav.speed = FORWARD_SLOW
             self.PublishNavigation()
 
+class StepMove(MissionStep):
+    __slots__ = ('speed', 'timer', 'end_time')
+
+    def __init__(self, mission, section):
+        super().__init__(mission, section)
+        self.speed = 0
+        self.timer = 1
+        self.end_time = None
+
+    def Load(self, parts):
+        self.speed = int(parts[0])
+        self.timer = float(parts[1])
+
+    def DoMissionStep(self, loop_ct):
+        print("StepMove.DoMissionStep()", loop_ct, self.end_time, time.time())
+        if loop_ct == 1:
+            self.nav.speed = self.speed
+            self.PublishNavigation(timer=self.timer)
+            self.end_time = time.time() + self.timer
+            return False
+        if time.time() >= self.end_time:
+            return True
+
 class StepMagic(MissionStep):
     __slots__ = ('last_imageFn', 'movement_started')
 
@@ -144,7 +313,10 @@ class StepMagic(MissionStep):
         self.last_imageFn = None
         self.movement_started = False
 
-    def DoMissionStep(self):
+    def Load(self, parts):
+        pass
+
+    def DoMissionStep(self, loop_ct):
         if self.navigator.imageFn is None:
             # Don't do anything till navigator gets an image.
             # This is safe at start of mission but dangerous if moving
@@ -163,7 +335,7 @@ class StepMagic(MissionStep):
             im = cv2.imread(fp)
             if im is None:
                 return
-        r = OpticChiasm.Robogames(im, [OpticChiasm.HSV_YELLOW])
+        r = OpticChiasm.Robogames(im, [25])
         r.ProcessLines()
         r.FilterLines()
         r.SelectLines()
@@ -197,7 +369,8 @@ class StepAccMotion(MissionStep):
         self.direction = parts[1]
         self.distance = float(parts[2])
 
-    def DoMissionStep(self, nav):
+    def DoMissionStep(self, loop_ct):
+    #def DoMissionStep(self, nav):
         step = NavStep()
         step.steering = 'A0'
         if self.direction == 'F':
@@ -215,7 +388,7 @@ class StepMessage(MissionStep):
         super().__init__(mission, section)
         self.topic = topic
 
-    def DoMissionStep(self):
+    def DoMissionStep(self, loop_ct):
         print("StepMessage", self.topic, self.parms)
         self.mission.navigator.Publish(self.topic, self.parms)
         return True
@@ -225,7 +398,7 @@ class StepSleep(MissionStep):
         super().__init__(mission, section)
         self.interval = interval
 
-    def DoMissionStep(self):
+    def DoMissionStep(self, loop_ct):
         time.sleep(float(self.interval))
         return True
 
@@ -238,6 +411,7 @@ class Mission(object):
         self.mission_script = payload['mission_script'].split('\n')
         self.mission_steps = []
         self.mission_step_ix = 0
+        self.mission_step_loop_ct = 0
         self.running = True
         self.LoadMission()
 
@@ -262,13 +436,22 @@ class Mission(object):
                     section = 'run'
                 elif step_type == 'end':
                     section = 'end'
+                elif step_type == 'gps':
+                    step = StepGpsWaypoint(self, section)
                 elif step_type == 'magic':
                     step = StepMagic(self, section)
+                elif step_type == 'move':
+                    step = StepMove(self, section)
                 elif step_type == 'msg':
                     step = StepMessage(self, section, parts[1].strip())
                 elif step_type == 'sleep':
                     step = StepSleep(self, section, parts[1].strip())
                 if step is not None:
+                    if len(parts) > 1:
+                        posparms = parts[1:]
+                    else:
+                        posparms = []
+                    step.Load(posparms)
                     self.mission_steps.append(step)
             else:
                 # This is a parameter of the step being loaded
@@ -283,11 +466,13 @@ class Mission(object):
         if self.mission_step_ix >= len(self.mission_steps):
             self.EndMission()
             return False
+        self.mission_step_loop_ct += 1
         step = self.mission_steps[self.mission_step_ix]
-        if step.DoMissionStep():
+        if step.DoMissionStep(self.mission_step_loop_ct):
             # The step returns true to indicate that it is done.
             # Otherwise it repeats on the next DoMission().
             self.mission_step_ix += 1
+            self.mission_step_loop_ct = 0
         return True
 
     def StartWrapup(self):
@@ -311,6 +496,7 @@ class Mission(object):
         # storage.
         # The mission end topic stops logging of data. This should only happen 
         # once per mission from here, but redundant messages should not be harmful.
+        self.navigator.EStop()
         payload = {}
         payload['loop_mode'] = 'idle'
         self.navigator.Publish(vconst.cameraman_orders_topic, payload)
@@ -374,7 +560,9 @@ class navigator(vnavs_mqtt.mqtt_node):
 						vconst.mission_cancel_topic,
 						vconst.mission_end_topic,
 						vconst.navigator_service_topic,
-						vconst.cameraman_pic_ready_topic
+						vconst.cameraman_pic_ready_topic,
+						'data/save',
+						'data/get'
 					],
 					Readers=[],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
@@ -396,104 +584,39 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
         self.persistent_data = None
-
-    def NavigateTowardWaypoint(self, ix):
-        # should be reworked using GeographicLib ??
-        # Longitude are lines drawn between poles. +/- 180 degrees from Prime Meridian (Greenwich England)
-        # delta Longitude is deltaX.
-        # Latitude are lines drawn ~ perpendicular to longitude. Equator is 0 degrees, poles are +/- 90 degrees.
-        # delta Latitude is deltaY.
-        # geopy coordinates are (latitude, longitude) or (y, x)
-        if self.heading is None:
-            # we aren't receiving GPS info. Can't navigate.
-            print("NO HEADING - can't navigate.")
-            return None
-        w = self.mission.waypoints[ix][1]			# Assume this is a navigation waypoint W
-        d = DistanceToWaypoint((self.latitude, self.longitude), w)
-
-        deltaHeading = d.heading_to_waypoint - self.heading
-        if deltaHeading < -180:
-            deltaHeading = deltaHeading + 360
-        elif deltaHeading > 180:
-            deltaHeading = deltaHeading - 360
-        if abs(deltaHeading) < STEER_STRAIGHT_HEADING:
-            self.nav.Init()
-            self.nav.steering = "A0"
-            if d.distance_to_waypoint > 10:
-                self.nav.speed = FORWARD_FAST
-            else:
-                self.nav.speed = FORWARD_SLOW
-        else:
-            # deltaHeading is +/- 180 degrees, map to +/- 60 steering order.
-            # this should query the helmsman for this bots range instead of assuming 60.
-            # The signs of headings and steering command are the same. Negative means
-            # the waypoint is to the left, positive is to the right.
-            if abs(deltaHeading) <= Y_TURN_LIMIT:
-                # make the direct turn
-                self.nav.Init()
-                self.nav.steering = 'A' + str(int(deltaHeading / 3))
-                if (d.distance_to_waypoint > 10) and (abs(deltaHeading) < 20):
-                    self.nav.speed = FORWARD_FAST
-                else:
-                    self.nav.speed = FORWARD_SLOW
-                if abs(deltaHeading) > 45:
-                    pass
-                    #self.nav.untrustedGpsUpdates = 1		# give GPS time to settle after tight turn
-                self.nav.softKeepSeconds = 2
-                self.nav.speed = FORWARD_SLOW
-                self.nav.startingYaw = self.yaw
-                self.nav.deltaYawGoal = deltaHeading
-            else:
-                self.nav.speed = STOP_SPEED
-                self.nav.hardKeepSeconds = STOP_SECONDS
-                step = NavStep()
-                # Note: this steering direction is reversed, but yaw is not.
-                step.steering = 'A' + str(int(-deltaHeading / 3))
-                step.gps_speed = REVERSE_SLOW
-                step.startingYaw = self.yaw
-                step.deltaYawGoal = deltaHeading * OVERSTEER_ADJUSTMENT
-                step.untrustedGpsUpdates = -1
-                self.navSteps = [step]
-                #
-                step = NavStep()
-                step.steering = 'A0'
-                step.gps_speed = STOP_SPEED
-                step.hardKeepSeconds = STOP_SECONDS
-                step.untrustedGpsUpdates = -1
-                self.navSteps.append(step)
-                #
-                step = NavStep()
-                step.steering = 'A' + str(int(deltaHeading / 3))
-                step.gps_speed = FORWARD_SLOW
-                step.startingYaw = self.yaw
-                step.deltaYawGoal = deltaHeading * OVERSTEER_ADJUSTMENT
-                step.untrustedGpsUpdates = 1
-                self.navSteps.append(step)
-
-        self.PublishNavigation()
-        self.mission.navpoints.append(((self.latitude, self.longitude), self.nav.steering))
-        print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.mission.waypoints[self.mission.mission_step_ix]))
-        print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, d.distance_to_waypoint,
-					deltaHeading, self.heading, waypointHeading, self.mission.mission_step_ix))
-        return d.distance_to_waypoint
+        self.loopy = 0
 
     def DumpPersistentData(self):
         if self.persistent_data is None:
             return					# its was never loaded
+        self.persistent_data['test'] = 'test'
+        
         path = os.path.expanduser('~/vnavs.data')
         d = json.dumps(self.persistent_data)
         f = open(path, 'w')
-        f.write(d)
+        f.write(d.decode("utf-8"))
         f.close()
 
     def LoadPersistentData(self):
         if self.persistent_data is not None:
             return					# its already loaded
         path = os.path.expanduser('~/vnavs.data')
-        f = open(path, 'r')
+        try:
+            f = open(path, 'r')
+        except IOError as e:
+            # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
+            if e.errno == 2:
+                self.persistent_data = {}
+                return
+            else:
+                raise
+
         d = f.read()
         f.close()
-        self.persistent_data = json.loads(d)
+        if d == "":
+            self.persistent_data = {}
+        else:
+            self.persistent_data = json.loads(d)
 
 
     def rmsg_cameraman_pic_ready(self, payload):
@@ -504,12 +627,25 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.new_imu_payload = payload
 
     def rmsg_engineer_1_gps(self, payload):
+        print("GPS Message")
         self.new_gps_payload = payload
 
     def rmsg_mission_begin(self, payload):
+        #self.EStop()
+        print("<<<<<<<<<<")
+        print("<<<<<<<<<<")
+        print("<<<<<<<<<<")
+        print("<<<<<<<<<<")
+        print(payload)
         self.new_mission_begin_payload = payload
 
     def rmsg_mission_cancel(self, payload):
+        #self.EStop()
+        print(">>>>>>>>>>")
+        print(">>>>>>>>>>")
+        print(">>>>>>>>>>")
+        print(">>>>>>>>>>")
+        print(payload)
         self.new_mission_cancel_payload = payload
 
     def rmsg_mission_end(self, payload):
@@ -520,11 +656,21 @@ class navigator(vnavs_mqtt.mqtt_node):
         pass
 
     def rmsg_data_save(self, payload):
+        print("rmsg_data_save()", payload)
         key = payload['key']
         value = payload['value']
         self.LoadPersistentData()
         self.persistent_data[key] = value
         self.DumpPersistentData()
+
+    def rmsg_data_get(self, payload):
+        print("rmsg_data_get()", payload)
+        key = payload['key']
+        self.LoadPersistentData()
+        value = self.persistent_data[key]
+        self.PrepareResponse(payload)
+        payload['value'] = value
+        self.Publish('data/value', payload)
 
     def rmsg_navigator_mode(self, payload):
         print("MODE_MSG", payload)
@@ -610,6 +756,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.Publish(vconst.navigator_service_ack_topic, payload)
 
     def LoadGpsPayload(self):
+        print("LoadGpsPayload()", self.new_gps_payload)
         payload = self.new_gps_payload
         if payload is None:
             return False
@@ -623,6 +770,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         #self.gpsRequested = False
         self.gpsReadyForNavigation = True
         self.stats.Count('GpsRcv')
+        print("GPS FOUND $$$$$$$$$$$$$$$$$")
         return True
 
     def LoadImuPayload(self):
@@ -635,7 +783,12 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.stats.Count('ImuRcv')
 
     def DoLoop(self):
+        if not self.LoadGpsPayload():
+            self.LoadImuPayload()
         if self.mission is None:
+            if time.time() > self.loopy:
+                print("DoLoop()")
+                self.loopy = time.time() + 1
             if self.new_mission_begin_payload is None:
                 # No navigation. No active mission. None to load.
                 return
@@ -661,8 +814,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         # Handle message data within this thread.
         #
         self.ChangeMode()
-        if not self.LoadGpsPayload():
-            self.LoadImuPayload()
         # We might not want to ProcessSerivceRequest() here if any of them take much time.
         # Maybe only run when in paused or manual mode.
         self.ProcessServiceRequest()
@@ -731,50 +882,14 @@ class navigator(vnavs_mqtt.mqtt_node):
 
     def EStop(self):
         payload = {}
-        payload['heading'] = "A0"
+        payload['heading'] = "0"
         payload['speed'] = 0
         payload['timer'] = 6
         self.Publish(vconst.helmsman_orders_topic, payload)
 
-    def CheckYawForCompletedManuever(self):
-        ## ************** ##
-        # Need to track how far we have been moving in same direction. If we overshoot
-        # past folding point we get stuck in circle.
-        #
-        if self.nav.startingYaw is None:
-            return False				# there is nothing to complete
-        if self.yaw is None:
-            return False				# probably an error, no IMU data arriving
-        yawDeltaSoFar = self.yaw - self.nav.startingYaw
-        print("IMU YAW {:+8.4f} Goal Delta: {:+8.4f} Progress: {:+8.4f}".format(self.yaw, self.nav.deltaYawGoal, yawDeltaSoFar))
-        if self.nav.deltaYawGoal < 0:
-            # we are turning left. Heading going down in value.
-            # Possibly wrapping from 0 to 359
-            if self.yaw > self.nav.startingYaw:
-                # we have probably wrapped 0/360, but it could be noise or wind
-                try:
-                    if (self.yaw - self.nav.startingYaw) > 30:
-                        # it's a significant difference, not noise
-                        yawDeltaSoFar -= 360
-                except TypeError:
-                    # not sure how this happened!
-                    print("TYPE ERROR")
-                    pass
-            if yawDeltaSoFar <= self.nav.deltaYawGoal:
-                # we have gone more negative, further left
-                return True				# manuever completed
-            else:
-                return False			# manuever continuing
-        else:
-            # we are turning right, Heading going up in value.
-            # Possibly wrapping from 359 to 0
-            if self.yaw < self.nav.startingYaw:
-                if (self.yaw - self.nav.startingYaw) < -30:
-                    yawDeltaSoFar += 360
-            if yawDeltaSoFar >= self.nav.deltaYawGoal:
-                return True				# manuever completed
-            else:
-                return False			# manuever continuing
+
+
+
 
 class MissionMap(object):
     def __init__(self, waypoints=None, navpoints=None):
@@ -994,6 +1109,11 @@ def TestImuCancel():
             else:
                 r = "CONTINUE"
             print("IMU YAW {:+8.4f} Goal Delta: {:+8.4f} Progress: {}".format(h.yaw, h.nav.deltaYawGoal, r))
+
+def PositionStringToTuple(position):
+    parts = position.split(',')
+    waypoint = (float(parts[0]), float(parts[1]))
+    return waypoint
 
 def RunMap():
     waypoints = []
