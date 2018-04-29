@@ -35,7 +35,7 @@ class joystick(vnavs_mqtt.mqtt_node):
         if self.system == 'Linux':
             pass
             ## this only works under linux
-        self.gamepad = evdev.InputDevice('/dev/input/event2')
+        self.gamepad = evdev.InputDevice('/dev/input/event3')
         PrintCapability(self.gamepad)
         self.gamepadAxis = {}
         capabilities = self.gamepad.capabilities(absinfo=True)
