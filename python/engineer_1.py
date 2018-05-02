@@ -56,6 +56,9 @@ class VnavsDataDict(object):
     def __init__(self):
         self.attributes = {}
 
+    def items(self):
+        return self.attributes.items()
+
     def AddAttribute(self, name, type, uom=None,
 						default_value=None, values=None, min_value=None, max_value=None, limit_value=None):
         attribute = VnavsAttribute(name, type=type, uom=None, default_value=default_value, values=values,
@@ -73,7 +76,7 @@ class VnavsDataRecord(object):
         self.ClearData()
 
     def ClearData(self):
-        for key, attribute_def in self._dict,items():
+        for key, attribute_def in self._dict.items():
             setattr(self, key, attribute_def.default_value)
 
     def CreatePayload(self):
@@ -111,7 +114,7 @@ GpsDataDict.AddAttribute(GPS_DIFFERENTIAL, 'str',
 				values={'A': "Autonomous", 'D': "Differential GPS"})
 GpsDataDict.AddAttribute(GPS_TIMESTAMP, 'time')
 
-class GpsData(VnavsDataRecord):
+class GpsDataRecord(VnavsDataRecord):
     __slots__ = GpsDataDict.Slots()
     _dict = GpsDataDict
 
@@ -129,7 +132,7 @@ ImuDataDict.AddAttribute(IMU_YAW, 'float', uom='degrees', default_value = 0,
 				min_value=0.0, limit_value=360.0)
 ImuDataDict.AddAttribute(IMU_TIMESTAMP, 'time')
 
-class ImuData(object):
+class ImuDataRecord(VnavsDataRecord):
     __slots__ = ImuDataDict.Slots()
     _dict = ImuDataDict
 
@@ -157,7 +160,7 @@ class Position(object):
 						+ (cos(position_latitude_radians) * cos(waypoint_latitude_radians) * sin(longitude_difference_radians/2)**2)
         c = 2 * asin(sqrt(a)) 
         r = 6371 # Radius of earth in kilometers. Use 3956 for miles
-        distance_to waypoint = c * r
+        distance_to_waypoint = c * r
 
         # calculate heading / bearing
 
@@ -167,7 +170,7 @@ class Position(object):
         initial_bearing = atan2(x, y)
 
         # Now we have the initial bearing but math.atan2 return values
-        # from -180° to + 180° which is not what we want for a compass bearing
+        # from -180 to + 180 which is not what we want for a compass bearing
         # The solution is to normalize the initial bearing as shown below
         initial_bearing = degrees(initial_bearing)
         heading_to_waypoint = (initial_bearing + 360) % 360
@@ -182,7 +185,7 @@ class GpsDevice(object):
         self.gps_buffer = ''			# read buffer
         self.next_eol_ix = -1			# index of first <cr><lf>
         self.gps_inited = False
-        self.data = GpsData()
+        self.data = GpsDataRecord()
         self.last_sentence_str = None
         self.OpenPort()
 
@@ -281,6 +284,7 @@ class GpsDevice(object):
         self.data.gps_latitude = parsed_sentence.latitude
         try:
             self.data.gps_timestamp = parsed_sentence.datetime
+            self.data.gps_timestamp = 0
         except:
             # this sometimes fails. Maybe just indoors.
             self.data.gps_timestamp = None
@@ -349,7 +353,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         self.goal_latitude = None
         self.gps_device = GpsDevice()
         # self.gps_device.IncreaseUpdateRate()
-        self.imu_data = ImuData()
+        self.imu_data = ImuDataRecord()
         self.sense = SenseHat()
         self.sense.set_imu_config(False, True, False)
         self.last_acceleromter_timestamp = time.time()
@@ -361,7 +365,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         have_new_gps_data = self.gps_device.UpdateGpsInfo()
         if have_new_gps_data:
             payload = self.gps_device.data.CreatePayload()
-             self.Publish(vconst.engineer_1_gps_topic, payload)
+            self.Publish(vconst.engineer_1_gps_topic, payload)
             self.stats.Count('GpsMsg')
 
         if ((time.time() - self.last_acceleromter_timestamp) > SEND_ACCELEROMETER_PERIOD):
@@ -370,7 +374,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
             self.imu_data.imu_pitch = self.orientation['pitch']
             self.imu_data.imu_roll = self.orientation['roll']
             self.imu_data.imu_timestamp = time.time()
-            payload = self.imu_device.data.CreatePayload()
+            payload = self.imu_data.CreatePayload()
             self.Publish(vconst.engineer_1_imu_topic, payload)
             self.last_acceleromter_timestamp = time.time()
             self.stats.Count('ImuMsg')
