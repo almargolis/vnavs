@@ -103,12 +103,12 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        mission_image_frame = mission_fram.AddFrame()
-        mission_info_frame = mission_fram.AddFrame(col=NEXT_COL)
+        mission_image_frame = mission_frame.AddFrame()
+        mission_info_frame = mission_frame.AddFrame(col=NEXT_COL)
         self.f1_fname = mission_image_frame.AddLabel('fname')
         self.f1_img1 = mission_image_frame.AddLabelImage()
-        mission_image_frame.AddLabel("IMU")
-        self.imu_info = mission_image_frame.AddLabel(col=NEXT_COL)
+        mission_info_frame.AddLabel("IMU")
+        self.imu_info = mission_info_frame.AddLabel(col=NEXT_COL)
 
         self.message_tab = self.notebook.AddTab('Message')
         self.mt_file_name = self.message_tab.AddEntryField('Script File', width=25)
@@ -171,8 +171,10 @@ class MissionControl(vnavs_mqtt.mqtt_node):
     def rmsg_wildcard(self, topic, payload):
         self.f1_engineer_1_entry.ReplaceValue(payload)
         if topic[-5:] == 'abend':
-          t = payload['traceback']
-          self.alert_text.ReplaceValue(t)
+            t = payload['traceback']
+            self.alert_text.ReplaceValue(t)
+        if engineer_1.IMU_YAW in payload:
+            self.imu_info.ReplaceValue(payload[engineer_1.IMU_YAW])
 
     def rmsg_cameraman_pic_ready(self, payload):
         if 'annotated' in payload:
