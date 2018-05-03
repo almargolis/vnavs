@@ -29,6 +29,8 @@ wildcard_method_name = handler_method_prefix + 'wildcard'
 
 stop_process = False
 
+TCPIP_STD_BUFLEN = 4096
+TCPIP_STD_BUFLEN = 8192
 TCPIP_STD_BUFLEN = 1024
 TCPIP_XFR_BUFLEN = 4096
 FAST_MQTT_PORT = 4000
@@ -314,7 +316,7 @@ class SocketWrapper(object):
         # OS select() waits for inputs, just as you would casually expect, so it is safe to have all inout sockets
         # in the list. Output sockets are ready whenever the buffer is empty, so if you leave an inactive socket
         # in the output list, select returns immediately because it is writable. Therefore, output sockets should
-        # only be in hte list when you actually have something to write.n If you are a no-timeout select when that
+        # only be in the list when you actually have something to write. If you are a no-timeout select when that
         # socket gets added to the output list, nothing happens immediatly because the OS doesn't know about it.
         # The new output message will languish until something else releases the select. Because of this, it should
         # be fairly unusual to call select with no timeout.
@@ -1279,6 +1281,10 @@ class mqtt_node(object):
                 payload = {}
                 print("JSON Error", message.payload)
         handler_method = self.handlers[message.topic]
+        if '_sendTime' in payload:
+            send_time = float(payload['_sendTime'])
+            if (time.time() - send_time) > 1:
+                raise Exception("node message stale")
         #
         if message.topic in self.pendingReads:
             del self.pendingReads[message.topic]
