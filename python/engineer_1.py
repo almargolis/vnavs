@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import math
 import os
 from geopy.distance import great_circle
 import pynmea2
@@ -72,8 +73,10 @@ class VnavsDataRecord(object):
     __slots__ = ('_dict')
     _dict = None
 
-    def __init__(self):
-        self.ClearData()
+    def __init__(self, payload=None):
+        self.ClearData()			# call even if payload provided to init all
+        if payload is not None:
+              self.LoadPayload(payload)
 
     def ClearData(self):
         for key, attribute_def in self._dict.items():
@@ -87,7 +90,7 @@ class VnavsDataRecord(object):
 
     def LoadPayload(self, payload):
         for this in self.__slots__:
-            setattr(self, payload[this])
+            setattr(self, this, payload[this])
 
 GPS_SPEED = 'gps_speed'
 GPS_HEADING = 'gps_heading'
@@ -118,6 +121,9 @@ class GpsDataRecord(VnavsDataRecord):
     __slots__ = GpsDataDict.Slots()
     _dict = GpsDataDict
 
+    def Position(self):
+        return Position(self.gps_latitude, self.gps_longitude)
+
 IMU_PITCH = 'imu_pitch'
 IMU_ROLL = 'imu_roll'
 IMU_YAW = 'imu_yaw'
@@ -146,6 +152,17 @@ class Position(object):
 						#			180 = S, 270 = W (left)
         self.speed = speed			# float, m/s
 
+    def __repr__(self):
+        if self.heading is None:
+            note = ''
+        else:
+            note = '-> ' + `self.heading`
+        if self.speed is not None:
+            if note != '':
+                note += ' '
+            note += '@ ' + `self.speed`
+        return '({}, {}, {})'.format(self.latitude, self.longitude, note)
+        
     def DistanceToWaypoint(self, waypoint):
         # Adapted from https://stackoverflow.com/questions/4913349/haversine-formula-in-python-bearing-and-distance-between-two-gps-points
         #
@@ -153,27 +170,29 @@ class Position(object):
         #
         # convert decimal degrees to radians 
         position_latitude_radians, position_longitude_radians, waypoint_latitude_radians, waypoint_longitude_radians = map(
-							radians, [self.latitude, self.longitude, waypoint.latitude, waypoint.longitude]) 
+							math.radians, [self.latitude, self.longitude, waypoint.latitude, waypoint.longitude]) 
         longitude_difference_radians = waypoint_longitude_radians - position_longitude_radians 
         latitude_difference_radians = waypoint_latitude_radians - position_latitude_radians 
-        a = sin(latitude_difference_radians/2)**2 \
-						+ (cos(position_latitude_radians) * cos(waypoint_latitude_radians) * sin(longitude_difference_radians/2)**2)
-        c = 2 * asin(sqrt(a)) 
-        r = 6371 # Radius of earth in kilometers. Use 3956 for miles
+        a = math.sin(latitude_difference_radians/2)**2 \
+						+ (math.cos(position_latitude_radians) * math.cos(waypoint_latitude_radians) * math.sin(longitude_difference_radians/2)**2)
+        c = 2 * math.asin(math.sqrt(a)) 
+        r = 6371 * 1000				# Radius of earth in meters. Use 3956 for miles
         distance_to_waypoint = c * r
 
         # calculate heading / bearing
 
-        x = sin(longitude_difference_radians) * cos(waypoint_latitude_radians)
-        y = cos(position_latitude_radians) * sin(waypoint_latitude_radians) - (sin(position_latitude_radians) * cos(waypoint_latitude_radians) * cos(longitude_difference_radians))
+        x = math.sin(longitude_difference_radians) * math.cos(waypoint_latitude_radians)
+        y = math.cos(position_latitude_radians) * math.sin(waypoint_latitude_radians) - (math.sin(position_latitude_radians) * math.cos(waypoint_latitude_radians) * math.cos(longitude_difference_radians))
 
-        initial_bearing = atan2(x, y)
+        initial_bearing = math.atan2(x, y)
 
         # Now we have the initial bearing but math.atan2 return values
         # from -180 to + 180 which is not what we want for a compass bearing
         # The solution is to normalize the initial bearing as shown below
-        initial_bearing = degrees(initial_bearing)
+        initial_bearing = math.degrees(initial_bearing)
         heading_to_waypoint = (initial_bearing + 360) % 360
+
+        #print("Position.DistanceToWaypoint()", `self`, `waypoint`, heading_to_waypoint, distance_to_waypoint)
 
         o = object()
         setattr(o, 'heading_to_waypoint', heading_to_waypoint)			# compass degrees

@@ -306,6 +306,15 @@ SPEED_STOP = 0
 
 STEER_STRAIGHT = 0
 
+HELMSMAN_STATE = 'state'
+HELMSMAN_SPEED = 'speed'
+HELMSMAN_SPEED_SCALE_MIN = 'speed_scale_min'
+HELMSMAN_SPEED_SCALE_MAX = 'speed_scale_max'
+HELMSMAN_HEADING = 'heading'
+HELMSMAN_HEADING_SCALE_MIN = 'heading_scale_min'
+HELMSMAN_HEADING_SCALE_MAX = 'heading_scale_max'
+HELMSMAN_TIMER = 'timer'
+
 class helmsman(vnavs_mqtt.mqtt_node):
     def __init__(self):
         self.orders_q = queue.Queue(10)
@@ -326,9 +335,9 @@ class helmsman(vnavs_mqtt.mqtt_node):
 
     def rmsg_helmsman_orders(self, payload):
         #print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
-        if 'state' in payload:
+        if HELMSMAN_STATE in payload:
             print("--------------------")
-            new_state = payload['state']
+            new_state = payload[HELMSMAN_STATE]
             if new_state == STATE_ESTOPPED:
                 print("XXXXXXXXXXXXXXXXXXXXXX")
                 self.v.Estop()
@@ -345,31 +354,31 @@ class helmsman(vnavs_mqtt.mqtt_node):
         return				# the rest is abandoned code
 
     def InterpretOrders(self, payload):
-        if 'speed' in payload:
-            if 'speed_scale_min' in payload:
-                speed_raw = int(payload['speed'])
-                speed_scale_min = int(payload['speed_scale_min'])
-                speed_scale_max = int(payload['speed_scale_max'])
+        if HELMSMAN_SPEED in payload:
+            if HELMSMAN_SPEED_SCALE_MIN in payload:
+                speed_raw = int(payload[HELMSMAN_SPEED])
+                speed_scale_min = int(payload[HELMSMAN_SPEED_SCALE_MIN])
+                speed_scale_max = int(payload[HELMSMAN_SPEED_SCALE_MAX])
                 speed_request = self.ScaleRequest(speed_raw, -speed_scale_min, -speed_scale_max, -self.v.speed_max, self.v.speed_max)
             else:
-                speed_request = payload['speed']	# Note: alphanumeric
+                speed_request = payload[HELMSMAN_SPEED]	# Note: alphanumeric
             self.v.NewSpeedGoal(speed_request)
             print("SPEED", speed_request)
             #self.GetGoalSpeed(speed_request)
-        if 'heading' in payload:
-            if 'heading_scale_min' in payload:
-                heading_raw = int(payload['heading'])
-                heading_scale_min = int(payload['heading_scale_min'])
-                heading_scale_max = int(payload['heading_scale_max'])
+        if HELMSMAN_HEADING in payload:
+            if HELMSMAN_HEADING_SCALE_MIN in payload:
+                heading_raw = int(payload[HELMSMAN_HEADING])
+                heading_scale_min = int(payload[HELMSMAN_HEADING_SCALE_MIN])
+                heading_scale_max = int(payload[HELMSMAN_HEADING_SCALE_MAX])
                 heading_request = self.ScaleRequest(heading_raw, heading_scale_min, heading_scale_max, -self.v.steering_max, self.v.steering_max, sensitivity=None)
             else:
-                heading_request = int(payload['heading'])	# Note: alphanumeric
+                heading_request = int(payload[HELMSMAN_HEADING])	# Note: alphanumeric
             #print ("STEER", heading_request)
             self.v.NewSteeringGoal(heading_request)
             #self.GetGoalSteering(heading_request)
-        if 'timer' in payload:
-            print("TIMER", payload['timer'])
-            timer = int(payload['timer'])
+        if HELMSMAN_TIMER in payload:
+            print("TIMER", payload[HELMSMAN_TIMER])
+            timer = int(payload[HELMSMAN_TIMER])
         else:
             timer = 3
         self.deadman_time = time.time() + timer
@@ -428,12 +437,6 @@ class helmsman(vnavs_mqtt.mqtt_node):
         if self.state in STATES_MOVING:
             # Speed and Steering goals are set asynchronously via MQTT messages
             self.v.Tick()
-        sleep_secs = 2				# This is very slow, for testing
-        sleep_secs = 0.02
-        sleep_secs = 0.001
-        sleep_secs = 0.1			# This was my first try, slow speeds choppy
-        sleep_secs = 0.01
-        time.sleep(sleep_secs)
 
     def CleanupLoop(self):
         self.v.Estop()
