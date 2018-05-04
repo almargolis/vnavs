@@ -526,13 +526,12 @@ class NavStep(object):
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[
+        super().__init__(Subscribe_Latest=[
 						'navigator/mode',
-		#				vconst.engineer_1_gps_topic,
+						vconst.engineer_1_gps_topic,
 						vconst.engineer_1_imu_topic,
 						vconst.mission_begin_topic,
 						vconst.mission_cancel_topic,
-						vconst.mission_end_topic,
 						vconst.navigator_service_topic,
 						'data/save',
 						'data/get'
@@ -546,8 +545,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.imageRequested = None
         self.pausedMode = None
         self.mission = None
-        self.new_gps_payload = None
-        self.new_imu_payload = None
         self.new_mission_begin_payload = None
         self.new_mission_cancel_payload = None
         self.new_mode_payload = None
@@ -555,7 +552,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
         self.persistent_data = None
-        self.loopy = 0
 
     def DumpPersistentData(self):
         if self.persistent_data is None:
@@ -588,39 +584,6 @@ class navigator(vnavs_mqtt.mqtt_node):
             self.persistent_data = {}
         else:
             self.persistent_data = json.loads(d)
-
-    def rmsg_engineer_1_imu(self, payload):
-        self.new_imu_payload = payload
-        print("IMU", payload['imu_yaw'])
-
-    def rmsg_engineer_1_gps(self, payload):
-        #print("GPS Message")
-        self.new_gps_payload = payload
-
-    def rmsg_mission_begin(self, payload):
-        #self.EStop()
-        print("<<<<<<<<<<")
-        print("<<<<<<<<<<")
-        print("<<<<<<<<<<")
-        print("<<<<<<<<<<")
-        print(payload)
-        self.new_mission_begin_payload = payload
-
-    def rmsg_mission_cancel(self, payload):
-        #self.EStop()
-        print(">>>>>>>>>>")
-        print(">>>>>>>>>>")
-        print(">>>>>>>>>>")
-        print(">>>>>>>>>>")
-        print(payload)
-        self.new_mission_cancel_payload = payload
-
-    def rmsg_mission_end(self, payload):
-        # This message is sent by the mission to let other nodes know that
-        # the mission has ended.
-        # This should function should verify that we have sent this normally.
-        # If we think the mission is still running, we need to do something.
-        pass
 
     def rmsg_data_save(self, payload):
         print("rmsg_data_save()", payload)
@@ -723,19 +686,24 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.Publish(vconst.navigator_service_ack_topic, payload)
 
     def DoLoop(self):
-        if self.new_gps_payload is not None:
-            payload, self.new_gps_payload = self.new_gps_payload, None
+        payload = self.GetLatestPayload(vconst.engineer_1_gps_topic)
+        if payload is not None:
             self.gps_data.LoadPayload(payload)
             self.stats.Count('GpsRcv')
             self.gpsReadyForNavigation = True
-        if self.new_imu_payload is not None:
-            payload, self.new_imu_payload = self.new_imu_payload, None
+
+        payload = self.GetLatestPayload(vconst.engineer_1_imu_topic)
+        if payload is not None:
             self.imu_data.LoadPayload(payload)
             self.stats.Count('ImuRcv')
+
+        payload = self.GetLatestPayload(vconst.mission_begin_topic)
+        if payload is not None:
+            self.new_mission_begin_payload = payload		# get the latest request if multiples received
+        payload = self.GetLatestPayload(vconst.mission_cancel_topic)
+        if payload is not None:
+            self.new_mission_cancel_payload = payload
         if self.mission is None:
-            if time.time() > self.loopy:
-                print("DoLoop()")
-                self.loopy = time.time() + 1
             if self.new_mission_begin_payload is not None:
                 mission_payload = self.new_mission_begin_payload
                 self.new_mission_begin_payload = None
@@ -753,8 +721,6 @@ class navigator(vnavs_mqtt.mqtt_node):
             if not self.mission.running:
                 self.mission = None
             return
-        sleep_interval = 0.01
-        time.sleep(sleep_interval)
         return		# the following code needs to be moved to mission
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         #
