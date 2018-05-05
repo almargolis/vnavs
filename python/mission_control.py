@@ -31,6 +31,7 @@ except ImportError:
     easytk = None
 
 import engineer_1
+import helmsman
 import navigator
 import vnavs_mqtt
 import vnavs_const as vconst
@@ -47,13 +48,13 @@ BOT_1_MAP_TRANSPOSE = [
 
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[
-                        vconst.cameraman_pic_ready_topic,
+        super().__init__(Subscribe_Latest=[
+                      				  vconst.cameraman_pic_ready_topic,
 						vconst.engineer_1_gps_topic,
 						vconst.engineer_1_imu_topic,
 						vconst.helmsman_orders_topic,
-						'MissionControl/notice',      # this doesn't work - fix wildcard too - crash - ack, etc
-						vconst.navigator_service_ack_topic
+						vconst.navigator_service_ack_topic,
+						vconst.navigator_plot_topic
 						],
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
@@ -82,10 +83,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.image.img_fname_suffix = ''
         self.image.do_save_snaps = False
         self.pic_fn = None
-        self.pic_last_time = time.time()
-        self.pic_processed = False
-        self.pic_requested = False
-        self.pic_request_time = 0
         self.pic_get = True
         if vnavs_mqtt.ARG_IMAGE_GET in self.args:
             self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
@@ -103,12 +100,18 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        mission_image_frame = mission_fram.AddFrame()
-        mission_info_frame = mission_fram.AddFrame(col=NEXT_COL)
+        mission_image_frame = mission_frame.AddFrame()
+        mission_info_frame = mission_frame.AddFrame(row=SAME_ROW, col=NEXT_COL)
         self.f1_fname = mission_image_frame.AddLabel('fname')
         self.f1_img1 = mission_image_frame.AddLabelImage()
-        mission_image_frame.AddLabel("IMU")
-        self.imu_info = mission_image_frame.AddLabel(col=NEXT_COL)
+        self.gps_position = mission_info_frame.AddLabelInfo('GPS Position:')
+        self.gps_speed = mission_info_frame.AddLabelInfo('GPS Speed:')
+        self.imu_heading = mission_info_frame.AddLabelInfo('IMU Heading:')
+        self.waypoint_position = mission_info_frame.AddLabelInfo('Waypoint Position:')
+        self.waypoint_heading = mission_info_frame.AddLabelInfo('Waypoint Heading:')
+        self.waypoint_distance = mission_info_frame.AddLabelInfo('Waypoint Distance:')
+        self.helmsman_speed = mission_info_frame.AddLabelInfo('Helmsman Speed:')
+        self.helmsman_steer = mission_info_frame.AddLabelInfo('Helmsman Steering:')
 
         self.message_tab = self.notebook.AddTab('Message')
         self.mt_file_name = self.message_tab.AddEntryField('Script File', width=25)
@@ -168,18 +171,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             im = None
         return im
 
-    def rmsg_wildcard(self, topic, payload):
-        self.f1_engineer_1_entry.ReplaceValue(payload)
-        if topic[-5:] == 'abend':
-          t = payload['traceback']
-          self.alert_text.ReplaceValue(t)
 
-    def rmsg_cameraman_pic_ready(self, payload):
-        if 'annotated' in payload:
-            self.pic_fn = payload['annotated']
-        else:
-            self.pic_fn = payload['filename']
-        self.pic_processed = False
 
     def filter_payload(self, payload):
         new_payload = {}
@@ -197,7 +189,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.f1_helmsman_status.set(payload)
         if 'filename' in payload:
             self.pic_fn = payload['filename']
-            self.pic_processed = False
             #print("NAV FILE", self.pic_fn)
 
     def ClearWaypoints(self):
@@ -266,15 +257,64 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.f1_img1.UpdateImage(opencv_fn=path)
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.pic_fn = None
-        self.pic_processed = True
-        self.pic_requested = False
-        self.pic_last_time = time.time()
 
     def DoLoop(self):
         #speed = int(self.f1_speed_control.get())
         #self.f1_speed_display.configure(text=str(speed))
-        if (time.time() - self.pic_last_time) > 1.0:
+        payload = self.GetLatestPayload(vconst.cameraman_pic_ready_topic)
+        if payload is not None:
+            if 'annotated' in payload:
+                self.pic_fn = payload['annotated']
+            else:
+                self.pic_fn = payload['filename']
             self.ProcessImage()
+
+        payload = self.GetLatestPayload(vconst.engineer_1_gps_topic)
+        if payload is not None:
+            self.gps_speed.ReplaceValue(payload[engineer_1.GPS_SPEED])
+            latitude = None
+            longitude = None
+            if engineer_1.GPS_LATITUDE in payload:
+                latitude = payload[engineer_1.GPS_LATITUDE]
+            if engineer_1.GPS_LONGITUDE in payload:
+                longitude = payload[engineer_1.GPS_LONGITUDE]
+            if (latitude is not None) and (longitude is not None):
+                position = "{},{}".format(latitude, longitude)
+                self.gps_position.ReplaceValue(position)
+
+        payload = self.GetLatestPayload(vconst.engineer_1_imu_topic)
+        if payload is not None:
+            self.imu_heading.ReplaceValue(payload[engineer_1.IMU_YAW])
+
+        payload = self.GetLatestPayload(vconst.navigator_plot_topic)
+        if payload is not None:
+            self.waypoint_heading.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_HEADING])
+            self.waypoint_distance.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_DISTANCE])
+            latitude = None
+            longitude = None
+            if navigator.NAVIGATOR_WAYPOINT_LATITUDE in payload:
+                latitude = payload[navigator.NAVIGATOR_WAYPOINT_LATITUDE]
+            if navigator.NAVIGATOR_WAYPOINT_LONGITUDE in payload:
+                longitude = payload[navigator.NAVIGATOR_WAYPOINT_LONGITUDE]
+            if (latitude is not None) and (longitude is not None):
+                position = "{},{}".format(latitude, longitude)
+                self.waypoint_position.ReplaceValue(position)
+
+        payload = self.GetLatestPayload(vconst.helmsman_orders_topic)
+        if payload is not None:
+            speed = "?"
+            steer = "?"
+            if helmsman.HELMSMAN_SPEED in payload:
+                speed = payload[helmsman.HELMSMAN_SPEED]
+            self.helmsman_speed.ReplaceValue(speed)
+            if helmsman.HELMSMAN_HEADING in payload:
+                steer = payload[helmsman.HELMSMAN_HEADING]
+            self.helmsman_steer.ReplaceValue(steer)
+
+        # if topic[-5:] == 'abend':
+        #    t = payload['traceback']
+        #    self.alert_text.ReplaceValue(t)
+
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

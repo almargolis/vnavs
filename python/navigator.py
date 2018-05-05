@@ -21,6 +21,7 @@ import time
 import vnavs_mqtt
 import vnavs_const as vconst
 import engineer_1
+import helmsman
 
 WAYPOINT_WINDOW_METERS = 4.0
 STEER_STRAIGHT_HEADING = 10.0
@@ -41,6 +42,11 @@ MAX_TIMED_MANUEVER_SECONDS = 10
 Y_TURN_LIMIT = 160
 INITIAL_GPS_WAIT = 3
 OVERSTEER_ADJUSTMENT = 0.5
+
+NAVIGATOR_WAYPOINT_LATITUDE = 'waypoint_latitude'
+NAVIGATOR_WAYPOINT_LONGITUDE = 'waypoint_longitude'
+NAVIGATOR_WAYPOINT_HEADING = 'waypoint_heading'
+NAVIGATOR_WAYPOINT_DISTANCE = 'waypoint_distance'
 
 def CheckYawForCompletedManuever(current_yaw, nav):
     ## ************** ##
@@ -82,7 +88,7 @@ def CheckYawForCompletedManuever(current_yaw, nav):
         else:
             return False			# manuever continuing
 
-def NavigateTowardWaypoint(current_yaw, current_position, waypoint, nav):
+def NavigateTowardWaypoint(current_yaw, current_position, waypoint, nav, navigator=None):
     # should be reworked using GeographicLib ??
     # Longitude are lines drawn between poles. +/- 180 degrees from Prime Meridian (Greenwich England)
     # delta Longitude is deltaX.
@@ -162,7 +168,14 @@ def NavigateTowardWaypoint(current_yaw, current_position, waypoint, nav):
     #print("Path (%s, %s) -> %s" % (self.latitude, self.longitude, self.mission.waypoints[self.mission.mission_step_ix]))
     #print("Path %4s dX %+03.4f dY %+03.4f Hyp %+03.2f difHdg %+03.4f GpsHdg %+03.4f HdgToW %03.4f %2d" % (self.nav.steering, deltaX, deltaY, d.distance_to_waypoint,
 #					deltaHeading, self.heading, waypointHeading, self.mission.mission_step_ix))
-    print("NavigationTowardWaypoint()", current_yaw, delta.heading_to_waypoint, deltaHeading, nav.steering, nav.speed)
+    payload = {}
+    payload[NAVIGATOR_WAYPOINT_LATITUDE] = waypoint.latitude
+    payload[NAVIGATOR_WAYPOINT_LONGITUDE] = waypoint.longitude
+    payload[NAVIGATOR_WAYPOINT_HEADING] = delta.heading_to_waypoint
+    payload[NAVIGATOR_WAYPOINT_DISTANCE] = delta.distance_to_waypoint
+    navigator.Publish(vconst.navigator_plot_topic, payload)
+
+    print("NavigateTowardWaypoint()", current_yaw, delta.heading_to_waypoint, deltaHeading, nav.steering, nav.speed)
     return delta.distance_to_waypoint
 
 
@@ -177,9 +190,9 @@ class MissionStep(object):
 
     def PublishNavigation(self, timer=6):
         payload = {}
-        payload['heading'] = self.nav.steering
-        payload['speed'] = self.nav.speed
-        payload['timer'] = timer
+        payload[helmsman.HELMSMAN_HEADING] = self.nav.steering
+        payload[helmsman.HELMSMAN_SPEED] = self.nav.speed
+        payload[helmsman.HELMSMAN_TIMER] = timer
         self.navigator.Publish(vconst.helmsman_orders_topic, payload)
         if self.nav.untrustedGpsUpdates < 0:
             # this could be dangerous, skipping navigation indefinately
@@ -219,7 +232,7 @@ class StepGpsWaypoint(MissionStep):
             return True
         if time.time() > self.next_time:
             print("StepGpsWaypoint.DoMissionStep() navigate", delta.distance_to_waypoint)
-            NavigateTowardWaypoint(self.navigator.imu_data.imu_yaw, current_position, self.waypoint, self.nav)
+            NavigateTowardWaypoint(self.navigator.imu_data.imu_yaw, current_position, self.waypoint, self.nav, navigator=self.navigator)
             self.PublishNavigation()
             self.next_time = time.time() + 1.0
             self.next_time = time.time() + 0.5
@@ -375,13 +388,16 @@ class StepSleep(MissionStep):
         time.sleep(float(self.interval))
         return True
 
+MISSION_NAME = 'mission_name'
+MISSION_SCRIPT = 'mission_script'
+MISSION_DEBUG = 'mission_debug'
 
 class Mission(object):
     def __init__(self, navigator, payload):
         self.navigator = navigator
         self.missionDir = self.navigator.missionDir
-        self.mission_name = payload['mission_name']
-        self.mission_script = payload['mission_script'].split('\n')
+        self.mission_name = payload[MISSION_NAME]
+        self.mission_script = payload[MISSION_SCRIPT].split('\n')
         self.mission_steps = []
         self.mission_step_ix = 0
         self.mission_step_loop_ct = 0
@@ -526,13 +542,12 @@ class NavStep(object):
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[
+        super().__init__(Subscribe_Latest=[
 						'navigator/mode',
-		#				vconst.engineer_1_gps_topic,
+						vconst.engineer_1_gps_topic,
 						vconst.engineer_1_imu_topic,
 						vconst.mission_begin_topic,
 						vconst.mission_cancel_topic,
-						vconst.mission_end_topic,
 						vconst.navigator_service_topic,
 						'data/save',
 						'data/get'
@@ -546,8 +561,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.imageRequested = None
         self.pausedMode = None
         self.mission = None
-        self.new_gps_payload = None
-        self.new_imu_payload = None
         self.new_mission_begin_payload = None
         self.new_mission_cancel_payload = None
         self.new_mode_payload = None
@@ -555,7 +568,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
         self.persistent_data = None
-        self.loopy = 0
 
     def DumpPersistentData(self):
         if self.persistent_data is None:
@@ -588,39 +600,6 @@ class navigator(vnavs_mqtt.mqtt_node):
             self.persistent_data = {}
         else:
             self.persistent_data = json.loads(d)
-
-    def rmsg_engineer_1_imu(self, payload):
-        self.new_imu_payload = payload
-        print("IMU", payload['imu_yaw'])
-
-    def rmsg_engineer_1_gps(self, payload):
-        #print("GPS Message")
-        self.new_gps_payload = payload
-
-    def rmsg_mission_begin(self, payload):
-        #self.EStop()
-        print("<<<<<<<<<<")
-        print("<<<<<<<<<<")
-        print("<<<<<<<<<<")
-        print("<<<<<<<<<<")
-        print(payload)
-        self.new_mission_begin_payload = payload
-
-    def rmsg_mission_cancel(self, payload):
-        #self.EStop()
-        print(">>>>>>>>>>")
-        print(">>>>>>>>>>")
-        print(">>>>>>>>>>")
-        print(">>>>>>>>>>")
-        print(payload)
-        self.new_mission_cancel_payload = payload
-
-    def rmsg_mission_end(self, payload):
-        # This message is sent by the mission to let other nodes know that
-        # the mission has ended.
-        # This should function should verify that we have sent this normally.
-        # If we think the mission is still running, we need to do something.
-        pass
 
     def rmsg_data_save(self, payload):
         print("rmsg_data_save()", payload)
@@ -723,19 +702,24 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.Publish(vconst.navigator_service_ack_topic, payload)
 
     def DoLoop(self):
-        if self.new_gps_payload is not None:
-            payload, self.new_gps_payload = self.new_gps_payload, None
+        payload = self.GetLatestPayload(vconst.engineer_1_gps_topic)
+        if payload is not None:
             self.gps_data.LoadPayload(payload)
             self.stats.Count('GpsRcv')
             self.gpsReadyForNavigation = True
-        if self.new_imu_payload is not None:
-            payload, self.new_imu_payload = self.new_imu_payload, None
+
+        payload = self.GetLatestPayload(vconst.engineer_1_imu_topic)
+        if payload is not None:
             self.imu_data.LoadPayload(payload)
             self.stats.Count('ImuRcv')
+
+        payload = self.GetLatestPayload(vconst.mission_begin_topic)
+        if payload is not None:
+            self.new_mission_begin_payload = payload		# get the latest request if multiples received
+        payload = self.GetLatestPayload(vconst.mission_cancel_topic)
+        if payload is not None:
+            self.new_mission_cancel_payload = payload
         if self.mission is None:
-            if time.time() > self.loopy:
-                print("DoLoop()")
-                self.loopy = time.time() + 1
             if self.new_mission_begin_payload is not None:
                 mission_payload = self.new_mission_begin_payload
                 self.new_mission_begin_payload = None
@@ -753,8 +737,6 @@ class navigator(vnavs_mqtt.mqtt_node):
             if not self.mission.running:
                 self.mission = None
             return
-        sleep_interval = 0.01
-        time.sleep(sleep_interval)
         return		# the following code needs to be moved to mission
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         #
@@ -829,9 +811,9 @@ class navigator(vnavs_mqtt.mqtt_node):
 
     def EStop(self):
         payload = {}
-        payload['heading'] = "0"
-        payload['speed'] = 0
-        payload['timer'] = 6
+        payload[helmsman.HELMSMAN_HEADING] = "0"
+        payload[helmsman.HELMSMAN_SPEED] = 0
+        payload[helmsman.HELMSMAN_TIMER] = 6
         self.Publish(vconst.helmsman_orders_topic, payload)
 
 

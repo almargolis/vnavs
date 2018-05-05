@@ -24,8 +24,12 @@ else:
     import queue as Queue
 
 config_file_path = os.path.expanduser("~/vnavs.ini")
-handler_method_prefix = 'rmsg_'
-wildcard_method_name = handler_method_prefix + 'wildcard'
+
+SUB_HANDLER_METHOD_PREFIX = 'rmsg_'
+SUB_WILDCARD_METHOD_NAME = SUB_HANDLER_METHOD_PREFIX + 'wildcard'
+SUB_MODE_LATEST = 'L'
+SUB_MODE_HANDLER = 'H'
+SUB_MODE_READER = 'R'
 
 stop_process = False
 
@@ -952,15 +956,26 @@ def Publish(topic, payload, ResponseTopic=None):
         node.CheckMqttPendingActivity()
     return node.ack_payload
 
+class mqtt_subscription(object):
+    __slots__ = ('handler_method', 'last_payload', 'mode', 'topic')
+
+    def __init__(self, topic, mode):
+        self.topic = topic
+        self.mode = mode
+        self.handler_method = None
+        self.last_payload = None
+
 class mqtt_node(object):
     __slots__ = ('ack_pending', 'ack_payload', 'ack_topic', 'args', 'arrivedReads', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'debug', 'exception_ct', 'exception_last_time',
-					'handlers', 'imageDir', 'lastSocketError', 'loop_sleep', 'mqttc', 'node_name', 'pendingReads',
-					'readers', 'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
+					'imageDir', 'lastSocketError', 'loop_sleep', 'mqttc', 'node_name', 'pendingReads',
+					'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
 					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
 
-    def __init__(self, node_name=None, Subscriptions=[], Readers=[], AckTopic=None,
-				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0, BrokerType='F', Streamer=False, Verbose=True):
+    def __init__(self, node_name=None, Subscribe_Latest=None, Subscriptions=None, Readers=None, AckTopic=None,
+				LoopSleep=0.01,
+				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0,
+				BrokerType='F', Streamer=False, Verbose=True):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         #	switch between cameras / bots manually.
         # BlockIfNotConnected is for nodes that only need to run when connected to a message server. DoLoop() is what is blocked.
@@ -998,9 +1013,19 @@ class mqtt_node(object):
         self.imageDir = os.path.expanduser(self.imageDir)		# this expands tilde in path
         self.single_threaded = SingleThreaded
         self.select_timeout = SelectTimeoutSecs
-        self.readers = Readers
-        self.subscriptions = Subscriptions
-        self.handlers = {}
+        self.subscriptions = {}
+        if Readers is not None:
+            for this in Readers:
+                new_sub = mqtt_subscription(this, SUB_MODE_READER)
+                self.subscriptions[this] = new_sub
+        if Subscriptions is not None:
+            for this in Subscriptions:
+                new_sub = mqtt_subscription(this, SUB_MODE_HANDLER)
+                self.subscriptions[this] = new_sub
+        if Subscribe_Latest is not None:
+            for this in Subscribe_Latest:
+                new_sub = mqtt_subscription(this, SUB_MODE_LATEST)
+                self.subscriptions[this] = new_sub
         self.wildcard_handler = None
         self.broker_type = BrokerType
         self.InitMqttClient()
@@ -1008,7 +1033,7 @@ class mqtt_node(object):
         self.debug = 0
         self.exception_last_time = 0
         self.exception_ct = 0
-        self.loop_sleep = 0			# set if we don't want to slow loop frequency
+        self.loop_sleep = LoopSleep
         self.lastSocketError = None
         self.pendingReads = {}
         self.arrivedReads = {}
@@ -1118,6 +1143,10 @@ class mqtt_node(object):
                 if self.CheckExceptions():
                     sys.exit(0)
                 if self.loop_sleep > 0:
+                    # This is essentially a yield to the other thread. Without this, the communications
+                    # thread can be blocked. Navigator was experiencing MANY MINUTES of message delivery
+                    # delay without this. Nodes with lots of i/o in the main thread may not need this
+                    # sleep. Cameraman does fine without it.
                     time.sleep(self.loop_sleep)
             except KeyboardInterrupt:
                 self.CleanupLoop()
@@ -1167,20 +1196,19 @@ class mqtt_node(object):
         return s[:max_chars] + ' [...]'
 
     def RegisterMessageHandlers(self):
-        self.handlers = {}
-        self.wildcard_handler = getattr(self, wildcard_method_name, None)
-        topics = self.subscriptions + self.readers
-        for this_topic in topics:
-            handler_name = handler_method_prefix + this_topic.replace('/', '_')
-            handler_method = getattr(self, handler_name, None)
-            if handler_method is None:
-                if (self.ack_topic is not None) and (self.ack_topic == this_topic):
-                    pass			# doesn't require handler
-                if self.wildcard_handler is None:
-                    print("No message handler for topic '%s'" % (this_topic))
-            self.handlers[this_topic] = handler_method
-            if this_topic in self.subscriptions:
-                self.mqttc.subscribe(this_topic, 0)
+        self.wildcard_handler = getattr(self, SUB_WILDCARD_METHOD_NAME, None)
+        for this_subscription in self.subscriptions.values():
+            if this_subscription.mode == SUB_MODE_HANDLER:
+                handler_name = SUB_HANDLER_METHOD_PREFIX + this_subscription.topic.replace('/', '_')
+                handler_method = getattr(self, handler_name, None)
+                if handler_method is None:
+                    if (self.ack_topic is not None) and (self.ack_topic == this_topic):
+                        pass			# doesn't require handler
+                    if self.wildcard_handler is None:
+                        print("No message handler for topic '%s'" % (this_topic))
+                this_subscription.handler_method = handler_method
+            if this_subscription.mode != SUB_MODE_READER:
+                self.mqttc.subscribe(this_subscription.topic, 0)
 
     def Get(self, topic, timeout=1.0):
         # Get the most recent message without repeats and automatically request more.
@@ -1194,6 +1222,23 @@ class mqtt_node(object):
             return payload
         self.Read(topic)
         return None
+
+    def GetLatestPayload(self, topic):
+        # This methodology risks loosing a latest message that arrives between the line
+        # where the payload is copied and the line where the subscription object payload is cleared.
+        # This should be extremely rare and is not completely inconsistent with the expectation that
+        # latest method subscriptions may not process all messages.
+        # As currenty written, using a single swap statement, this should be completely thread safe.
+        #
+        if topic not in self.subscriptions:
+            raise Exception("GetLatestPayload() unknown topic '{}'".format(topic))
+        subscription = self.subscriptions[topic]
+        if subscription.mode != SUB_MODE_LATEST:
+            raise Exception("GetLatestPayload() unexpected mode '{}' for topic '{}'".format(subscription.mode, topic))
+        if subscription.last_payload is None:
+            return None					# avoids tiny chance of clearing payload that arrives mid-method
+        payload, subscription.last_payload = subscription.last_payload, None
+        return payload
 
     def Read(self, topic, timeout=1.0):
         if not self.mqttc.connected:
@@ -1280,28 +1325,33 @@ class mqtt_node(object):
             except ValueError:
                 payload = {}
                 print("JSON Error", message.payload)
-        handler_method = self.handlers[message.topic]
+        subscription = self.subscriptions[message.topic]
         if '_sendTime' in payload:
             send_time = float(payload['_sendTime'])
-            if (time.time() - send_time) > 1:
-                raise Exception("node message stale")
+            send_diff = time.time() - send_time
+            if send_diff > 5:
+                print("Node stale message {} - {} = {}".format(time.time(), send_time, send_diff))
+                #raise Exception("node message stale")
         #
         if message.topic in self.pendingReads:
             del self.pendingReads[message.topic]
             self.arrivedReads[message.topic] = payload
             return
-        if handler_method is None:
-            if self.wildcard_handler is not None:
-                error = self.wildcard_handler(message.topic, payload)
-            elif (self.ack_topic is not None) and (self.ack_topic == message.topic):
-                # No handler required. Save specific response.
-                if (self.ack_pending is not None) and ('_ackSeq' in payload) and (payload['_ackSeq'] == self.ack_pending):
-                    self.ack_payload = payload
-                    error = None
+        if subscription.mode == SUB_MODE_LATEST:
+            subscription.last_payload = payload
+        elif subscription.mode == SUB_MODE_HANDLER:
+            if subscription.handler_method is None:
+                if self.wildcard_handler is not None:
+                    error = self.wildcard_handler(message.topic, payload)
+                elif (self.ack_topic is not None) and (self.ack_topic == message.topic):
+                    # No handler required. Save specific response.
+                    if (self.ack_pending is not None) and ('_ackSeq' in payload) and (payload['_ackSeq'] == self.ack_pending):
+                        self.ack_payload = payload
+                        error = None
+                else:
+                    error = ' no handler for topic'
             else:
-                error = ' no handler for topic'
-        else:
-            error = handler_method(payload)
+                error = subscription.handler_method(payload)
         # Acks get sent automagically as needed.
         # Only a small percentage of messages get ack-ed, based on
         # the state of error and the _ack payload property.
