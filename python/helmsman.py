@@ -11,7 +11,12 @@ import sys
 import threading
 import time
 
-from pyfirmata import Arduino, util
+try:
+    from pyfirmata import Arduino, util
+except ImportError:
+    # Thiis might happen on non-arduino bot or app that just needs constants
+    Arduino = None
+    util = None
 
 import vnavs_mqtt
 import vnavs_const as vconst

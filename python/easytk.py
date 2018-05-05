@@ -217,7 +217,8 @@ class TkWidgetDef(object):
         if isinstance(self.tkw, ScrolledText.ScrolledText):
             self.tkw.delete("1.0", Tkinter.END)
             self.tkw.insert("1.0", new_value)
-        elif isinstance(self.tkw, ttk.Label):
+        elif isinstance(self.tkw, ttk.Label) and (self.tkw_label is None):
+            # if self.tkw_label is not None, this is from AddLabelInfo(): update self.tk_data
             self.tkw.config(text=new_value)
         elif isinstance(self.tkw, Tkinter.Listbox):
             # clear current selection first, else multi-selection occurs
@@ -275,18 +276,18 @@ class TkWidgetDef(object):
         tk_data.set(value)
         if caption is None:
             col_span = 1
-            tk_label = None
+            tk_caption = None
             refname = "EntryBox"
         else:
-            tk_label = ttk.Label(self.tkw, text=caption)
-            tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+            tk_caption = ttk.Label(self.tkw, text=caption)
+            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
             col_span = 2
             refname = caption.lower().replace(' ', '_')
         tk_entry = ttk.Entry(self.tkw, width=width, textvariable=tk_data)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
         if OnDoubleClick is not None:
             tk_entry.bind('<Double-Button-1>', OnDoubleClick)
-        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
         self.RememberPosition(frame, row, col, colspan=col_span)
         self.children.append(frame)
         return frame
@@ -299,11 +300,11 @@ class TkWidgetDef(object):
 
         tk_data = Tkinter.StringVar()
         tk_data.set(value)
-        tk_label = ttk.Label(self.tkw, text=caption)
-        tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+        tk_caption = ttk.Label(self.tkw, text=caption)
+        tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
         tk_entry = ScrolledText.ScrolledText(master=self.tkw, width=width, height=height, wrap=Tkinter.WORD)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
-        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
         self.RememberPosition(frame, row, col, colspan=2, rowspan=height)
         self.children.append(frame)
         return frame
@@ -317,11 +318,11 @@ class TkWidgetDef(object):
         print('Slider', row, col, self.last_used_row, self.last_used_col)
         if caption is None:
             refname = "Slider"
-            tk_label = None
+            tk_caption = None
         else:
             refname = caption.lower().replace(' ', '_')
-            tk_label = ttk.Label(self.tkw, text=caption)
-            tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+            tk_caption = ttk.Label(self.tkw, text=caption)
+            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
         # there is also a ttk.Scale, which doesn't support many options
         # if specified, label appears above the slider
         # the default showvalue=1 displays the value above the slider, moving with tthe cursor
@@ -330,7 +331,7 @@ class TkWidgetDef(object):
         if value is not None:
             tk_entry.set(value)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
-        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label)
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption)
         self.RememberPosition(frame, row, col, colspan=2)
         self.children.append(frame)
         return frame
@@ -372,10 +373,32 @@ class TkWidgetDef(object):
         # be automagically updated if something changed the variable.
         refname = 'X'
         row, col = self.Position(row=row, col=col)
-        tk_label = ttk.Label(self.tkw, text=text)
-        tk_label.grid(column=col, row=row, sticky=Tkinter.W)
-        frame = TkWidgetDef(refname, tk_label)
+        tk_caption = ttk.Label(self.tkw, text=text)
+        tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
+        frame = TkWidgetDef(refname, tk_caption)
         self.RememberPosition(frame, row, col)
+        self.children.append(frame)
+        return frame
+
+    def AddLabelInfo(self, caption, value='', width=10, row=NEXT_ROW, col=SAME_COL):
+        # This is much like AddEntryField() but the field is another lable so it is
+        # display only.
+        row, col = self.Position(row=row, col=col)
+        tk_data = Tkinter.StringVar()
+        tk_data.set(value)
+        if caption is None:
+            col_span = 1
+            tk_caption = None
+            refname = "LabelInfo"
+        else:
+            refname = caption.lower().replace(' ', '_')
+            tk_caption = ttk.Label(self.tkw, text=caption)
+            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
+            col_span = 2
+        tk_info = ttk.Label(self.tkw, textvariable=tk_data)
+        tk_info.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
+        frame = TkWidgetDef(refname, tk_info, tkw_label=tk_caption, Data=tk_data)
+        self.RememberPosition(frame, row, col, colspan=col_span)
         self.children.append(frame)
         return frame
 
@@ -391,13 +414,13 @@ class TkWidgetDef(object):
         row, col = self.Position(row=row, col=col)
         if caption is None:
             refname = "QWE"
-            tk_label = None
+            tk_caption = None
             entry_col = col
             remember_colspan = 1
         else:
             refname = caption.lower().replace(' ', '_')
-            tk_label = ttk.Label(self.tkw, text=caption)
-            tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+            tk_caption = ttk.Label(self.tkw, text=caption)
+            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
             entry_col = col + 1
             remember_colspan = 2
 
@@ -408,7 +431,7 @@ class TkWidgetDef(object):
         args = [self.tkw, tk_data] + s_items
         tk_entry = Tkinter.OptionMenu(*args)
         tk_entry.grid(column=entry_col, row=row, sticky=(Tkinter.W, Tkinter.E))
-        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_label, Data=tk_data)
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
         self.RememberPosition(frame, row, col, colspan=remember_colspan)
         self.children.append(frame)
         return frame
@@ -440,16 +463,16 @@ class TkWidgetDef(object):
         row, col = self.Position(row=row, col=col)
 
         if caption is None:
-            tk_label = None
+            tk_caption = None
             refname = "ZXC"
         else:
             refname = caption.lower().replace(' ', '_')
-            tk_label = ttk.Label(self.tkw, text=caption)
-            tk_label.grid(column=col, row=row, sticky=Tkinter.W)
+            tk_caption = ttk.Label(self.tkw, text=caption)
+            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
 
         container = ttk.Frame(master=self.tkw, borderwidth=2, relief=Tkinter.SUNKEN)
         tkw = tk_widget_class(master=container, borderwidth=0, **tk_widget_parms)
-        frame = TkWidgetDef(refname, tkw, tkw_label=tk_label)
+        frame = TkWidgetDef(refname, tkw, tkw_label=tk_caption)
         frame.scroll_container = container		# may be needed to avoid garbage collection
 
         if XSCROLL:

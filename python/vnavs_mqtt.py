@@ -1328,8 +1328,10 @@ class mqtt_node(object):
         subscription = self.subscriptions[message.topic]
         if '_sendTime' in payload:
             send_time = float(payload['_sendTime'])
-            if (time.time() - send_time) > 1:
-                raise Exception("node message stale")
+            send_diff = time.time() - send_time
+            if send_diff > 5:
+                print("Node stale message {} - {} = {}".format(time.time(), send_time, send_diff))
+                #raise Exception("node message stale")
         #
         if message.topic in self.pendingReads:
             del self.pendingReads[message.topic]
