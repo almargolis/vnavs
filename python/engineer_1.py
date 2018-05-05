@@ -284,9 +284,12 @@ class GpsDevice(object):
             if gps_data[ix] != '':
                 satCt += 1
         # DOP: Dilution of Precision < 1.0 is ideal but hard to get
-        posDOP = float(gps_data[15])		# position (overall ?)
-        horzDOP = float(gps_data[16])		# horizontal
-        vertDOP = float(gps_data[17])		# vertical
+        try:
+            posDOP = float(gps_data[15])		# position (overall ?)
+            horzDOP = float(gps_data[16])		# horizontal
+            vertDOP = float(gps_data[17])		# vertical
+        except ValueError:
+            mode2 = '1'
         if mode2 == '3':
             if (posDOP < 1.0) or (horzDOP < 1.0) or (vertDOP < 1.0):
                 self.data.gps_quality = 'A'
