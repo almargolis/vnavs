@@ -136,6 +136,9 @@ class GpsDevice(object):
         self.gps_mode = mode2
 
     def UpdateRmcSentence(self, parsed_sentence):
+        speedRaw = parsed_sentence.data[6].strip()
+        if speedRaw == '':
+            return False		# on my sparkfun sensor, rest is also bad
         self.longitude = parsed_sentence.longitude
         self.latitude = parsed_sentence.latitude
         try:
@@ -144,7 +147,6 @@ class GpsDevice(object):
             # this sometimes fails. Maybe just indoors.
             self.timestamp = None
         self.gps_status = parsed_sentence.data[1]	# A=valid, V=invalid
-        speedRaw = parsed_sentence.data[6].strip()
         try:
             speedKnots = float(speedRaw)
             self.gps_speed = speedKnots * METERS_PER_SECOND_PER_KNOT
@@ -160,6 +162,7 @@ class GpsDevice(object):
                 print("Invalid RMC heading", `heading_raw`)
         self.gps_differential = parsed_sentence.data[11]	# A=autonomous, D=differeential GPS
         print("RMC ------")
+        return True
         """
         print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
 					self.gps_status, parsed_sentence.data[2], parsed_sentence.data[3], self.latitude,
@@ -195,8 +198,8 @@ class GpsDevice(object):
         if parsed_sentence.sentence_type == 'GSA':
             self.UpdateGsaSentence(parsed_sentence)
         elif parsed_sentence.sentence_type == 'RMC':
-            self.UpdateRmcSentence(parsed_sentence)
-            return True				# True if we have new position info
+            rmc = self.UpdateRmcSentence(parsed_sentence)
+            return rmc			# True if we have new position info
 
         return False
 
