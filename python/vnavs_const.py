@@ -12,6 +12,8 @@ mission_begin_topic = 'mission/begin'
 mission_cancel_topic = 'mission/cancel'
 mission_end_topic = 'mission/end'
 mission_e_stop_topic = 'mission/estop'
+mission_paused_topic = 'mission/paused'
+mission_resume_topic = 'mission/resume'
 
 system_abend_topic = 'system/abend'
 system_message_error_topic = 'system/nak'
@@ -27,3 +29,5 @@ helmsman_orders_topic = 'helmsman/orders'
 
 navigator_service_topic = 'navigator/service'
 navigator_service_ack_topic = 'navigator_service_ack'
+navigator_plot_topic = 'navigator/plot'
+
