@@ -1,3 +1,7 @@
+from __future__ import absolute_import, division, print_function
+from builtins import (bytes, str, open, super, range,
+                      zip, round, input, int, pow, object)
+
 import os, cv2, numpy as np
 import math
 import time
@@ -57,7 +61,7 @@ class Image(object):
         OpenCv and numpy operations that I find non-intuitive.
     """
     __slots__ = (
-	'colorcode', 'colordepth', 'height', '_im', 'shape', 'width' 
+	'colorcode', 'colordepth', 'height', '_im', 'shape', 'width'
     )
 
     def __init__(self, im=None, colorcode=None, opencv_fn=None):
@@ -153,12 +157,275 @@ class Image(object):
 
     def DrawRectangle(self, rect, color=DRAW_BGR_GREEN, thickness=2):
         cv2.rectangle(self._im, rect.p1, rect.p2, color, thickness)
-    
+
     def RectFromSymbolicYX(self, y_range, x_range):
         return RectFromSymbolicYX(self._im, y_range, x_range)
 
     def RectFromSymbolicPP(self, p1, p2):
         return RectFromSymbolicPP(self._im, p1, p2)
+
+#
+# FilterParm.GetValue() must be exception-safe.
+# The application runs in multiple threads (tkinter, vnavs_mqtt and main().
+# Step execution may be called while the user is editing, so a partially edited
+# value may be picked up.
+#
+# This is probably a bug, not a feature. Execution should be orderly and only
+# in the main() thread. But maintining this rule keeps the system as user friendly
+# as possible in the event of errors and doesn't really have a downside except
+# perhaps a flash of odd results if the step is executed while the user is editing.
+#
+class FilterParm(object):
+    __slots__ = ('caption', 'default', 'name', 'max_value', 'min_value', 'use_slider')
+    def __init__(self, name, default, click_point=False,
+				min_value=None, max_value=None, use_slider=False):
+        self.name = name
+        self.default = default
+        self.click_point = click_point
+        self.min_value = min_value
+        self.max_value = max_value
+        self.use_slider = use_slider
+        if self.click_point:
+            self.caption = self.name + ' (PP)'
+        else:
+            self.caption = self.name
+
+class FilterParmFloat(FilterParm):
+    def GetValue(self, raw_value):
+        if isinstance(raw_value, str):
+            raw_value = raw_value.strip()
+        return str(float(raw_value))
+
+class FilterParmInt(FilterParm):
+    def GetValue(self, raw_value):
+        if isinstance(raw_value, str):
+            raw_value = raw_value.strip()
+        try:
+            i = int(raw_value)
+        except:
+            i = 0
+        return str(i)
+
+class FilterParmStr(FilterParm):
+    def GetValue(self, raw_value):
+        if raw_value is None:
+            raw_value = ''
+        v = raw_value.strip()
+        if '"' in v:
+            v = ''
+        if "'" in v:
+            v = ''
+        return v
+
+class FilterParmPoint(FilterParm):
+    # This is a numpy / mathematical point
+
+    def GetValue(self, raw_value):
+        v = raw_value.split(',')
+        x = int(v[0].strip())
+        y = int(v[1].strip())
+        return "({},{})".format(x, y)
+
+class FilterParmPointSym(FilterParm):
+    def __init__(self, name, default, click_point=True):
+        super().__init__(name, default, click_point=click_point)
+
+    def GetValue(self, raw_value):
+        # The defaults of 'b' and 'e' works well for ranges like CropYX.
+        # Not so much for points like CropPP.
+        v = raw_value.split(',')
+        x = ''
+        y = ''
+        if len(v) >= 1:
+            x = v[0].strip()
+        if len(v) >= 2:
+            y = v[1].strip()
+
+        if x == '':
+            x = 'b'
+        if y == '':
+            y = 'e'
+        return "('{}','{}')".format(x, y)
+
+# Filter functions should modify only:
+#	xstep.im
+# GetParm() must filter parameters to avoid code injection attacks
+
+
+
+FILTER_NAME_ANALYZER		= 'Analyzer'
+FILTER_NAME_COLORMASK_MULTI	= 'ColorMaskMulti'
+FILTER_NAME_COLORMASK_SINGLE	= 'ColorMaskSingle'
+FILTER_NAME_CROPPP		= 'CropPP'
+FILTER_NAME_IMAGE		= 'Image'
+
+FLAG_ISBASE = 'isbase'
+FLAG_SLIDERS = 'sliders'
+
+class ImageFilter(object):
+    __slots__ = ('annotate_code', 'filter_names', 'filters', 'flags', 'code', 'name', 'parms')
+    filters = {}
+    filter_names = []
+
+    def __init__(self, name, code, parms, Flags=None):
+        self.name = name
+        self.code = code
+        self.parms = parms		# a list of FilterParm() and descendent objects
+        self.flags = Flags		# a list of string flag names
+        self.annotate_code = None
+        self.filters[name] = self
+        self.filter_names.append(name)
+        self.filter_names.sort()
+
+#
+# Filter code is processed with exec with available globals OpticCiasm, cv2,
+#	previous step exec_im and its shape as im, h, w and c,
+#	xstep is the current ProcessStep() with exec_im set to None.
+#
+ImageFilter(FILTER_NAME_IMAGE,
+			'xstep.exec_im = xstep.source_im.copy()',
+			[],
+			Flags=[FLAG_ISBASE])
+
+ImageFilter(FILTER_NAME_COLORMASK_MULTI,
+			'xstep.exec_im = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={huerange}, threshold={threshold}),\n' \
+				+ '	colorcode=oc.IM_GRAY)',
+                        [FilterParmInt('huerange', '25', min_value=0, max_value=127, use_slider=True),
+				FilterParmInt('threshold', '50', min_value=0, max_value=127, use_slider=True),
+				FilterParmInt('wthreshold', '50', min_value=0, max_value=127, use_slider=True),
+                                FilterParmStr('colors', 'oc.HSV_WHITE, oc.HSV_RED')],
+                        Flags=[])
+
+ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
+			'xstep.exec_im = oc.Image(oc.ColorMaskOneHue(im_in.ImAsAny("{colorcode}"), hue={hue}, huerange={hueRange},' \
+				+ ' saturation={saturation}, saturationrange={saturationRange},' \
+				+ ' value={value}, valuerange={valueRange}),\n' \
+				+ '	colorcode=oc.IM_GRAY)',
+                        [FilterParmInt('hue', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
+                        	FilterParmInt('hueRange', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
+                        	FilterParmInt('saturation', '205', min_value=0, max_value=255, use_slider=True),
+                        	FilterParmInt('saturationRange', '50', min_value=0, max_value=255, use_slider=True),
+                        	FilterParmInt('value', '205', min_value=0, max_value=255, use_slider=True),
+				FilterParmInt('valueRange', '50', min_value=0, max_value=255, use_slider=True),
+				FilterParmStr('colorcode', IM_HSV)
+			],
+                        Flags=[FLAG_SLIDERS])
+
+filter = ImageFilter(FILTER_NAME_CROPPP,
+			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n'
+				+ 'xstep.exec_im = im_in.Crop(r)\n'
+				+ 'print(im_in.shape, r)\n',
+			[FilterParmPointSym('p1', 'm-50,m+50'), FilterParmPointSym('p2', '-100,e')],
+			Flags=[FLAG_ISBASE])
+filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
+				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
+
+filter = ImageFilter('CropYX',
+			'r = im_in.RectFromSymbolicYX({y_range}, {x_range})\n'
+				+ 'xstep.exec_im = im_in.Crop(r)\n'
+				+ 'print(im_in.shape, r)\n',
+			[FilterParmPointSym('y_range', '-100,'), FilterParmPointSym('x_range', 'm-50,m+50')],
+			Flags=[FLAG_ISBASE])
+filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
+				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
+
+ImageFilter('Gray',
+			'xstep.exec_im = im_in.CopyAsGray()',
+			[],
+			Flags=[])
+
+ImageFilter('Blur',
+			'xstep.exec_im = oc.Image(im=cv2.blur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
+			[FilterParmPoint('ksize', '3,3')],
+			Flags=[])
+
+ImageFilter('BlurGaussian',
+			'xstep.exec_im = oc.Image(im=cv2.GaussianBlur(im_in.im, {ksize}, {sigmaX}), colorcode=im_in.colorcode)',
+			[FilterParmPoint('ksize', '3,3'), FilterParmFloat('sigmaX', '0.0')],
+			Flags=[])
+
+ImageFilter('BlurMedian',
+			'xstep.exec_im = oc.Image(im=cv2.medianBlur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
+			[FilterParmInt('ksize', '3')],
+			Flags=[])
+
+ImageFilter('Canny',
+			'xstep.exec_im = oc.Image(im=cv2.Canny(im_in.ImAsGray(), {threshold1}, {threshold2}), colorcode=oc.IM_GRAY)',
+			[FilterParmFloat('threshold1', '100'), FilterParmFloat('threshold2', '300')],
+			Flags=[])
+
+ImageFilter('CannyAuto',
+			'xstep.exec_im = oc.Image(im=oc.AutoCanny(im_in.ImAsGray(), {sigma}), colorcode=oc.IM_GRAY)',
+			[FilterParmFloat('sigma', '0.33')],
+			Flags=[])
+
+ImageFilter('ColorBalance',
+			'xstep.exec_im = oc.simplest_cb(im, {pct})',
+			[FilterParmInt('pct', '20')],
+			Flags=[])
+
+ImageFilter('Erode',
+			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
+				+ 'xstep.exec_im = oc.Image(im=cv2.erode(im_in.im, kernel, iterations={iterations}),\n'
+				+ '			colorcode=im_in.colorcode)\n',
+			[FilterParmInt('kernel_dim', '1'),
+				FilterParmInt('iterations', '1')],
+			Flags=[])
+
+# findContours modifies the soure image. The image is assumed to be binary, ususally from canny
+filter = ImageFilter('ContoursFind',
+			'cont2, xstep.exec_contours, xstep.exec_hierarchy = cv2.findContours(im_in.ImAsGray(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
+			[FilterParmInt('MaxLevel', '-1')],
+			Flags=[])
+filter.annotate_code = 'xstep.exec_annotated = im_base.CopyAsGray().CopyAsBGR()\n' \
+				+ 'oc.CrayolaContours(xstep.exec_annotated.im, xstep.exec_contours, xstep.exec_hierarchy, MaxLevel={MaxLevel})\n' \
+				+ 'oc.ContoursToLineVectors(xstep.exec_annotated.im, xstep.exec_contours, xstep.exec_hierarchy)\n'
+		#		+ 'cv2.drawContours(xstep.exec_annotated.im, xstep.exec_contours, -1, oc.DRAW_BGR_RED, 1)\n'
+		#		+ 'for i in xrange(0, len(xstep.exec_contours)):\n'
+		#		+ '    color = (np.random.uniform(0, 255), np.random.uniform(0, 255), np.random.uniform(0, 255))\n'
+		#		+ '    cv2.drawContours(xstep.exec_im, xstep.exec_contours, 1, color, 1)\n',
+
+ImageFilter('ContoursDraw',
+			'xstep.exec_annotated = oc.Image(im=cv2.drawContours(im_in.im, in_contours, -1, (0, 0, 255)), colorcode=im_in.colorcode)',
+			[],
+			Flags=['incont'])
+
+ImageFilter('EqualizeHistogram',
+			'xstep.exec_im = oc.Image(im=cv2.equalizeHist(im_in.ImAsGray()), colorcode=oc.IM_GRAY)',
+			[],
+			Flags=[])
+
+ImageFilter('HistogramCB',
+			'oc.Histogram_CB(im)',
+			[],
+			Flags=[])
+
+filter = ImageFilter(FILTER_NAME_ANALYZER,
+			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n',
+			[FilterParmPointSym('p1', 'm-3,m-3'), FilterParmPointSym('p2', 'p+3,p+3')],
+			Flags=[])
+filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
+				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n' \
+				+ 'xstep.SetInfo(0, "Hue", im_in.Crop(r).AverageHue())\n'
+
+filter = ImageFilter('HoughLinesP',
+			'xstep.exec_lines = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
+			[FilterParmInt('MinLineLength', '30'), FilterParmInt('MaxLineGap', 10)],
+			Flags=[''])
+filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
+				+ 'print(xstep.exec_lines)\n' \
+				+ 'color_ix = -1\n' \
+				+ 'if (xstep.exec_lines is not None) and (len(xstep.exec_lines) > 0):\n' \
+				+ '    for line  in xstep.exec_lines:\n' \
+				+ '        for x1,y1,x2,y2 in line:\n' \
+				+ '            color_ix = oc.NextColorIx(color_ix)\n' \
+				+ '            color = oc.DRAW_COLORS[color_ix]\n' \
+				+ '            cv2.line(xstep.exec_annotated.im, (x1,y1), (x2,y2), color, 1)\n'
+
+ImageFilter('Map',
+			'cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))',
+			[],
+			Flags=[])
 
 #
 # This is an interesting example of line locating
@@ -309,12 +576,12 @@ def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=
             yl = int(lower_left[1])
         else:
             yl = int(lower_right[1])
-        cv2.line(img, (xu, yu), (xl, yl), DRAW_BGR_BLACK, 5) 
+        cv2.line(img, (xu, yu), (xl, yl), DRAW_BGR_BLACK, 5)
         box = np.int0(box)
         cv2.drawContours(img, [box], 0, DRAW_BGR_WHITE, 2)
         print("RRR", rect)
     print("^^^^^^^^^")
-        
+
 def CrayolaContours(img, contours, hierarchy, MaxLevel=-1):
     def ColorBranch(ix, c, this_level, max_level):
         h = hierarchy[0, ix]
