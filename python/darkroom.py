@@ -256,18 +256,24 @@ class ProcessStep(object):
         execution_start = time.time()
         #
         base_image = None
+        latest_im = None
+        latest_contours = None
+        latest_hierarchy = None
         for ix, this in enumerate(self.steps):
             if ix >= self.ix:
                 break
             if this.exec_im is not None:
-                exec_global_vars['im_in'] = this.exec_im
+                latest_im = this.exec_im
                 if OpticChiasm.FLAG_ISBASE in this.cv_specs.flags:
                     exec_global_vars['im_base'] = this.exec_im
                     base_image = this.exec_im
             if this.exec_contours is not None:
-                exec_global_vars['contours_in'] = this.exec_contours
+                latest_contours = this.exec_contours
             if this.exec_hierarchy is not None:
-                exec_global_vars['hierarchy_in'] = this.exec_hierarchy
+                latest_hierarchy = this.exec_hierarchy
+        exec_global_vars['im_in'] = latest_im
+        exec_global_vars['contours_in'] = latest_contours
+        exec_global_vars['hierarchy_in'] = latest_hierarchy
 
         for ix, this in enumerate(self.info_widgets):
             if ix < len(self.info_data):

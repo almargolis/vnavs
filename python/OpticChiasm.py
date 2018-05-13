@@ -61,13 +61,16 @@ class Image(object):
         OpenCv and numpy operations that I find non-intuitive.
     """
     __slots__ = (
-	'colorcode', 'colordepth', 'height', '_im', 'shape', 'width'
+	'colorcode', 'colordepth', 'crop_source', 'crop_x', 'crop_y', 'height', '_im', 'shape', 'width'
     )
 
     def __init__(self, im=None, colorcode=None, opencv_fn=None):
         if opencv_fn is not None:
             im = cv2.imread(opencv_fn)
             colorcode = IM_BGR
+        crop_source = None				# Image() from which this is cropped
+        crop_x = None					# left x starting position of this crop in source image
+        crop_y = None					# upper y` starting position of this crop in source image
         self.ReplaceImage(im, colorcode)
 
     def copy(self):
@@ -106,9 +109,12 @@ class Image(object):
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_HSV))
         return cv2.cvtColor(self._im, transform)
 
-    def ImAsGray(self):
+    def ImAsGray(self, Copy=False):
         if self.colorcode == IM_GRAY:
-            return self._im
+            if Copy:
+                return self._im.copy()
+            else:
+                return self._im
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_GRAY))
         return cv2.cvtColor(self._im, transform)
 
@@ -152,8 +158,14 @@ class Image(object):
         average_color = hsv[:, :, 0].mean()
         return average_color
 
-    def Crop(self, rect):
-        return Image(im=self._im[rect.y_min:rect.y_max+1, rect.x_min:rect.x_max+1], colorcode=self.colorcode)
+    def Crop(self, rect, Isolate=False):
+        print("Crop()", rect)
+        new_image = Image(im=self._im[rect.y_min:rect.y_max+1, rect.x_min:rect.x_max+1], colorcode=self.colorcode)
+        if not Isolate:
+            new_image.crop_source = self
+            new_image.crop_x = rect.x_min
+            new_image.crop_y = rect.y_min
+        return new_image
 
     def DrawRectangle(self, rect, color=DRAW_BGR_GREEN, thickness=2):
         cv2.rectangle(self._im, rect.p1, rect.p2, color, thickness)
@@ -339,6 +351,13 @@ ImageFilter('Blur',
 			[FilterParmPoint('ksize', '3,3')],
 			Flags=[])
 
+ImageFilter('BlurBilateralFilter',
+			'xstep.exec_im = oc.Image(im=cv2.bilateralFilter(im_in.im, {diameter}, {sigmaColor}, {sigmaSpace}), colorcode=im_in.colorcode)',
+			[FilterParmInt('diameter', '5'), FilterParmInt('sigmaColor', '17'), FilterParmInt('sigmaSpace', '17')],
+			Flags=[])
+                        # diameter > 5 is very slow, use 5 for real time processing or 9 for off-line heavy filtering
+			# the two sigma values are often the same value. <10 doesn't do much, >150 is cartoonish
+
 ImageFilter('BlurGaussian',
 			'xstep.exec_im = oc.Image(im=cv2.GaussianBlur(im_in.im, {ksize}, {sigmaX}), colorcode=im_in.colorcode)',
 			[FilterParmPoint('ksize', '3,3'), FilterParmFloat('sigmaX', '0.0')],
@@ -363,18 +382,62 @@ ImageFilter('ColorBalance',
 			'xstep.exec_im = oc.simplest_cb(im, {pct})',
 			[FilterParmInt('pct', '20')],
 			Flags=[])
-
-ImageFilter('Erode',
+#
+# Morphing Filters
+#
+# There are more of these. There is also a function to build a morphng engine, which appernly how dilate and
+# erode are defined. Kernel can be non-rectanglar and there is a function to build those. If we enhance kernel,
+# probably want to specify anchor too.
+#
+# https://docs.opencv.org/2.4/modules/imgproc/doc/filtering.html
+# https://docs.opencv.org/3.0-beta/doc/py_tutorials/py_imgproc/py_morphological_ops/py_morphological_ops.html
+#
+ImageFilter('MorphClose',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
-				+ 'xstep.exec_im = oc.Image(im=cv2.erode(im_in.im, kernel, iterations={iterations}),\n'
+				+ 'xstep.exec_im = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_CLOSE, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
-			[FilterParmInt('kernel_dim', '1'),
+			[FilterParmInt('kernel_dim', '5'),
 				FilterParmInt('iterations', '1')],
 			Flags=[])
 
+ImageFilter('MorphDilate',
+			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
+				+ 'xstep.exec_im = oc.Image(im=cv2.dilate(im_in.im, kernel, iterations={iterations}),\n'
+				+ '			colorcode=im_in.colorcode)\n',
+			[FilterParmInt('kernel_dim', '5'),
+				FilterParmInt('iterations', '1')],
+			Flags=[])
+
+ImageFilter('MorphErode',
+			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
+				+ 'xstep.exec_im = oc.Image(im=cv2.erode(im_in.im, kernel, iterations={iterations}),\n'
+				+ '			colorcode=im_in.colorcode)\n',
+			[FilterParmInt('kernel_dim', '5'),
+				FilterParmInt('iterations', '1')],
+			Flags=[])
+
+ImageFilter('MorphGradient',
+			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
+				+ 'xstep.exec_im = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_GRADIENT, kernel, iterations={iterations}),\n'
+				+ '			colorcode=im_in.colorcode)\n',
+			[FilterParmInt('kernel_dim', '5'),
+				FilterParmInt('iterations', '1')],
+			Flags=[])
+
+ImageFilter('MorphOpen',
+			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
+				+ 'xstep.exec_im = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_OPEN, kernel, iterations={iterations}),\n'
+				+ '			colorcode=im_in.colorcode)\n',
+			[FilterParmInt('kernel_dim', '5'),
+				FilterParmInt('iterations', '1')],
+			Flags=[])
+
+#
+# Contour Filters
+#
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
 filter = ImageFilter('ContoursFind',
-			'cont2, xstep.exec_contours, xstep.exec_hierarchy = cv2.findContours(im_in.ImAsGray(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
+			'cont2, xstep.exec_contours, xstep.exec_hierarchy = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
 			[FilterParmInt('MaxLevel', '-1')],
 			Flags=[])
 filter.annotate_code = 'xstep.exec_annotated = im_base.CopyAsGray().CopyAsBGR()\n' \
@@ -386,7 +449,7 @@ filter.annotate_code = 'xstep.exec_annotated = im_base.CopyAsGray().CopyAsBGR()\
 		#		+ '    cv2.drawContours(xstep.exec_im, xstep.exec_contours, 1, color, 1)\n',
 
 ImageFilter('ContoursDraw',
-			'xstep.exec_annotated = oc.Image(im=cv2.drawContours(im_in.im, in_contours, -1, (0, 0, 255)), colorcode=im_in.colorcode)',
+			'xstep.exec_annotated = oc.Image(im=cv2.drawContours(im_in.im, contours_in, -1, (0, 0, 255)), colorcode=im_in.colorcode)',
 			[],
 			Flags=['incont'])
 
@@ -533,8 +596,61 @@ def NextColorIx(c):
         c = 0
     return c
 
+class OpenCvRect(object):
+    slots = ('angle', 'center_x', 'center_y', 'height', 'width')
+
+    def __init__(self, rect):		# rect from cv2.minAreaRect() ((x, y), (w, h), angle)
+        center = rect[0]
+        dims = rect[1]
+        self.angle = rect[2]
+        self.center_x = center[0]
+        self.center_y = center[1]
+        self.width = dims[0]
+        self.height = dims[1]
+
+    def BoxPointsList(self):
+        return cv2.boxPoints(self.AsOpenCvRect()).tolist()	# returns array of 4 [x, y]
+
+    def AsOpenCvRect(self):
+        return [[self.center_x, self.center_y], [self.width, self.height], angle]
+
+def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumLines=3):
+    # returns a list of the largest contours as minimum sized rectangles
+    if hierarchy is None:
+        return None
+    print("VECTOR vvvvvvv")
+    # Scan contours, discarding small ones
+    h_ix = 0
+    discarded_contour_count = 0
+    areas = []
+    while h_ix >= 0:
+        h = hierarchy[0, h_ix]
+        cnt = contours[h_ix]
+        area = cv2.contourArea(cnt)
+        if area >= MinimumArea:
+            areas.append((area, h_ix))
+        else:
+            discarded_contour_count = 0
+        h_ix = h[0]
+    areas.sort(reverse=True)				# sort from largest to smallest)
+    rect_list = []
+    for this in areas[:MaximumLines]:
+        h_ix = this[1]
+        cnt = contours[h_ix]
+        rect = OpenCvRect(cv2.minAreaRect(cnt))		# ((x, y), (w, h), angle)
+        rect_list.append(rect)
+    print("^^^^^^^^^")
+    return rect_list
+
+
+
 def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=3):
     # This only looks at top level of hierarchy.
+    # This analyzes contours and draws them on thee image -- modifying the image.
+    # This is my original attempt for learning about / exploring.
+    # I'm not working to make it obsolete, separating the analysis from the 
+    # drqwing with more structured data.
+    #
     if hierarchy is None:
         return None
     print("VECTOR vvvvvvv")
@@ -581,6 +697,12 @@ def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=
         cv2.drawContours(img, [box], 0, DRAW_BGR_WHITE, 2)
         print("RRR", rect)
     print("^^^^^^^^^")
+
+
+
+
+
+
 
 def CrayolaContours(img, contours, hierarchy, MaxLevel=-1):
     def ColorBranch(ix, c, this_level, max_level):
@@ -1146,9 +1268,9 @@ def ResolveSymbolicIndex(c, ext, p1=None):
         if isinstance(c, basestring):
             if c[0] == 'm':
                 if c == 'm':
-                    return ext / 2
+                    return int(ext / 2)
                 else:
-                    return (ext / 2) + int(c[1:])
+                    return int(ext / 2) + int(c[1:])
             elif c[0] == 'e':
                 if c == 'e':
                     return ext
@@ -1187,6 +1309,8 @@ def ResolveSymbolicIndex(c, ext, p1=None):
 class Rect(object):
     __slots__ = ('y_min', 'y_max', 'x_min', 'x_max')
     def __init__(self, y_min, y_max, x_min, x_max):
+        #assert y_min < y_max		# maybe just reorder instead. If we do that,
+        #assert x_min < x_max		# should make them properties to keep enforced.
         self.y_min = y_min
         self.y_max = y_max
         self.x_min = x_min
