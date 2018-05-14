@@ -205,6 +205,43 @@ class MissionStep(object):
             self.nav.hardTimeLimit = time.time() + self.nav.hardKeepSeconds
         #print("PublishNavigation", payload)
 
+class StepLine(MissionStep):
+    __slots__ = ('next_time', 'speed', 'waypoint')
+    def __init__(self, mission, section):
+        super().__init__(mission, section)
+        self.waypoint = None
+        self.next_time = None
+
+    def Load(self, parts):
+        # key = parts[0]
+        # self.navigator.LoadPersistentData()
+        # value = self.navigator.persistent_data[key]
+        # self.waypoint = engineer_1.PositionStringToPosition(value)
+        self.speed = int(parts[1])
+        self.next_time = time.time()
+
+    def DoMissionStep(self, loop_ct):
+        no_turn = 285
+        hyst = 10
+        left_turn = no_turn - hyst
+        right_turn = no_turn + hyst
+        turn_degrees = 25
+        if time.time() > self.next_time:
+            if self.navigator.line_x is not None:
+                if self.navigator.line_x < left_turn:
+                    self.nav.steering = -turn_degrees
+                elif self.navigator.line_x > right_turn:
+                    self.nav.steering = turn_degrees
+                else:
+                    self.nav.steering = 0
+            self.nav.speed = self.speed
+            print("StepLine.DoMissionStep() navigate", self.navigator.line_x, self.nav.speed, self.nav.steering)
+            self.PublishNavigation()
+            self.next_time = time.time() + 1.0
+            self.next_time = time.time() + 0.5
+        return False
+
+
 class StepGpsWaypoint(MissionStep):
     __slots__ = ('next_time', 'speed', 'waypoint')
     def __init__(self, mission, section):
@@ -426,6 +463,8 @@ class Mission(object):
                     section = 'end'
                 elif step_type == 'gps':
                     step = StepGpsWaypoint(self, section)
+                elif step_type == 'line':
+                    step = StepLine(self, section)
                 elif step_type == 'magic':
                     step = StepMagic(self, section)
                 elif step_type == 'move':
@@ -543,6 +582,7 @@ class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscribe_Latest=[
 						'navigator/mode',
+						vconst.cameraman_pic_ready_topic,
 						vconst.engineer_1_gps_topic,
 						vconst.engineer_1_imu_topic,
 						vconst.mission_begin_topic,
@@ -558,6 +598,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.imu_data = engineer_1.ImuDataRecord()
         self.imageFn = None
         self.imageRequested = None
+        self.line_x = None
         self.pausedMode = None
         self.mission = None
         self.new_mission_begin_payload = None
@@ -712,18 +753,28 @@ class navigator(vnavs_mqtt.mqtt_node):
             self.imu_data.LoadPayload(payload)
             self.stats.Count('ImuRcv')
 
+        payload = self.GetLatestPayload(vconst.cameraman_pic_ready_topic)
+        if payload is not None:
+            if 'center_line' in payload:
+                line = payload['center_line']
+                parts = line.split(',')
+                self.line_x = int(parts[0])
+
         payload = self.GetLatestPayload(vconst.mission_begin_topic)
         if payload is not None:
             self.new_mission_begin_payload = payload		# get the latest request if multiples received
+
         payload = self.GetLatestPayload(vconst.mission_cancel_topic)
         if payload is not None:
             self.new_mission_cancel_payload = payload
+
         if self.mission is None:
             if self.new_mission_begin_payload is not None:
                 mission_payload = self.new_mission_begin_payload
                 self.new_mission_begin_payload = None
                 self.new_mission_cancel_payload = None
                 self.mission = Mission(self, mission_payload)
+
         if self.mission is not None:
             if self.new_mission_begin_payload is not None:
                 # A new mission has been received, cancel the existing mission
@@ -814,10 +865,6 @@ class navigator(vnavs_mqtt.mqtt_node):
         payload[helmsman.HELMSMAN_SPEED] = 0
         payload[helmsman.HELMSMAN_TIMER] = 6
         self.Publish(vconst.helmsman_orders_topic, payload)
-
-
-
-
 
 class MissionMap(object):
     def __init__(self, waypoints=None, navpoints=None):

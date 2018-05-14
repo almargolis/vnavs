@@ -608,6 +608,12 @@ class OpenCvRect(object):
         self.width = dims[0]
         self.height = dims[1]
 
+    def __repr__(self):
+        return "(({center_x}, {center_y}), ({width}, {height}), {angle})".format(
+				center_x=self.center_x, center_y=self.center_y,
+				width=self.width, height=self.height,
+				angle=self.angle)
+
     def BoxPointsList(self):
         return cv2.boxPoints(self.AsOpenCvRect()).tolist()	# returns array of 4 [x, y]
 

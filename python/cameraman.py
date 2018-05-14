@@ -7,7 +7,7 @@ import cv2
 import datetime
 import io
 import json
-import numpy
+import numpy as np
 import os
 import pickle
 import sys
@@ -317,6 +317,37 @@ class cameraman(vnavs_mqtt.mqtt_node):
         if self.iso > 800:
             self.iso = 800
 
+    def MakerFaire2018(self, im):
+        hue = 90
+        hue_range = 30
+        saturation = 0
+        saturation_range = 40
+        value = 209
+        value = 170
+        value_range = 12
+        value_range = 30
+        kernel_dim = 11
+        iterations = 1
+        crop_start_x = 60
+        crop_start_y = 280
+        #
+        im_in = OpticChiasm.Image(im, colorcode=OpticChiasm.IM_BGR)
+        im_cropped = im_in.Crop(OpticChiasm.Rect(crop_start_y, 300, crop_start_x, 310))
+        im_bw = OpticChiasm.Image(OpticChiasm.ColorMaskOneHue(im_cropped.ImAsHSV(), hue=hue, huerange=hue_range,
+                                saturation=saturation, saturationrange=saturation_range,
+                                value=value, valuerange=value_range),
+                                colorcode=OpticChiasm.IM_GRAY)
+        kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
+        im_dilated = cv2.dilate(im_bw.im, kernel, iterations=iterations)
+        cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        rect_list = OpticChiasm.ContoursExtract(contours, hierarchy)
+        if rect_list is not None:
+            for this in rect_list:
+                this.center_x += crop_start_x
+                this.center_y += crop_start_y
+        print("MAKER ==>", rect_list)
+        return rect_list
+
     def ImageBurst(self):
         # establish paramters for this burst. Since MQTT is running in a separate thread
         # there is a potential race condition if several conflicting instructions arrive
@@ -412,6 +443,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             #
             # At this point we have an image captured and in the requested format.
             #
+            rect_list = None
             if (len(self.post_processes) > 0) or (burst_loop_mode == 'idle'):
                 # we need an OpenCv image for post processing
                 if burst_loop_publish == 'file':
@@ -425,6 +457,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 an_path = os.path.join(self.imageDir, an_fn)
                 cv2.imwrite(an_path, annotated)
             else:
+                rect_list = self.MakerFaire2018(img)
                 annotated = None
             payload = {}
             payload['filename'] = im_fn
@@ -434,6 +467,9 @@ class cameraman(vnavs_mqtt.mqtt_node):
             payload['shutter_speed'] = self.camera.exposure_speed
             payload['capture_format'] = capture_format
             payload['capture_publish'] = capture_publish
+            if rect_list is not None:
+                if len(rect_list) >= 1:
+                    payload['center_line'] = "{},{}".format(int(rect_list[0].center_x), int(rect_list[0].center_y))
             self.Publish(vconst.cameraman_pic_ready_topic, payload)
             print("P", self.mqttc.connected)
             if self.camera.iso != self.iso:
