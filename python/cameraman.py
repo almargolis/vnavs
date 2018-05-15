@@ -331,13 +331,14 @@ class cameraman(vnavs_mqtt.mqtt_node):
         crop_start_x = 60
         crop_start_y = 280
         #
+        return None
         im_in = OpticChiasm.Image(im, colorcode=OpticChiasm.IM_BGR)
-        im_cropped = im_in.Crop(OpticChiasm.Rect(crop_start_y, 300, crop_start_x, 310))
-        im_bw = OpticChiasm.Image(OpticChiasm.ColorMaskOneHue(im_cropped.ImAsHSV(), hue=hue, huerange=hue_range,
+        im_cropped = im_in.FindColorBlob(
+                                hue=hue, huerange=hue_range,
                                 saturation=saturation, saturationrange=saturation_range,
-                                value=value, valuerange=value_range),
-                                colorcode=OpticChiasm.IM_GRAY)
-        kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
+                                value=value, valuerange=value_range,
+                                rect=OpticChiasm.Rect(crop_start_y, 300, crop_start_x, 310),
+                                kernel_dim=kernel_dim, iterations=iterations)
         im_dilated = cv2.dilate(im_bw.im, kernel, iterations=iterations)
         cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         rect_list = OpticChiasm.ContoursExtract(contours, hierarchy)

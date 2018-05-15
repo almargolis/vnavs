@@ -171,8 +171,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             im = None
         return im
 
-
-
     def filter_payload(self, payload):
         new_payload = {}
         for (k, v) in payload.items():
@@ -244,7 +242,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         payload['speed'] = 0
         self.Publish(vconst.helmsman_orders_topic, payload)
 
-    def ProcessImage(self):
+    def ProcessImage(self, payload):
         if self.pic_fn is None:
             print("NO PIC AVAILABLE")
             return
@@ -254,7 +252,14 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             if not self.file_client.GetFile(self.pic_fn, path=path):
                 print("Unable to fetch PIC", self.pic_fn)
                 return
-        self.f1_img1.UpdateImage(opencv_fn=path)
+        im = cv2.imread(path)
+        if 'center_line' in payload:
+            line_at = payload['center_line']
+            parts = line_at.split(',')
+            line_x = int(parts[0])
+            line_y = int(parts[1])
+            cv2.line(im, (line_x, line_y-50), (line_x, line_y+50), OpticChiasm.DRAW_BGR_BLACK, 5)
+        self.f1_img1.UpdateImage(source_im=im)
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.pic_fn = None
 
@@ -267,7 +272,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
                 self.pic_fn = payload['annotated']
             else:
                 self.pic_fn = payload['filename']
-            self.ProcessImage()
+            self.ProcessImage(payload)
 
         payload = self.GetLatestPayload(vconst.engineer_1_gps_topic)
         if payload is not None:
