@@ -205,13 +205,15 @@ class Image(object):
         line_rect = rect.copy()
         print("ChaseLine()", self, line_hsvspec, line_rect)
         def QualifyLineSegment():
+            # This advances the search through the image. Adjusting line_hsvspec and line_rect.
             # check if the blob is reasonably a line segment
             # size? color? location?
-            blobs = self.FindColorBlobs(hsvspec=line_hsvspec, rect=line_rect,
+            print("ChaseLine() Qualify", line_hsvspec, line_rect)
+            blobs, next_hsv_spec = self.FindColorBlobs(hsvspec=line_hsvspec, rect=line_rect,
                                 kernel_dim=kernel_dim, iterations=iterations)
             if blobs is None:
                 return None
-            return blobs[0]
+            return blobs[0], next_hsv_spec
 
         def AdvanceLineSearch(prev_segment):
             # adjust hsvspec and rect for next slice
@@ -233,7 +235,7 @@ class Image(object):
 
         line_points = []
         while True:
-            this_segment = QualifyLineSegment()
+            this_segment, line_hsv_spec = QualifyLineSegment()
             if this_segment is not None:
                 line_points.append(this_segment)
             if not AdvanceLineSearch(this_segment):
@@ -246,18 +248,22 @@ class Image(object):
             im_cropped = self
         else:
             im_cropped = self.Crop(rect)
-        im_bw = ColorMaskOneHue(im_cropped.ImAsHSV(), hsvspec)
+        im_hsv = im_cropped.ImAsHSV()
+        im_bw = ColorMaskOneHue(im_hsv, hsvspec)
         print("FindColorBlobs() Cropped " + ReprOpenCv(im_bw))
         kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
         im_dilated = cv2.dilate(im_bw, kernel, iterations=iterations)
         cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         rect_list = ContoursExtract(contours, hierarchy)
-        if (rect_list is not None) and (rect is not None):
-            for this in rect_list:              # adjust to original image coordinates
-                this.center_x += rect.x_min
-                this.center_y += rect.y_min
+        next_hsv_spec = None
+        if rect_list is not None:
+            next_hsv_spec = NextHsvSpec(im_hsv, im_bw, rect_list[0])
+            if rect is not None:
+                for this in rect_list:              # adjust to original image coordinates
+                    this.center_x += rect.x_min
+                    this.center_y += rect.y_min
         print("FindColorBlobs()", rect_list)
-        return rect_list
+        return rect_list, next_hsv_spec
 
 #
 # FilterParm.GetValue() must be exception-safe.
@@ -994,6 +1000,35 @@ class HsvSpec(object):
         return HsvSpec(hue=self.hue, huerange=self.huerange,
                             saturation=self.saturation, saturationrange=self.saturationrange,
                             value=self.value, valuerange=self.valuerange)
+
+def NextHsvSpec(hsvImage, hueMask, rect):
+    # Creates an HsvSpec based on the upper part of this image.
+    # Used by Image.ChaseLine()
+    def CalcRange(hist):
+        # check if rng reasonable, avg close to hist[0], colorwrap
+        avg = int((hist[2] - hist[1]) / 2)
+        rng = avg - hist[1]
+        return avg, rng
+    values = []
+    values.append([0, 255, 0])		# sum, min value, max value)
+    values.append([0, 255, 0])		# sum, min value, max value)
+    values.append([0, 255, 0])		# sum, min value, max value)
+    x = rect.center_x
+    y = rect.center_y
+    for this_y in range(y, 0):
+        if hueMask[this_y, x] > 0:
+            hsv = hsvImage[this_y, x]
+            for ix, this_byte in enumerate(hsv):
+                values[ix][0] += this_byte
+                if this_byte < values[ix][1]:
+                    values[ix][1] = this_byte
+                if this_byte > values[ix][2]:
+                    values[ix][2] = this_byte
+    hsv_spec = HsvSpec(0)
+    hsv_spec.hue, hsv_spec.huerange = CalcRange(values[0])
+    hsv_spec.saturation, hsv_spec.saturationrange = CalcRange(values[1])
+    hsv_spec.value, hsv_spec.valuerange = CalcRange(values[2])
+    return hsv_spec
 
 def ColorMaskOneHue(hsvImage, hsvspec):
     # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to HSV_MAX_HUE,
