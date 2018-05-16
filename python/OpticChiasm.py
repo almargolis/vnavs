@@ -692,8 +692,26 @@ def NextColorIx(c):
         c = 0
     return c
 
+def ListOfOpenCvRectAsList(in_list):
+    res = []
+    for this in in_list:
+        res.append(this.AsList())
+    return res
+
+def ListOfOpenCvRectFromList(in_list):
+    res = []
+    for this in in_list:
+        res.append(OpenCvRectFromList(this))
+    return res
+
+def OpenCvRectFromList(res):
+    o = object()
+    for ix, this in enumerate(res):
+        setattr(o, OpenCvRect.__slots__[ix], this)
+    return OpenCvRect(((o.center_x, o.center_y), (o.width, o.height), o.angle))
+
 class OpenCvRect(object):
-    slots = ('angle', 'center_x', 'center_y', 'height', 'width')
+    __slots__ = ('angle', 'center_x', 'center_y', 'height', 'width')
 
     def __init__(self, rect):		# rect from cv2.minAreaRect() ((x, y), (w, h), angle)
         center = rect[0]
@@ -709,6 +727,12 @@ class OpenCvRect(object):
 				center_x=self.center_x, center_y=self.center_y,
 				width=self.width, height=self.height,
 				angle=self.angle)
+
+    def AsList(self):
+        res = []
+        for this in self.__slots__:
+            res.append(getattr(self, this))
+        return res
 
     def BoxPointsList(self):
         return cv2.boxPoints(self.AsOpenCvRect()).tolist()	# returns array of 4 [x, y]

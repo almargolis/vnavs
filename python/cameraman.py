@@ -331,23 +331,17 @@ class cameraman(vnavs_mqtt.mqtt_node):
         crop_start_x = 60
         crop_start_y = 280
         #
-        return None
         im_in = OpticChiasm.Image(im, colorcode=OpticChiasm.IM_BGR)
-        im_cropped = im_in.FindColorBlob(
+        hsvspec = OpticChiasm.HsvSpec(
                                 hue=hue, huerange=hue_range,
                                 saturation=saturation, saturationrange=saturation_range,
-                                value=value, valuerange=value_range,
-                                rect=OpticChiasm.Rect(crop_start_y, 300, crop_start_x, 310),
+                                value=value, valuerange=value_range)
+        rect=OpticChiasm.Rect(crop_start_y, 300, crop_start_x, 310)
+        rect_list = im_in.ChaseLine(hsvspec=hsvspec, rect=rect,
                                 kernel_dim=kernel_dim, iterations=iterations)
-        im_dilated = cv2.dilate(im_bw.im, kernel, iterations=iterations)
-        cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        rect_list = OpticChiasm.ContoursExtract(contours, hierarchy)
-        if rect_list is not None:
-            for this in rect_list:
-                this.center_x += crop_start_x
-                this.center_y += crop_start_y
-        print("MAKER ==>", rect_list)
-        return rect_list
+        list_list = OpticChiasm.ListOfOpenCvRectAsList(rect_list)
+        print("MAKER ==>", list_list)
+        return list_list
 
     def ImageBurst(self):
         # establish paramters for this burst. Since MQTT is running in a separate thread
@@ -468,9 +462,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             payload['shutter_speed'] = self.camera.exposure_speed
             payload['capture_format'] = capture_format
             payload['capture_publish'] = capture_publish
-            if rect_list is not None:
-                if len(rect_list) >= 1:
-                    payload['center_line'] = "{},{}".format(int(rect_list[0].center_x), int(rect_list[0].center_y))
+            payload['center_line'] = rect_list
             self.Publish(vconst.cameraman_pic_ready_topic, payload)
             print("P", self.mqttc.connected)
             if self.camera.iso != self.iso:
