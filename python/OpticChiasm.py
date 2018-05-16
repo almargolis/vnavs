@@ -203,8 +203,10 @@ class Image(object):
             return None
         line_hsvspec = hsvspec.copy()
         line_rect = rect.copy()
+        chase_ct = 0
         print("ChaseLine()", self, line_hsvspec, line_rect)
         def QualifyLineSegment():
+            global next_hsv_spec
             # This advances the search through the image. Adjusting line_hsvspec and line_rect.
             # check if the blob is reasonably a line segment
             # size? color? location?
@@ -212,7 +214,7 @@ class Image(object):
             blobs, next_hsv_spec = self.FindColorBlobs(hsvspec=line_hsvspec, rect=line_rect,
                                 kernel_dim=kernel_dim, iterations=iterations)
             if blobs is None:
-                return None
+                return None, None
             return blobs[0], next_hsv_spec
 
         def AdvanceLineSearch(prev_segment):
@@ -235,29 +237,34 @@ class Image(object):
 
         line_points = []
         while True:
-            this_segment, line_hsv_spec = QualifyLineSegment()
+            chase_ct += 1
+            print("ChaseLine() Loop", chase_ct, line_hsvspec, line_rect)
+            this_segment, this_hsvspec = QualifyLineSegment()
             if this_segment is not None:
                 line_points.append(this_segment)
+            if this_hsvspec is not None:
+                line_hsvspec = this_hsvspec
             if not AdvanceLineSearch(this_segment):
                 return line_points
 
     def FindColorBlobs(self, hsvspec, rect=None,
                             kernel_dim=3, iterations=1):
-        print("FindColorBlobs()", self, rect)
+        print("FindColorBlobs()", self, rect, hsvspec)
         if rect is None:
             im_cropped = self
         else:
             im_cropped = self.Crop(rect)
         im_hsv = im_cropped.ImAsHSV()
-        im_bw = ColorMaskOneHue(im_hsv, hsvspec)
-        print("FindColorBlobs() Cropped " + ReprOpenCv(im_bw))
+        im_masked = ColorMaskOneHue(im_hsv, hsvspec)
+        print("FindColorBlobs() Cropped " + ReprOpenCv(im_masked))
         kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
-        im_dilated = cv2.dilate(im_bw, kernel, iterations=iterations)
+        im_dilated = cv2.dilate(im_masked, kernel, iterations=iterations)
         cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         rect_list = ContoursExtract(contours, hierarchy)
         next_hsv_spec = None
         if rect_list is not None:
-            next_hsv_spec = NextHsvSpec(im_hsv, im_bw, rect_list[0])
+            # used im_masked because im_dilated includes out of range hsv values
+            next_hsv_spec = NextHsvSpec(im_hsv, im_masked, rect_list[0])
             if rect is not None:
                 for this in rect_list:              # adjust to original image coordinates
                     this.center_x += rect.x_min
@@ -1001,22 +1008,29 @@ class HsvSpec(object):
                             saturation=self.saturation, saturationrange=self.saturationrange,
                             value=self.value, valuerange=self.valuerange)
 
-def NextHsvSpec(hsvImage, hueMask, rect):
+def NextHsvSpec(hsvImage, hueMask, rect, minrange=20):
     # Creates an HsvSpec based on the upper part of this image.
     # Used by Image.ChaseLine()
     def CalcRange(hist):
         # check if rng reasonable, avg close to hist[0], colorwrap
-        avg = int((hist[2] - hist[1]) / 2)
-        rng = avg - hist[1]
+        avg = int((int(hist[1]) + int(hist[2])) / 2)
+        rng = hist[2] - avg
+        if rng < minrange:
+            rng = minrange
         return avg, rng
+    print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(hueMask), rect)
+    value_ct = 0
     values = []
     values.append([0, 255, 0])		# sum, min value, max value)
     values.append([0, 255, 0])		# sum, min value, max value)
     values.append([0, 255, 0])		# sum, min value, max value)
-    x = rect.center_x
-    y = rect.center_y
-    for this_y in range(y, 0):
+    x = int(rect.center_x)
+    y = int(rect.center_y)
+    for this_y in range(y, 0, -1):
+        print("NextHsvSpec() Loop", this_y, x)
+        print("NextHsvSpec() Loop", this_y, x, hueMask[this_y, x], hsvImage[this_y, x])
         if hueMask[this_y, x] > 0:
+            value_ct += 1
             hsv = hsvImage[this_y, x]
             for ix, this_byte in enumerate(hsv):
                 values[ix][0] += this_byte
@@ -1024,10 +1038,14 @@ def NextHsvSpec(hsvImage, hueMask, rect):
                     values[ix][1] = this_byte
                 if this_byte > values[ix][2]:
                     values[ix][2] = this_byte
+    if value_ct < 3:
+        print("NextHsvSpec()", value_ct, None, values)
+        return None
     hsv_spec = HsvSpec(0)
     hsv_spec.hue, hsv_spec.huerange = CalcRange(values[0])
     hsv_spec.saturation, hsv_spec.saturationrange = CalcRange(values[1])
     hsv_spec.value, hsv_spec.valuerange = CalcRange(values[2])
+    print("NextHsvSpec()", value_ct, hsv_spec, values)
     return hsv_spec
 
 def ColorMaskOneHue(hsvImage, hsvspec):
