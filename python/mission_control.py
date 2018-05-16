@@ -252,14 +252,17 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             if not self.file_client.GetFile(self.pic_fn, path=path):
                 print("Unable to fetch PIC", self.pic_fn)
                 return
-        im = cv2.imread(path)
+        im = OpticChiasm.ReadImage(path)
         if 'center_line' in payload:
             line_at = payload['center_line']
-            parts = line_at.split(',')
-            line_x = int(parts[0])
-            line_y = int(parts[1])
-            cv2.line(im, (line_x, line_y-50), (line_x, line_y+50), OpticChiasm.DRAW_BGR_BLACK, 5)
-        self.f1_img1.UpdateImage(source_im=im)
+            list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
+            print("ProcessImage() center_line ", list_of_OpenCvRect)
+            im.DrawLinePoints(list_of_OpenCvRect)
+            #parts = line_at.split(',')
+            #line_x = int(parts[0])
+            #line_y = int(parts[1])
+            #cv2.line(im, (line_x, line_y-50), (line_x, line_y+50), OpticChiasm.DRAW_BGR_BLACK, 5)
+        self.f1_img1.UpdateImage(source_im=im.im)
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.pic_fn = None
 

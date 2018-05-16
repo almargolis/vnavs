@@ -692,23 +692,32 @@ def NextColorIx(c):
         c = 0
     return c
 
-def ListOfOpenCvRectAsList(in_list):
+def ListOfOpenCvRectAsListOfDicts(in_list):
+    # Takes list of OpenCvRect and converts to a JSON serializable
+    # list of dicts. The list is from Image.ChaseLine() or similar.
     res = []
     for this in in_list:
-        res.append(this.AsList())
+        res.append(ObjectAsDict(this))
     return res
 
-def ListOfOpenCvRectFromList(in_list):
+def ListOfOpenCvRectFromListofDicts(in_list):
+    # Takes a list of dicts and convert to a list
+    # of OpenCvRect
     res = []
     for this in in_list:
-        res.append(OpenCvRectFromList(this))
+        res.append(OpenCvRectFromDict(this))
     return res
 
-def OpenCvRectFromList(res):
-    o = object()
-    for ix, this in enumerate(res):
-        setattr(o, OpenCvRect.__slots__[ix], this)
-    return OpenCvRect(((o.center_x, o.center_y), (o.width, o.height), o.angle))
+def OpenCvRectFromDict(d):
+    return OpenCvRect(((d['center_x'], d['center_y'],
+                        (d['width'], d['height']),
+                        d['angle']))
+
+def ObjectAsDict(src):
+    res = {}
+    for this in src.__slots__:
+        res[this] = getattr(src, this)
+    return res
 
 class OpenCvRect(object):
     __slots__ = ('angle', 'center_x', 'center_y', 'height', 'width')
@@ -727,12 +736,6 @@ class OpenCvRect(object):
 				center_x=self.center_x, center_y=self.center_y,
 				width=self.width, height=self.height,
 				angle=self.angle)
-
-    def AsList(self):
-        res = []
-        for this in self.__slots__:
-            res.append(getattr(self, this))
-        return res
 
     def BoxPointsList(self):
         return cv2.boxPoints(self.AsOpenCvRect()).tolist()	# returns array of 4 [x, y]

@@ -339,7 +339,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         rect=OpticChiasm.Rect(crop_start_y, 300, crop_start_x, 310)
         rect_list = im_in.ChaseLine(hsvspec=hsvspec, rect=rect,
                                 kernel_dim=kernel_dim, iterations=iterations)
-        list_list = OpticChiasm.ListOfOpenCvRectAsList(rect_list)
+        list_list = OpticChiasm.ListOfOpenCvRectAsListOfDicts(rect_list)
         print("MAKER ==>", list_list)
         return list_list
 
