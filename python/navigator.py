@@ -48,6 +48,51 @@ NAVIGATOR_WAYPOINT_LONGITUDE = 'waypoint_longitude'
 NAVIGATOR_WAYPOINT_HEADING = 'waypoint_heading'
 NAVIGATOR_WAYPOINT_DISTANCE = 'waypoint_distance'
 
+class PID(object):
+    __slots__ = ('d_gain', 'd_out', 'error', 'i_out', 'i_accumulator', 'i_gain', 'i_last_time',
+					'output_scale', 'p_gain', 'p_out', 'pid_out', 'prev_error', 'target_value')
+
+    def __init__(self, SetPoint=0, KP=1.0, KI=0.5, KD=0.25, OutputScale=1.0):
+        # Parameter names are common engineering terms.
+        # Code variables are more like programming terms.
+        self.target_value = SetPoint
+        self.p_gain = KP
+        self.i_gain = KI
+        self.d_gain = KD
+        self.output_scale = OutputScale
+        self.Reset()
+
+    def Reset(self):
+        self.error = 0
+        self.prev_error = 0
+        self.p_out = 0
+        self.i_accumulator = 0
+        self.i_out = 0
+        self.d_out = 0
+        self.pid_out = 0
+        self.i_time_last = time.time()				# time in seconds
+
+    def GetOutput(self, current_state):
+        time_now = time.time()
+        dt = time_now - self.i_time_last
+        self.error = current_state - self.target_value
+
+        self.p_out = self.error * self.p_gain
+
+        self.i_accumulator += self.error * dt
+        self.i_out = self.i_accumulator * self.i_gain
+
+        self.derivative = (self.error - self.prev_error) / dt
+        self.d_out = self.derivative * self.d_gain
+        #
+        self.i_time_last = time_now
+        self.prev_error = self.error
+        self.pid_out = self.p_out + self.i_out + self.d_out
+        return self.pid_out * self.output_scale
+
+    def GetOutputInt(self, current_state):
+        return int(self.GetOutput(current_state))
+
 def CheckYawForCompletedManuever(current_yaw, nav):
     ## ************** ##
     # Need to track how far we have been moving in same direction. If we overshoot
@@ -209,8 +254,8 @@ class StepLine(MissionStep):
     __slots__ = ('next_time', 'speed', 'waypoint')
     def __init__(self, mission, section):
         super().__init__(mission, section)
-        self.waypoint = None
         self.next_time = None
+        self.pid = PID(SetPoint=285, OutputScale=0.5, KI=0, KD=0)
 
     def Load(self, parts):
         # key = parts[0]
@@ -218,24 +263,14 @@ class StepLine(MissionStep):
         # value = self.navigator.persistent_data[key]
         # self.waypoint = engineer_1.PositionStringToPosition(value)
         self.speed = int(parts[1])
-        self.next_time = time.time()
+        self.next_time = 0
 
     def DoMissionStep(self, loop_ct):
-        no_turn = 285
-        hyst = 10
-        left_turn = no_turn - hyst
-        right_turn = no_turn + hyst
-        turn_degrees = 25
+        self.pid.Reset()
         if time.time() > self.next_time:
-            if self.navigator.line_x is not None:
-                if self.navigator.line_x < left_turn:
-                    self.nav.steering = -turn_degrees
-                elif self.navigator.line_x > right_turn:
-                    self.nav.steering = turn_degrees
-                else:
-                    self.nav.steering = 0
+            self.nav.steering = self.pid.GetOutputInt(self.navigator.line_x)
             self.nav.speed = self.speed
-            print("StepLine.DoMissionStep() navigate", self.navigator.line_x, self.nav.speed, self.nav.steering)
+            print("StepLine.DoMissionStep() LINE", self.navigator.line_x, self.nav.speed, self.nav.steering)
             self.PublishNavigation()
             self.next_time = time.time() + 1.0
             self.next_time = time.time() + 0.5
@@ -756,9 +791,10 @@ class navigator(vnavs_mqtt.mqtt_node):
         payload = self.GetLatestPayload(vconst.cameraman_pic_ready_topic)
         if payload is not None:
             if 'center_line' in payload:
-                line = payload['center_line']
-                parts = line.split(',')
-                self.line_x = int(parts[0])
+                line_at = payload['center_line']
+                list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
+                if len(list_of_OpenCvRect) > 0:
+                    self.line_x = list_of_OpenCvRect[0].center_x
 
         payload = self.GetLatestPayload(vconst.mission_begin_topic)
         if payload is not None:

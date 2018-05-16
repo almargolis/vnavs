@@ -256,7 +256,10 @@ class vehicle(object):
         else:
             direction = self.steering_plan[0].direction
         print("SteeringTick()", self.steering_offset, direction, self.steering_plan)
-        self.steering.write(self.steering_offset + direction)
+        try:
+            self.steering.write(self.steering_offset + direction)
+        except ValueError:
+            pass				# attempt to write invalid value
         self.steering_last = direction
         return
 
