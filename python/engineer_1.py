@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import datetime
 import math
 import os
 from geopy.distance import great_circle
@@ -29,6 +30,11 @@ METERS_PER_SECOND_PER_KNOT = 0.514444
 GPS_BAUD_9600 = 9600
 GPS_BAUD_38400 = 38400
 GPS_BAUD_RATES = (GPS_BAUD_9600, GPS_BAUD_38400)
+
+DDT_TIME = 'time'
+DDT_INT = 'int'
+DDT_FLOAT = 'float'
+DDT_STR = 'str'
 
 #
 # VnavsData provides a mechanism for reliably processing data with a minimum of code.
@@ -84,8 +90,12 @@ class VnavsDataRecord(object):
 
     def CreatePayload(self):
         payload = {}
-        for this in self.__slots__:
-            payload[this] = getattr(self, this)
+        for attrname, datadef in self._dict.items():
+            value = getattr(self, attrname)
+            if datadef.type == DDT_TIME:
+                if isinstance(value, datetime.datetime):
+                    value = value.strftime("%Y%m%d%H%M%S")
+            payload[attrname] = value
         return payload
 
     def LoadPayload(self, payload):
@@ -102,20 +112,20 @@ GPS_MODE = 'gps_mode'
 GPS_DIFFERENTIAL = 'gps_differential'
 
 GpsDataDict = VnavsDataDict()
-GpsDataDict.AddAttribute(GPS_MODE, 'int', default_value = 1,
+GpsDataDict.AddAttribute(GPS_MODE, DDT_INT, default_value = 1,
 				values={1: 'no fix', 2: '2D < 4 satelites', 3: '3D >= 4 satelites'})
-GpsDataDict.AddAttribute(GPS_QUALITY, 'str', default_value='F',
+GpsDataDict.AddAttribute(GPS_QUALITY, DDT_STR, default_value='F',
 				values={'A': "Best Accuracy", 'B': "Reasonable Accuracy", 'F': 'Not Reliable'})
-GpsDataDict.AddAttribute(GPS_LONGITUDE, 'float', default_value = 0,
+GpsDataDict.AddAttribute(GPS_LONGITUDE, DDT_FLOAT, default_value = 0,
 				min_value=0.0, limit_value=360.0)
-GpsDataDict.AddAttribute(GPS_LATITUDE, 'float', default_value = 0,
+GpsDataDict.AddAttribute(GPS_LATITUDE, DDT_FLOAT, default_value = 0,
 				min_value=0.0, limit_value=360.0)
-GpsDataDict.AddAttribute(GPS_QUALITY, 'str', default_value='F',
+GpsDataDict.AddAttribute(GPS_QUALITY, DDT_STR, default_value='F',
 				values={'A': "Best Accuracy", 'B': "Reasonable Accuracy", 'F': 'Not Reliable'})
-GpsDataDict.AddAttribute(GPS_SPEED, 'float', default_value=0, uom='m/s')
-GpsDataDict.AddAttribute(GPS_DIFFERENTIAL, 'str',
+GpsDataDict.AddAttribute(GPS_SPEED, DDT_FLOAT, default_value=0, uom='m/s')
+GpsDataDict.AddAttribute(GPS_DIFFERENTIAL, DDT_STR,
 				values={'A': "Autonomous", 'D': "Differential GPS"})
-GpsDataDict.AddAttribute(GPS_TIMESTAMP, 'time')
+GpsDataDict.AddAttribute(GPS_TIMESTAMP, DDT_TIME)
 
 class GpsDataRecord(VnavsDataRecord):
     __slots__ = GpsDataDict.Slots()
@@ -130,13 +140,13 @@ IMU_YAW = 'imu_yaw'
 IMU_TIMESTAMP = 'imu_timestamp'
 
 ImuDataDict = VnavsDataDict()
-ImuDataDict.AddAttribute(IMU_PITCH, 'float', uom='degrees', default_value = 0,
+ImuDataDict.AddAttribute(IMU_PITCH, DDT_FLOAT, uom='degrees', default_value = 0,
 				min_value=0.0, limit_value=360.0)
-ImuDataDict.AddAttribute(IMU_ROLL, 'float', uom='degrees', default_value = 0,
+ImuDataDict.AddAttribute(IMU_ROLL, DDT_FLOAT, uom='degrees', default_value = 0,
 				min_value=0.0, limit_value=360.0)
-ImuDataDict.AddAttribute(IMU_YAW, 'float', uom='degrees', default_value = 0,
+ImuDataDict.AddAttribute(IMU_YAW, DDT_FLOAT, uom='degrees', default_value = 0,
 				min_value=0.0, limit_value=360.0)
-ImuDataDict.AddAttribute(IMU_TIMESTAMP, 'time')
+ImuDataDict.AddAttribute(IMU_TIMESTAMP, DDT_TIME)
 
 class ImuDataRecord(VnavsDataRecord):
     __slots__ = ImuDataDict.Slots()
@@ -342,14 +352,14 @@ class GpsDevice(object):
             except ValueError:
                 print("Invalid RMC heading", `heading_raw`)
         self.gps_differential = parsed_sentence.data[11]	# A=autonomous, D=differeential GPS
-        print("RMC ------")
-        return True
         """
         print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
 					self.gps_status, parsed_sentence.data[2], parsed_sentence.data[3], self.latitude,
 					parsed_sentence.data[4], parsed_sentence.data[5], self.longitude,
 					self.heading, self.gps_quality))
         """
+        print("RMC ------")
+        return True
 
     def UpdateGpsInfo(self):
         # Reads one GPS sentence if available and updates position information
@@ -404,6 +414,7 @@ class engineer_1(vnavs_mqtt.mqtt_node):
         have_new_gps_data = self.gps_device.UpdateGpsInfo()
         if have_new_gps_data:
             payload = self.gps_device.data.CreatePayload()
+            print("Engineeer_1.DoLoop() GPS Payload", payload)
             self.Publish(vconst.engineer_1_gps_topic, payload)
             self.stats.Count('GpsMsg')
 

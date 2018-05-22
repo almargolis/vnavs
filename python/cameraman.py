@@ -126,7 +126,7 @@ class macbook_camera(object):
                 yield 'buffer'
 
 class cameraman(vnavs_mqtt.mqtt_node):
-    __slots__ = ('burst_fps',
+    __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
                     'camera', 'camera_resolution',
                     'capture_format', 'capture_publish',
                     'image_ct',
@@ -149,9 +149,15 @@ class cameraman(vnavs_mqtt.mqtt_node):
     ]
 
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=[vconst.cameraman_orders_topic, vconst.cameraman_process_topic],
+        super().__init__(Subscriptions=[
+						vconst.cameraman_orders_topic,
+						vconst.cameraman_process_topic,
+						vconst.mission_specs_topic
+					],
 							SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
-        self.burst_fps = 0			# capture speed of last burst
+        self.burst_fps_rate = 0			# capture speed of last burst
+        self.burst_fps_ct = 0
+        self.burst_fps_start_time = time.time()
         self.iso = 100
         self.shutter_speed = 0
         self.camera_resolution = (320, 240)
@@ -171,13 +177,17 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.camera.hflip = False
         self.camera.iso = self.iso
         self.do_auto_iso = False
+        self.do_auto_iso = True
         self.idle_image_id = 0
         self.idle_image_id_max = 20
         self.iso = self.camera.iso
         self.camera.shutter_speed = self.shutter_speed
+        self.loop_mode = 'run'			# idle, single, run, pause
         self.loop_mode = 'idle'			# idle, single, run, pause
         self.loop_format = 'jpeg'		# jpeg, bgr
         self.loop_publish = 'file'
+        self.mission_specs = None
+        self.mission_hsv_spec = None
         self.capture_format = 'jpeg'		# jpeg, bgr
         self.capture_publish = 'file'		# file, stream
         self.post_processes = []
@@ -226,6 +236,10 @@ class cameraman(vnavs_mqtt.mqtt_node):
     def rmsg_cameraman_orders(self, payload):
         print(payload)
         self.ValidateMessage(self.orders_parms, payload)
+
+    def rmsg_mission_specs(self, payload):
+        self.mission_specs = payload
+        self.mission_hsv_spec = None
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
@@ -318,26 +332,62 @@ class cameraman(vnavs_mqtt.mqtt_node):
             self.iso = 800
 
     def MakerFaire2018(self, im):
-        hue = 90
-        hue_range = 30
-        saturation = 0
-        saturation_range = 40
-        value = 209
-        value = 170
-        value_range = 12
-        value_range = 30
+        spec = self.mission_specs		# copy to be thread safe
+        print("MakerFaire", spec)
+
+        default_hue = 90
+        default_huerange = 30
+        default_saturation = 0
+        default_saturationrange = 40
+        default_value = 170
+        default_valuerange = 30
+        try:
+            crop1_start_x = int(spec['l1x'])
+            crop1_start_y = int(spec['l1y'])
+            crop1_height = int(spec['l1h'])
+            crop1_width = int(spec['l1w'])
+            end_y = int(spec['end_y'])
+        except:
+            return []
+
+        if 'hue' in spec:
+            hue = int(spec['hue'])
+        else:
+            hue = default_hue
+        if 'huerange' in spec:
+            huerange = int(spec['huerange'])
+        else:
+            huerange = default_huerange
+        if 'saturation' in spec:
+            saturation = int(spec['saturation'])
+        else:
+            saturation = default_saturation
+        if 'saturationrange' in spec:
+            saturationrange = int(spec['saturationrange'])
+        else:
+            saturationrange = default_saturationrange
+        if 'value' in spec:
+            value = int(spec['value'])
+        else:
+            value = default_value
+        if 'valuerange' in spec:
+            valuerange = int(spec['valuerange'])
+        else:
+            valuerange = default_valuerange
         kernel_dim = 11
         iterations = 1
-        crop_start_x = 60
-        crop_start_y = 280
         #
         im_in = OpticChiasm.Image(im, colorcode=OpticChiasm.IM_BGR)
-        hsvspec = OpticChiasm.HsvSpec(
-                                hue=hue, huerange=hue_range,
-                                saturation=saturation, saturationrange=saturation_range,
-                                value=value, valuerange=value_range)
-        rect=OpticChiasm.Rect(crop_start_y, 300, crop_start_x, 310)
-        rect_list = im_in.ChaseLine(hsvspec=hsvspec, rect=rect,
+        rect=OpticChiasm.Rect(crop1_start_y-crop1_height, crop1_start_y, crop1_start_x, crop1_start_x+crop1_width)
+        if self.mission_hsv_spec is None:
+            """
+            hsvspec = OpticChiasm.HsvSpec(
+                                hue=hue, huerange=huerange,
+                                saturation=saturation, saturationrange=saturationrange,
+                                value=value, valuerange=valuerange)
+            """
+            self.mission_hsv_spec = OpticChiasm.NextHsvSpec(im_in.Crop(rect).ImAsHSV())
+        rect_list = im_in.ChaseLine(hsvspec=self.mission_hsv_spec, rect=rect, end_y=end_y,
                                 kernel_dim=kernel_dim, iterations=iterations)
         list_list = OpticChiasm.ListOfOpenCvRectAsListOfDicts(rect_list)
         print("MAKER ==>", list_list)
@@ -383,14 +433,11 @@ class cameraman(vnavs_mqtt.mqtt_node):
         #
         # Capture some pictures. This might be a single image or a long run of them.
         #
-        burst_start_time = time.time()
-        burst_ct = 0
         if self.verbose:
             print("READY", burst_loop_mode, burst_loop_format, burst_loop_publish, burst_dest)
         last_time = 0
         for im_path in self.camera.capture_continuous(burst_dest, format=burst_loop_format, use_video_port=True):
             self.image_ct += 1
-            burst_ct += 1
             # mqtt can change values asynchronously. copy so values are consistent during capture
             capture_format = self.capture_format
             capture_publish = self.capture_publish
@@ -403,6 +450,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 im_fn = image_file_name_format.format(counter=self.image_ct)
                 print("CAPT", im_fn, self.imageDir)
                 im_path = os.path.join(self.imageDir, im_fn)
+                file_written = True
                 if capture_format == 'jpeg':
                     # to keep understandable, keep following if consistent with buffer creation if
                     if burst_loop_format == 'yuv':
@@ -410,17 +458,23 @@ class cameraman(vnavs_mqtt.mqtt_node):
                     elif burst_loop_format in [OpticChiasm.IM_RGB, OpticChiasm.IM_BGR]:
                         cv2.imwrite(im_path, burst_dest.array)
                     else:
-                        f = open(im_fn, 'wb')
-                        f.write(burst_dest.getvalue())
-                        f.close()
-                    self.last_fn = im_fn
-                    self.last_format = capture_format
-                    payload = {}
-                    payload['filename'] = im_fn
-                    payload['capture_format'] = capture_format
-                    payload['capture_publish'] = capture_publish
-                    self.Publish(vconst.cameraman_pic_ready_topic, payload)
-                    last_time = time.time()
+                        try:
+                            f = open(im_fn, 'wb')
+                            f.write(burst_dest.getvalue())
+                            f.close()
+                        except IOError as e:
+                            # IOError: [Errno 28] Out of disk space
+                            if e.errno == 28:
+                                file_written = False
+                    if file_written:
+                        self.last_fn = im_fn
+                        self.last_format = capture_format
+                        payload = {}
+                        payload['filename'] = im_fn
+                        payload['capture_format'] = capture_format
+                        payload['capture_publish'] = capture_publish
+                        self.Publish(vconst.cameraman_pic_ready_topic, payload)
+                        last_time = time.time()
                 """
                 if burst_publish == 's':
                     #buffer = burst_dest.getvalue()
@@ -439,7 +493,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             # At this point we have an image captured and in the requested format.
             #
             rect_list = None
-            if (len(self.post_processes) > 0) or (burst_loop_mode == 'idle'):
+            if (len(self.post_processes) > 0) or (burst_loop_mode == 'idle') or True:
                 # we need an OpenCv image for post processing
                 if burst_loop_publish == 'file':
                     img = cv2.imread(im_path)
@@ -454,6 +508,12 @@ class cameraman(vnavs_mqtt.mqtt_node):
             else:
                 rect_list = self.MakerFaire2018(img)
                 annotated = None
+            #
+            # Imsge process, now publish
+            #
+            self.burst_fps_ct += 1
+            burst_elapsed_time = time.time() - self.burst_fps_start_time
+            self.burst_fps_rate = self.burst_fps_ct / burst_elapsed_time
             payload = {}
             payload['filename'] = im_fn
             if annotated is not None:
@@ -462,6 +522,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             payload['shutter_speed'] = self.camera.exposure_speed
             payload['capture_format'] = capture_format
             payload['capture_publish'] = capture_publish
+            payload['capture_fps'] = self.burst_fps_rate
             payload['center_line'] = rect_list
             self.Publish(vconst.cameraman_pic_ready_topic, payload)
             print("P", self.mqttc.connected)
@@ -490,9 +551,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 break
             if burst_loop_mode != self.loop_mode:
                 break
-        if burst_ct >= 10:
-            burst_time = time.time() - burst_start_time
-            self.burst_fps = burst_ct / burst_time
 
 if __name__ == '__main__':
     h = cameraman()
