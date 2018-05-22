@@ -717,6 +717,8 @@ def ListOfOpenCvRectAsListOfDicts(in_list):
 def ListOfOpenCvRectFromListofDicts(in_list):
     # Takes a list of dicts and convert to a list
     # of OpenCvRect
+    if in_list is None:
+        return []
     res = []
     for this in in_list:
         res.append(OpenCvRectFromDict(this))

@@ -102,8 +102,12 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         mission_image_frame = mission_frame.AddFrame()
         mission_info_frame = mission_frame.AddFrame(row=SAME_ROW, col=NEXT_COL)
-        self.f1_fname = mission_image_frame.AddLabel('fname')
+        #
+        image_info_frame = mission_image_frame.AddFrame()
+        self.f1_fname = image_info_frame.AddLabel('fname')
+        self.f1_fps = image_info_frame.AddLabel('fps', row=SAME_ROW, col=NEXT_COL)
         self.f1_img1 = mission_image_frame.AddLabelImage()
+        #
         self.gps_position = mission_info_frame.AddLabelInfo('GPS Position:')
         self.gps_speed = mission_info_frame.AddLabelInfo('GPS Speed:')
         self.imu_heading = mission_info_frame.AddLabelInfo('IMU Heading:')
@@ -264,6 +268,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             #cv2.line(im, (line_x, line_y-50), (line_x, line_y+50), OpticChiasm.DRAW_BGR_BLACK, 5)
         self.f1_img1.UpdateImage(source_im=im.im)
         self.f1_fname.ReplaceValue(self.pic_fn)
+        self.f1_fps.ReplaceValue('{} fps'.format(payload['capture_fps']))
         self.pic_fn = None
 
     def DoLoop(self):
