@@ -54,6 +54,14 @@ RACE_THRESHOLD = 150
 #   [0,0] is the upper, left corner of the image
 #   The image is stored as an array of horizontal lines, so the index is [y, x]
 #
+def ReadImage(path):
+    im = cv2.imread(path)
+    return Image(im=im, colorcode=IM_BGR)
+
+def ReprOpenCv(im):
+    imx = Image(im=im, colorcode=IM_BGR)
+    return imx.__repr__()
+
 class Image(object):
     """
 	Image is a wrapper around OpenCv images. Its main unique value is adding colorcode as a property
@@ -72,6 +80,9 @@ class Image(object):
         crop_x = None					# left x starting position of this crop in source image
         crop_y = None					# upper y` starting position of this crop in source image
         self.ReplaceImage(im, colorcode)
+
+    def __repr__(self):
+        return "Image {}x{}x{} {}".format(self.width, self.height, self.colordepth, self.colorcode)
 
     def copy(self):
         if self._im is None:
@@ -160,12 +171,20 @@ class Image(object):
 
     def Crop(self, rect, Isolate=False):
         print("Crop()", rect)
-        new_image = Image(im=self._im[rect.y_min:rect.y_max+1, rect.x_min:rect.x_max+1], colorcode=self.colorcode)
+        if rect is None:
+            return self.copy()
+        new_image = Image(im=self._im[rect.y_min:rect.y_max+1, rect.x_min:rect.x_max+1].copy(), colorcode=self.colorcode)
         if not Isolate:
             new_image.crop_source = self
             new_image.crop_x = rect.x_min
             new_image.crop_y = rect.y_min
         return new_image
+
+    def DrawLinePoints(self, linepoints, color=DRAW_BGR_GREEN, thickness=2):
+        # Annotates an array of OpenCvRect from ChaseLine() or elsewhere
+        if linepoints is not None:
+            for this in linepoints:
+                cv2.rectangle(self._im, this.p1, this.p2, color, thickness)
 
     def DrawRectangle(self, rect, color=DRAW_BGR_GREEN, thickness=2):
         cv2.rectangle(self._im, rect.p1, rect.p2, color, thickness)
@@ -175,6 +194,84 @@ class Image(object):
 
     def RectFromSymbolicPP(self, p1, p2):
         return RectFromSymbolicPP(self._im, p1, p2)
+
+    def ChaseLine(self, hsvspec, rect,
+			end_y=0,
+                            sliceheight=20,
+                            kernel_dim=3, iterations=1):
+        # don't modify source specs, make a working copy to step through
+        if (hsvspec is None) or (rect is None):
+            return None
+        line_hsvspec = hsvspec.copy()
+        line_rect = rect.copy()
+        chase_ct = 0
+        print("ChaseLine()", self, line_hsvspec, line_rect)
+        def QualifyLineSegment():
+            global next_hsv_spec
+            # This advances the search through the image. Adjusting line_hsvspec and line_rect.
+            # check if the blob is reasonably a line segment
+            # size? color? location?
+            print("ChaseLine() Qualify", line_hsvspec, line_rect)
+            blobs, next_hsv_spec = self.FindColorBlobs(hsvspec=line_hsvspec, rect=line_rect,
+                                kernel_dim=kernel_dim, iterations=iterations)
+            if blobs is None:
+                return None, None
+            return blobs[0], next_hsv_spec
+
+        def AdvanceLineSearch(prev_segment):
+            # adjust hsvspec and rect for next slice
+            # +/- x, match color and intensity
+            line_rect.y_min, line_rect.y_max = line_rect.y_min - sliceheight, line_rect.y_min
+            if line_rect.y_min < end_y:
+                return False                    # past top of image
+            if prev_segment is not None:
+                # else, leave x alone. maybe should advance like prev good segment
+                line_rect.x_min = int(prev_segment.center_x - (prev_segment.width * 2))
+                if line_rect.x_min < 0:
+                    line_rect.x_min = 0
+                line_rect.x_max = int(prev_segment.center_x + (prev_segment.width * 2))
+                if line_rect.x_max >= self.width:
+                    line_rect.x_max = self.width - 1
+                if (line_rect.x_max - line_rect.x_min) < prev_segment.width:
+                    return False                # shifted too close to left/right edge
+            return True
+
+        line_points = []
+        while True:
+            chase_ct += 1
+            print("ChaseLine() Loop", chase_ct, line_hsvspec, line_rect)
+            this_segment, this_hsvspec = QualifyLineSegment()
+            if this_segment is not None:
+                line_points.append(this_segment)
+            if this_hsvspec is not None:
+                line_hsvspec = this_hsvspec
+            if not AdvanceLineSearch(this_segment):
+                return line_points
+
+    def FindColorBlobs(self, hsvspec, rect=None,
+                            kernel_dim=3, iterations=1):
+        print("FindColorBlobs()", self, rect, hsvspec)
+        if rect is None:
+            im_cropped = self
+        else:
+            im_cropped = self.Crop(rect)
+        im_hsv = im_cropped.ImAsHSV()
+        im_masked = ColorMaskOneHue(im_hsv, hsvspec)
+        print("FindColorBlobs() Cropped " + ReprOpenCv(im_masked))
+        kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
+        im_dilated = cv2.dilate(im_masked, kernel, iterations=iterations)
+        cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        rect_list = ContoursExtract(contours, hierarchy)
+        next_hsv_spec = None
+        if rect_list is not None:
+            # used im_masked because im_dilated includes out of range hsv values
+            next_hsv_spec = NextHsvSpec(im_hsv, mask=im_masked, rect=rect_list[0])
+            if rect is not None:
+                for this in rect_list:              # adjust to original image coordinates
+                    this.center_x += rect.x_min
+                    this.center_y += rect.y_min
+        print("FindColorBlobs()", rect_list)
+        return rect_list, next_hsv_spec
 
 #
 # FilterParm.GetValue() must be exception-safe.
@@ -295,12 +392,12 @@ class ImageFilter(object):
 #	xstep is the current ProcessStep() with exec_im set to None.
 #
 ImageFilter(FILTER_NAME_IMAGE,
-			'xstep.exec_im = xstep.source_im.copy()',
+			'{x_output_im} = xstep.source_im.copy()',
 			[],
 			Flags=[FLAG_ISBASE])
 
 ImageFilter(FILTER_NAME_COLORMASK_MULTI,
-			'xstep.exec_im = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={huerange}, threshold={threshold}),\n' \
+			'{x_output_im} = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={huerange}, threshold={threshold}),\n' \
 				+ '	colorcode=oc.IM_GRAY)',
                         [FilterParmInt('huerange', '25', min_value=0, max_value=127, use_slider=True),
 				FilterParmInt('threshold', '50', min_value=0, max_value=127, use_slider=True),
@@ -309,9 +406,11 @@ ImageFilter(FILTER_NAME_COLORMASK_MULTI,
                         Flags=[])
 
 ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
-			'xstep.exec_im = oc.Image(oc.ColorMaskOneHue(im_in.ImAsAny("{colorcode}"), hue={hue}, huerange={hueRange},' \
+            '{x_output_hsvspec} = oc.HsvSpec(' \
+                + ' hue={hue}, huerange={hueRange},' \
 				+ ' saturation={saturation}, saturationrange={saturationRange},' \
-				+ ' value={value}, valuerange={valueRange}),\n' \
+				+ ' value={value}, valuerange={valueRange})\n' \
+			'{x_output_im} = oc.Image(oc.ColorMaskOneHue(im_in.ImAsAny("{colorcode}"), {x_output_hsvspec}),' \
 				+ '	colorcode=oc.IM_GRAY)',
                         [FilterParmInt('hue', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
                         	FilterParmInt('hueRange', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
@@ -324,62 +423,73 @@ ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
                         Flags=[FLAG_SLIDERS])
 
 filter = ImageFilter(FILTER_NAME_CROPPP,
-			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n'
-				+ 'xstep.exec_im = im_in.Crop(r)\n'
-				+ 'print(im_in.shape, r)\n',
+			'{x_output_rect} = im_in.RectFromSymbolicPP({p1}, {p2})\n'
+				+ '{x_output_im} = im_in.Crop({x_output_rect})\n'
+				+ 'print(im_in.shape, {x_output_rect})\n',
 			[FilterParmPointSym('p1', 'm-50,m+50'), FilterParmPointSym('p2', '-100,e')],
-			Flags=[FLAG_ISBASE])
-filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
-				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
+			Flags=[])
+filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 filter = ImageFilter('CropYX',
-			'r = im_in.RectFromSymbolicYX({y_range}, {x_range})\n'
-				+ 'xstep.exec_im = im_in.Crop(r)\n'
-				+ 'print(im_in.shape, r)\n',
+			'{x_output_rect} = im_in.RectFromSymbolicYX({y_range}, {x_range})\n'
+				+ '{x_output_im} = im_in.Crop({x_output_rect})\n'
+				+ 'print(im_in.shape, {x_output_rect})\n',
 			[FilterParmPointSym('y_range', '-100,'), FilterParmPointSym('x_range', 'm-50,m+50')],
-			Flags=[FLAG_ISBASE])
-filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
-				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
+			Flags=[])
+filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 ImageFilter('Gray',
-			'xstep.exec_im = im_in.CopyAsGray()',
+			'{x_output_im} = im_in.CopyAsGray()',
 			[],
 			Flags=[])
 
 ImageFilter('Blur',
-			'xstep.exec_im = oc.Image(im=cv2.blur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
+			'{x_output_im} = oc.Image(im=cv2.blur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
 			[FilterParmPoint('ksize', '3,3')],
 			Flags=[])
 
 ImageFilter('BlurBilateralFilter',
-			'xstep.exec_im = oc.Image(im=cv2.bilateralFilter(im_in.im, {diameter}, {sigmaColor}, {sigmaSpace}), colorcode=im_in.colorcode)',
+			'{x_output_im} = oc.Image(im=cv2.bilateralFilter(im_in.im, {diameter}, {sigmaColor}, {sigmaSpace}), colorcode=im_in.colorcode)',
 			[FilterParmInt('diameter', '5'), FilterParmInt('sigmaColor', '17'), FilterParmInt('sigmaSpace', '17')],
 			Flags=[])
                         # diameter > 5 is very slow, use 5 for real time processing or 9 for off-line heavy filtering
 			# the two sigma values are often the same value. <10 doesn't do much, >150 is cartoonish
 
 ImageFilter('BlurGaussian',
-			'xstep.exec_im = oc.Image(im=cv2.GaussianBlur(im_in.im, {ksize}, {sigmaX}), colorcode=im_in.colorcode)',
+			'{x_output_im} = oc.Image(im=cv2.GaussianBlur(im_in.im, {ksize}, {sigmaX}), colorcode=im_in.colorcode)',
 			[FilterParmPoint('ksize', '3,3'), FilterParmFloat('sigmaX', '0.0')],
 			Flags=[])
 
 ImageFilter('BlurMedian',
-			'xstep.exec_im = oc.Image(im=cv2.medianBlur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
+			'{x_output_im} = oc.Image(im=cv2.medianBlur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
 			[FilterParmInt('ksize', '3')],
 			Flags=[])
 
 ImageFilter('Canny',
-			'xstep.exec_im = oc.Image(im=cv2.Canny(im_in.ImAsGray(), {threshold1}, {threshold2}), colorcode=oc.IM_GRAY)',
+			'{x_output_im} = oc.Image(im=cv2.Canny(im_in.ImAsGray(), {threshold1}, {threshold2}), colorcode=oc.IM_GRAY)',
 			[FilterParmFloat('threshold1', '100'), FilterParmFloat('threshold2', '300')],
 			Flags=[])
 
 ImageFilter('CannyAuto',
-			'xstep.exec_im = oc.Image(im=oc.AutoCanny(im_in.ImAsGray(), {sigma}), colorcode=oc.IM_GRAY)',
+			'{x_output_im} = oc.Image(im=oc.AutoCanny(im_in.ImAsGray(), {sigma}), colorcode=oc.IM_GRAY)',
 			[FilterParmFloat('sigma', '0.33')],
 			Flags=[])
 
+filter = ImageFilter('ChaseLine',
+			'line_points = im_base.ChaseLine(hsvspec_in, rect_in)',
+			[],
+			Flags=[])
+                        # ChaseLine depends on previous rect and hsvspec. These probably changed im_in to a
+			# black and while image from HueMaskSingle or similar. This therefore uses
+                        # im_base to reset to the original color image
+filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+				+ '{x_output_annotated}.DrawLinePoints(line_points, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
+
+
 ImageFilter('ColorBalance',
-			'xstep.exec_im = oc.simplest_cb(im, {pct})',
+			'{x_output_im} = oc.simplest_cb(im, {pct})',
 			[FilterParmInt('pct', '20')],
 			Flags=[])
 #
@@ -394,7 +504,7 @@ ImageFilter('ColorBalance',
 #
 ImageFilter('MorphClose',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
-				+ 'xstep.exec_im = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_CLOSE, kernel, iterations={iterations}),\n'
+				+ '{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_CLOSE, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
 			[FilterParmInt('kernel_dim', '5'),
 				FilterParmInt('iterations', '1')],
@@ -402,7 +512,7 @@ ImageFilter('MorphClose',
 
 ImageFilter('MorphDilate',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
-				+ 'xstep.exec_im = oc.Image(im=cv2.dilate(im_in.im, kernel, iterations={iterations}),\n'
+				+ '{x_output_im} = oc.Image(im=cv2.dilate(im_in.im, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
 			[FilterParmInt('kernel_dim', '5'),
 				FilterParmInt('iterations', '1')],
@@ -410,7 +520,7 @@ ImageFilter('MorphDilate',
 
 ImageFilter('MorphErode',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
-				+ 'xstep.exec_im = oc.Image(im=cv2.erode(im_in.im, kernel, iterations={iterations}),\n'
+				+ '{x_output_im} = oc.Image(im=cv2.erode(im_in.im, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
 			[FilterParmInt('kernel_dim', '5'),
 				FilterParmInt('iterations', '1')],
@@ -418,7 +528,7 @@ ImageFilter('MorphErode',
 
 ImageFilter('MorphGradient',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
-				+ 'xstep.exec_im = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_GRADIENT, kernel, iterations={iterations}),\n'
+				+ '{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_GRADIENT, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
 			[FilterParmInt('kernel_dim', '5'),
 				FilterParmInt('iterations', '1')],
@@ -426,7 +536,7 @@ ImageFilter('MorphGradient',
 
 ImageFilter('MorphOpen',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
-				+ 'xstep.exec_im = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_OPEN, kernel, iterations={iterations}),\n'
+				+ '{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_OPEN, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
 			[FilterParmInt('kernel_dim', '5'),
 				FilterParmInt('iterations', '1')],
@@ -437,24 +547,24 @@ ImageFilter('MorphOpen',
 #
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
 filter = ImageFilter('ContoursFind',
-			'cont2, xstep.exec_contours, xstep.exec_hierarchy = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
+			'cont2, {x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
 			[FilterParmInt('MaxLevel', '-1')],
 			Flags=[])
-filter.annotate_code = 'xstep.exec_annotated = im_base.CopyAsGray().CopyAsBGR()\n' \
-				+ 'oc.CrayolaContours(xstep.exec_annotated.im, xstep.exec_contours, xstep.exec_hierarchy, MaxLevel={MaxLevel})\n' \
-				+ 'oc.ContoursToLineVectors(xstep.exec_annotated.im, xstep.exec_contours, xstep.exec_hierarchy)\n'
-		#		+ 'cv2.drawContours(xstep.exec_annotated.im, xstep.exec_contours, -1, oc.DRAW_BGR_RED, 1)\n'
-		#		+ 'for i in xrange(0, len(xstep.exec_contours)):\n'
+filter.annotate_code = '{x_output_annotated} = im_base.CopyAsGray().CopyAsBGR()\n' \
+				+ 'oc.CrayolaContours({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy}, MaxLevel={MaxLevel})\n' \
+				+ 'oc.ContoursToLineVectors({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy})\n'
+		#		+ 'cv2.drawContours({x_output_annotated}.im, {x_output_contours}, -1, oc.DRAW_BGR_RED, 1)\n'
+		#		+ 'for i in xrange(0, len({x_output_contours})):\n'
 		#		+ '    color = (np.random.uniform(0, 255), np.random.uniform(0, 255), np.random.uniform(0, 255))\n'
-		#		+ '    cv2.drawContours(xstep.exec_im, xstep.exec_contours, 1, color, 1)\n',
+		#		+ '    cv2.drawContours({x_output_im}, {x_output_contours}, 1, color, 1)\n',
 
 ImageFilter('ContoursDraw',
-			'xstep.exec_annotated = oc.Image(im=cv2.drawContours(im_in.im, contours_in, -1, (0, 0, 255)), colorcode=im_in.colorcode)',
+			'{x_output_annotated} = oc.Image(im=cv2.drawContours(im_in.im, contours_in, -1, (0, 0, 255)), colorcode=im_in.colorcode)',
 			[],
 			Flags=['incont'])
 
 ImageFilter('EqualizeHistogram',
-			'xstep.exec_im = oc.Image(im=cv2.equalizeHist(im_in.ImAsGray()), colorcode=oc.IM_GRAY)',
+			'{x_output_im} = oc.Image(im=cv2.equalizeHist(im_in.ImAsGray()), colorcode=oc.IM_GRAY)',
 			[],
 			Flags=[])
 
@@ -467,23 +577,23 @@ filter = ImageFilter(FILTER_NAME_ANALYZER,
 			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n',
 			[FilterParmPointSym('p1', 'm-3,m-3'), FilterParmPointSym('p2', 'p+3,p+3')],
 			Flags=[])
-filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
-				+ 'xstep.exec_annotated.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n' \
+filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+				+ '{x_output_annotated}.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n' \
 				+ 'xstep.SetInfo(0, "Hue", im_in.Crop(r).AverageHue())\n'
 
 filter = ImageFilter('HoughLinesP',
-			'xstep.exec_lines = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
+			'{x_output_lines} = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
 			[FilterParmInt('MinLineLength', '30'), FilterParmInt('MaxLineGap', 10)],
 			Flags=[''])
-filter.annotate_code = 'xstep.exec_annotated = im_base.copy()\n' \
-				+ 'print(xstep.exec_lines)\n' \
+filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+				+ 'print({x_output_lines})\n' \
 				+ 'color_ix = -1\n' \
-				+ 'if (xstep.exec_lines is not None) and (len(xstep.exec_lines) > 0):\n' \
-				+ '    for line  in xstep.exec_lines:\n' \
+				+ 'if ({x_output_lines} is not None) and (len({x_output_lines}) > 0):\n' \
+				+ '    for line  in {x_output_lines}:\n' \
 				+ '        for x1,y1,x2,y2 in line:\n' \
 				+ '            color_ix = oc.NextColorIx(color_ix)\n' \
 				+ '            color = oc.DRAW_COLORS[color_ix]\n' \
-				+ '            cv2.line(xstep.exec_annotated.im, (x1,y1), (x2,y2), color, 1)\n'
+				+ '            cv2.line({x_output_annotated}.im, (x1,y1), (x2,y2), color, 1)\n'
 
 ImageFilter('Map',
 			'cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))',
@@ -596,8 +706,37 @@ def NextColorIx(c):
         c = 0
     return c
 
+def ListOfOpenCvRectAsListOfDicts(in_list):
+    # Takes list of OpenCvRect and converts to a JSON serializable
+    # list of dicts. The list is from Image.ChaseLine() or similar.
+    res = []
+    for this in in_list:
+        res.append(ObjectAsDict(this))
+    return res
+
+def ListOfOpenCvRectFromListofDicts(in_list):
+    # Takes a list of dicts and convert to a list
+    # of OpenCvRect
+    if in_list is None:
+        return []
+    res = []
+    for this in in_list:
+        res.append(OpenCvRectFromDict(this))
+    return res
+
+def OpenCvRectFromDict(d):
+    return OpenCvRect(((d['center_x'], d['center_y']),
+                        (d['width'], d['height']),
+                        d['angle']))
+
+def ObjectAsDict(src):
+    res = {}
+    for this in src.__slots__:
+        res[this] = getattr(src, this)
+    return res
+
 class OpenCvRect(object):
-    slots = ('angle', 'center_x', 'center_y', 'height', 'width')
+    __slots__ = ('angle', 'center_x', 'center_y', 'height', 'width')
 
     def __init__(self, rect):		# rect from cv2.minAreaRect() ((x, y), (w, h), angle)
         center = rect[0]
@@ -608,11 +747,47 @@ class OpenCvRect(object):
         self.width = dims[0]
         self.height = dims[1]
 
+    def __repr__(self):
+        return "(({center_x}, {center_y}), ({width}, {height}), {angle})".format(
+				center_x=self.center_x, center_y=self.center_y,
+				width=self.width, height=self.height,
+				angle=self.angle)
+
     def BoxPointsList(self):
         return cv2.boxPoints(self.AsOpenCvRect()).tolist()	# returns array of 4 [x, y]
 
     def AsOpenCvRect(self):
         return [[self.center_x, self.center_y], [self.width, self.height], angle]
+
+    def TopY(self, x):
+        # This is incomplete. Need to consider angle.
+        # Return y coordinate of top line at position x.
+        top = self.center_y - (self.height / 2.0)
+        if top < 0.0:
+            top = 0.0
+        return top
+
+    @property
+    def p1(self):
+        # return upper/right corner point of right rectangle
+        half_width = self.width / 2
+        half_height = self.height / 2
+        return (int(self.center_x - half_width), int(self.center_y - half_width))
+
+    @property
+    def p2(self):
+        # return lower/left corner point of right rectangle
+        half_width = self.width / 2
+        half_height = self.height / 2
+        return (int(self.center_x + half_width), int(self.center_y + half_width))
+
+def OpenCvRectFromOpenCvImage(im):
+    shape = im.shape
+    height = shape[0]
+    width = shape[1]
+    center = (float(width / 2.0), float(height / 2.0))
+    dims = (width, height)
+    return OpenCvRect((center, dims, 0.0))
 
 def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumLines=3):
     # returns a list of the largest contours as minimum sized rectangles
@@ -648,7 +823,7 @@ def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=
     # This only looks at top level of hierarchy.
     # This analyzes contours and draws them on thee image -- modifying the image.
     # This is my original attempt for learning about / exploring.
-    # I'm not working to make it obsolete, separating the analysis from the 
+    # I'm not working to make it obsolete, separating the analysis from the
     # drqwing with more structured data.
     #
     if hierarchy is None:
@@ -697,11 +872,6 @@ def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=
         cv2.drawContours(img, [box], 0, DRAW_BGR_WHITE, 2)
         print("RRR", rect)
     print("^^^^^^^^^")
-
-
-
-
-
 
 
 def CrayolaContours(img, contours, hierarchy, MaxLevel=-1):
@@ -836,14 +1006,83 @@ def ColorMaskWhite(hsvChannels, threshold=50):
     filterMask = cv2.bitwise_and(saturationMask, valueMask)
     return filterMask
 
-def ColorMaskOneHue(hsvImage, hue, huerange=25, saturation=205, saturationrange=50, value=205, valuerange=50):
+class HsvSpec(object):
+    __slots__ = ('hue', 'huerange', 'saturation', 'saturationrange', 'value', 'valuerange')
+
+    def __init__(self, hue, huerange=25, saturation=205, saturationrange=50, value=205, valuerange=50):
+        self.hue = hue
+        self.huerange = huerange
+        self.saturation = saturation
+        self.saturationrange = saturationrange
+        self.value = value
+        self.valuerange = valuerange
+
+    def __repr__(self):
+        return "(H {} {} S {} {} V {} {})".format(self.hue, self.huerange,
+							self.saturation, self.saturationrange,
+							self.value, self.valuerange)
+
+    def copy(self):
+        return HsvSpec(hue=self.hue, huerange=self.huerange,
+                            saturation=self.saturation, saturationrange=self.saturationrange,
+                            value=self.value, valuerange=self.valuerange)
+
+def NextHsvSpec(hsvImage, mask=None, rect=None, minrange=20):
+    # hsvImage is an OpenCvImage. rect is an OpenCvRect.
+    # Creates an HsvSpec based on the upper part of this image.
+    # Optionally considers only image pixels hilighted (>0) by mask.
+    # Looks at either center of image or center of optional rect.
+    # Used by Image.ChaseLine()
+    def CalcRange(hist):
+        # check if rng reasonable, avg close to hist[0], colorwrap
+        avg = int((int(hist[1]) + int(hist[2])) / 2)
+        rng = hist[2] - avg
+        if rng < minrange:
+            rng = minrange
+        return avg, rng
+    print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(mask), rect)
+    value_ct = 0
+    values = []
+    values.append([0, 255, 0])		# sum, min value, max value)
+    values.append([0, 255, 0])		# sum, min value, max value)
+    values.append([0, 255, 0])		# sum, min value, max value)
+    if rect is None:
+        rect = OpenCvRectFromOpenCvImage(hsvImage)
+    x = int(rect.center_x)
+    y = int(rect.center_y)
+    top_y = int(rect.TopY(x))
+    for this_y in range(y, top_y, -1):
+        #print("NextHsvSpec() Loop", this_y, x, hueMask[this_y, x], hsvImage[this_y, x])
+        if (mask is None) or (mask[this_y, x] > 0):
+            value_ct += 1
+            hsv = hsvImage[this_y, x]
+            for ix, this_byte in enumerate(hsv):
+                values[ix][0] += this_byte
+                if this_byte < values[ix][1]:
+                    values[ix][1] = this_byte
+                if this_byte > values[ix][2]:
+                    values[ix][2] = this_byte
+    if value_ct < 3:
+        print("NextHsvSpec()", value_ct, None, values)
+        return None
+    hsv_spec = HsvSpec(0)
+    hsv_spec.hue, hsv_spec.huerange = CalcRange(values[0])
+    hsv_spec.saturation, hsv_spec.saturationrange = CalcRange(values[1])
+    hsv_spec.value, hsv_spec.valuerange = CalcRange(values[2])
+    print("NextHsvSpec()", value_ct, hsv_spec, values)
+    return hsv_spec
+
+def ColorMaskOneHue(hsvImage, hsvspec):
     # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to HSV_MAX_HUE,
     # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
     # Red color, value 0,  is one of the special case where our selection range wraps 0/HSV_MAX_HUE.
-    assert (hue >= 0) and (hue <= HSV_MAX_HUE)
+    assert (hsvspec.hue >= 0) and (hsvspec.hue <= HSV_MAX_HUE)
 
-    hue_min = hue - huerange
-    hue_max = hue + huerange
+    if hsvImage is None:
+        return None
+
+    hue_min = hsvspec.hue - hsvspec.huerange
+    hue_max = hsvspec.hue + hsvspec.huerange
     hue_min_2 = None
     hue_max_s = None
     if hue_min < 0:
@@ -855,24 +1094,28 @@ def ColorMaskOneHue(hsvImage, hue, huerange=25, saturation=205, saturationrange=
         hue_max_2 = hue_max - HSV_MAX_HUE
         hue_max = HSV_MAX_HUE
 
-    saturation_min = saturation - saturationrange
-    saturation_max = saturation + saturationrange
+    saturation_min = hsvspec.saturation - hsvspec.saturationrange
+    saturation_max = hsvspec.saturation + hsvspec.saturationrange
     if saturation_min < 0:
         saturation_min = 0
     if saturation_max > 255:
         saturation_max = 255
 
-    value_min = value - valuerange
-    value_max = value + valuerange
+    value_min = hsvspec.value - hsvspec.valuerange
+    value_max = hsvspec.value + hsvspec.valuerange
     if value_min < 0:
         value_min = 0
     if value_max > 255:
         value_max = 255
 
     print("ColorMaskOneHue()", hue_min, hue_max, saturation_min, saturation_max, value_min, value_max)
-    hueMask = cv2.inRange(hsvImage, np.array([hue_min, saturation_min, value_min], np.uint8), np.array([hue_max, saturation_max, value_max], np.uint8))
+    hueMask = cv2.inRange(hsvImage,
+                    np.array([hue_min, saturation_min, value_min], np.uint8),
+                    np.array([hue_max, saturation_max, value_max], np.uint8))
     if hue_min_2 is not None:
-        hueMask_2 = cv2.inRange(hsvImage, np.array([hue_min_2, saturation_min, value_min], np.uint8), np.array([hue_max_2, saturation_max, value_max], np.uint8))
+        hueMask_2 = cv2.inRange(hsvImage,
+                    np.array([hue_min_2, saturation_min, value_min], np.uint8),
+                    np.array([hue_max_2, saturation_max, value_max], np.uint8))
         hueMask = cv2.bitwise_or(hueMask, hueMask_2)
 
     return hueMask
@@ -887,7 +1130,10 @@ def ColorMask(hsvImage, colors=[0], huerange=25, saturation=205, saturationrange
         if this_hue < 0:
             this_result = ColorMaskWhite(hsvChannels, threshold=wthreshold)
         else:
-            this_result = ColorMaskOneHue(hsvImage, this_hue, huerange, saturation, saturationrange, value, valuerange)
+            hsvspec = HsvSpec(this_hue, huerange=huerange,
+                            saturation=saturation, saturationrange=saturationrange,
+                            value=value, valuerange=valuerange)
+            this_result = ColorMaskOneHue(hsvImage, hsvspec)
         if result is None:
             result = this_result
         else:
@@ -1307,6 +1553,7 @@ def ResolveSymbolicIndex(c, ext, p1=None):
     return res
 
 class Rect(object):
+    # This is a right rectangle. See OpenCvRect for rotated rectangle.
     __slots__ = ('y_min', 'y_max', 'x_min', 'x_max')
     def __init__(self, y_min, y_max, x_min, x_max):
         #assert y_min < y_max		# maybe just reorder instead. If we do that,
@@ -1319,6 +1566,10 @@ class Rect(object):
     def __repr__(self):
         return '[({0}, {1}), ({2}, {3})]'.format(self.x_min, self.y_min, self.x_max, self.y_max)
 
+    def copy(self):
+        res = Rect(self.y_min, self.y_max, self.x_min, self.x_max)
+        return res
+
     @property
     def p1(self):
         return(self.x_min, self.y_min)
@@ -1326,6 +1577,10 @@ class Rect(object):
     @property
     def p2(self):
         return(self.x_max, self.y_max)
+
+def RectFromOpenCvImage(im):
+    shape = im.shape
+    return Rect(0, shape[0], 0, shape[1])
 
 def RectFromSymbolicYX(im, y_range, x_range):
     height, width, channels = im.shape
@@ -1340,6 +1595,8 @@ def RectFromSymbolicYX(im, y_range, x_range):
     return Rect(y_min, y_max, x_min, x_max)
 
 def RectFromSymbolicPP(im, p1, p2):
+    if im is None:
+        return None
     if len(im.shape) > 2:
         height, width, channels = im.shape
     else:

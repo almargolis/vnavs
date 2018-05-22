@@ -14,6 +14,7 @@ mission_end_topic = 'mission/end'
 mission_e_stop_topic = 'mission/estop'
 mission_paused_topic = 'mission/paused'
 mission_resume_topic = 'mission/resume'
+mission_specs_topic = 'mission/specs'
 
 system_abend_topic = 'system/abend'
 system_message_error_topic = 'system/nak'

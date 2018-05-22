@@ -102,8 +102,12 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         mission_image_frame = mission_frame.AddFrame()
         mission_info_frame = mission_frame.AddFrame(row=SAME_ROW, col=NEXT_COL)
-        self.f1_fname = mission_image_frame.AddLabel('fname')
+        #
+        image_info_frame = mission_image_frame.AddFrame()
+        self.f1_fname = image_info_frame.AddLabel('fname')
+        self.f1_fps = image_info_frame.AddLabel('fps', row=SAME_ROW, col=NEXT_COL)
         self.f1_img1 = mission_image_frame.AddLabelImage()
+        #
         self.gps_position = mission_info_frame.AddLabelInfo('GPS Position:')
         self.gps_speed = mission_info_frame.AddLabelInfo('GPS Speed:')
         self.imu_heading = mission_info_frame.AddLabelInfo('IMU Heading:')
@@ -170,8 +174,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             print("ImagePillow() ERROR", path)
             im = None
         return im
-
-
 
     def filter_payload(self, payload):
         new_payload = {}
@@ -244,7 +246,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         payload['speed'] = 0
         self.Publish(vconst.helmsman_orders_topic, payload)
 
-    def ProcessImage(self):
+    def ProcessImage(self, payload):
         if self.pic_fn is None:
             print("NO PIC AVAILABLE")
             return
@@ -254,8 +256,19 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             if not self.file_client.GetFile(self.pic_fn, path=path):
                 print("Unable to fetch PIC", self.pic_fn)
                 return
-        self.f1_img1.UpdateImage(opencv_fn=path)
+        im = OpticChiasm.ReadImage(path)
+        if 'center_line' in payload:
+            line_at = payload['center_line']
+            list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
+            print("ProcessImage() center_line ", list_of_OpenCvRect)
+            im.DrawLinePoints(list_of_OpenCvRect)
+            #parts = line_at.split(',')
+            #line_x = int(parts[0])
+            #line_y = int(parts[1])
+            #cv2.line(im, (line_x, line_y-50), (line_x, line_y+50), OpticChiasm.DRAW_BGR_BLACK, 5)
+        self.f1_img1.UpdateImage(source_im=im.im)
         self.f1_fname.ReplaceValue(self.pic_fn)
+        self.f1_fps.ReplaceValue('{} fps'.format(payload['capture_fps']))
         self.pic_fn = None
 
     def DoLoop(self):
@@ -267,7 +280,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
                 self.pic_fn = payload['annotated']
             else:
                 self.pic_fn = payload['filename']
-            self.ProcessImage()
+            self.ProcessImage(payload)
 
         payload = self.GetLatestPayload(vconst.engineer_1_gps_topic)
         if payload is not None:

@@ -256,7 +256,10 @@ class vehicle(object):
         else:
             direction = self.steering_plan[0].direction
         print("SteeringTick()", self.steering_offset, direction, self.steering_plan)
-        self.steering.write(self.steering_offset + direction)
+        try:
+            self.steering.write(self.steering_offset + direction)
+        except ValueError:
+            pass				# attempt to write invalid value
         self.steering_last = direction
         return
 
@@ -377,7 +380,10 @@ class helmsman(vnavs_mqtt.mqtt_node):
                 heading_scale_max = int(payload[HELMSMAN_HEADING_SCALE_MAX])
                 heading_request = self.ScaleRequest(heading_raw, heading_scale_min, heading_scale_max, -self.v.steering_max, self.v.steering_max, sensitivity=None)
             else:
-                heading_request = int(payload[HELMSMAN_HEADING])	# Note: alphanumeric
+                try:
+                    heading_request = int(payload[HELMSMAN_HEADING])	# Note: alphanumeric
+                except TypeError:
+                    heading_request = 0
             #print ("STEER", heading_request)
             self.v.NewSteeringGoal(heading_request)
             #self.GetGoalSteering(heading_request)

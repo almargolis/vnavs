@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import codecs
 import json
 import math
 import os
@@ -38,10 +39,11 @@ SRC_BOT_CAMERA = 'bot'
 class ProcessStep(object):
     __slots__ = ('cv_filter_name', 'cv_specs',
 			'deposition',
-			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_im', 'exec_lines',
+			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_hsvspec', 'exec_im', 'exec_lines', 'exec_rect',
 			'filter_selection',
 			'image_widget', 'info_data', 'info_widgets', 'input_panel', 'ix', 'output_panel',
-			'parm_widgets', 'parm_values', 'parms_specs', 'point_target', 'source_im',
+			'parm_widgets', 'parm_values', 'parms_specs', 'point_target',
+			'source_im', 'source_path',
 			'tab', 'tab_title', 'thumbnail',
 			'zoom_popup'
 		)
@@ -49,12 +51,19 @@ class ProcessStep(object):
     steps = []
     process_file_extension = 'drk'
     process_file_types = (('Darkroom Process', '*.'+process_file_extension), )
+    imports = []                   # imports for exec or script
+    # imports.append(('__builtins__', __builtins__, None))
+    imports.append(('cv2', cv2, None))
+    imports.append(('np', np, 'numpy'))
+    imports.append(('oc', OpticChiasm, 'OpticChiasm'))
+    imports.append(('cameraman', None, None))
 
     def __init__(self, FilterName=None, Where=None, Parms={}):
         self.ix = len(self.steps)
         self.exec_im = None				# this is an OpticChiasm.Image produced by the filter
         self.steps.append(self)
         self.cv_filter_name = None			# this gets set by NewFilter()
+
         self.parm_values = Parms			# key is FilterParm.name
         self.tab_title = "Step %d" % (self.ix)
         self.tab = self.app.notebook.AddTab(self.tab_title, Where=Where)
@@ -95,6 +104,7 @@ class ProcessStep(object):
         self.thumbnail = self.app.thumbnailFrame.AddLabelImage(thumbnailof=self.image_widget, row=0, col=NEXT_COL)
         self.thumbnail.tkw.bind("<Button-1>", self.SelectTab)
         self.source_im = None			# captured image
+        self.source_path = None
         self.point_target = None
         self.SetFilter()
 
@@ -246,34 +256,128 @@ class ProcessStep(object):
                 this_widget[0].ReplaceValue(parm_value)
                 this_widget[0].parm_id = parm_name
 
+    @classmethod
+    def WriteScript(cls):
+        f = codecs.open('python/darkroom_script.py', 'w', encoding='utf-8')
+        f.write('\n')
+
+
+        f.write('from __future__ import absolute_import, division, print_function\n')
+        f.write('from builtins import (bytes, str, open, super, range,\n')
+        f.write('              zip, round, input, int, pow, object)\n')
+        f.write('\n')
+
+        for this in cls.imports:
+            if this[2] is None:
+                f.write('import {}\n'.format(this[0]))
+            else:
+                f.write('import {} as {}\n'.format(this[2], this[0]))
+
+        f.write('\n')
+        source_path = cls.steps[0].source_path
+        if source_path is None:
+            f.write('cam = cameraman.macbook_camera()\n')
+            f.write('im_in = cam.capture_image()\n')
+        else:
+            f.write('im_in = oc.ReadImage("{}")\n'.format(source_path))
+        f.write('im_base = im_in.copy()\n')
+        f.write('\n')
+
+        for ix, this in enumerate(cls.steps[1:]):
+            f.write('#\n# Step {} - {}\n#\n'.format(this.ix, this.cv_filter_name))
+            code_str = this.GetCodeStr(Script=True)
+            f.write(code_str)
+
+        if cls.steps[-1].cv_specs.annotate_code is None:
+            display_image = 'im_in'
+        else:
+            display_image = 'annotated'
+
+        f.write('\n')
+        f.write('cv2.imshow("im_in", {display}.im)\n'.format(display=display_image))
+        f.write('cv2.waitKey(0)\n')
+        f.write('cv2.destroyAllWindows()\n')
+        f.close()
+
+    def GetCodeStr(self, Script=True):
+        self.SaveParameters()
+        code_substitutions = {}
+        for this_parm in self.parms_specs:
+            raw_value = self.parm_values[self.cv_filter_name + '_' + this_parm.name]
+            code_substitutions[this_parm.name] = this_parm.GetValue(raw_value)
+        if Script:
+            code_substitutions['x_output_annotated'] = 'annotated'
+            code_substitutions['x_output_contours'] = 'contours_in'
+            code_substitutions['x_output_hierarchy'] = 'hierarchy_in'
+            code_substitutions['x_output_hsvspec'] = 'hsvspec_in'
+            code_substitutions['x_output_im'] = 'im_in'
+            code_substitutions['x_output_lines'] = 'lines_in'
+            code_substitutions['x_output_rect'] = 'rect_in'
+        else:
+            code_substitutions['x_output_annotated'] = 'xstep.exec_annotated'
+            code_substitutions['x_output_contours'] = 'xstep.exec_contours'
+            code_substitutions['x_output_hierarchy'] = 'xstep.exec_hierarchy'
+            code_substitutions['x_output_hsvspec'] = 'xstep.exec_hsvspec'
+            code_substitutions['x_output_im'] = 'xstep.exec_im'
+            code_substitutions['x_output_lines'] = 'xstep.exec_lines'
+            code_substitutions['x_output_rect'] = 'xstep.exec_rect'
+        code = self.cv_specs.code
+        if code[-1:] != '\n':
+            code += '\n'
+        if Script and (OpticChiasm.FLAG_ISBASE in self.cv_specs.flags):
+            code += 'im_base = im_in\n'
+        if self.cv_specs.annotate_code is not None:
+            code += '\n' + self.cv_specs.annotate_code
+        if code != '':
+            exec_code_str = code.format(**code_substitutions)
+            return exec_code_str
+        return ''
+
     def ExecuteStep(self):
-        exec_global_vars = {}
-        exec_global_vars['__builtins__'] = __builtins__
-        exec_global_vars['cv2'] = cv2
-        exec_global_vars['np'] = np
-        exec_global_vars['oc'] = OpticChiasm
-        exec_global_vars['xstep'] = self
         execution_start = time.time()
         #
-        base_image = None
+        # Collect output from prior steps
+        #
+        latest_base_image = None
         latest_im = None
         latest_contours = None
         latest_hierarchy = None
+        latest_hsvspec = None
+        latest_lines = None
+        latest_rect = None
         for ix, this in enumerate(self.steps):
             if ix >= self.ix:
                 break
             if this.exec_im is not None:
                 latest_im = this.exec_im
                 if OpticChiasm.FLAG_ISBASE in this.cv_specs.flags:
-                    exec_global_vars['im_base'] = this.exec_im
-                    base_image = this.exec_im
+                    latest_base_image = this.exec_im
             if this.exec_contours is not None:
                 latest_contours = this.exec_contours
             if this.exec_hierarchy is not None:
                 latest_hierarchy = this.exec_hierarchy
+            if this.exec_hsvspec is not None:
+                latest_hsvspec = this.exec_hsvspec
+            if this.exec_lines is not None:
+                latest_lines = this.exec_lines
+            if this.exec_rect is not None:
+                latest_rect = this.exec_rect
+
+        #
+        # Create environment for this step's execution
+        #
+        exec_global_vars = {}
+        for this in self.imports:
+            if this[1] is not None:
+                exec_global_vars[this[0]] = this[1]
+        exec_global_vars['xstep'] = self
+        exec_global_vars['im_base'] = latest_base_image
         exec_global_vars['im_in'] = latest_im
         exec_global_vars['contours_in'] = latest_contours
         exec_global_vars['hierarchy_in'] = latest_hierarchy
+        exec_global_vars['hsvspec_in'] = latest_hsvspec
+        exec_global_vars['lines_in'] = latest_lines
+        exec_global_vars['rect_in'] = latest_rect
 
         for ix, this in enumerate(self.info_widgets):
             if ix < len(self.info_data):
@@ -283,24 +387,18 @@ class ProcessStep(object):
                 this[0].ReplaceValue('')
                 this[1].ReplaceValue('')
 
-        code_substitutions = {}
-        self.SaveParameters()
-        for this_parm in self.parms_specs:
-            raw_value = self.parm_values[self.cv_filter_name + '_' + this_parm.name]
-            code_substitutions[this_parm.name] = this_parm.GetValue(raw_value)
         trace = None
-        self.exec_im = None
+        self.exec_annotated = None
         self.exec_contours = None
         self.exec_hierarchy = None
+        self.exec_hsvspec = None
+        self.exec_im = None
         self.exec_lines = None
-        self.exec_annotated = None
+        self.exec_rect = None
         deposition = ''
         self.deposition.ReplaceValue(deposition)
-        code = self.cv_specs.code
-        if self.cv_specs.annotate_code is not None:
-            code += '\n' + self.cv_specs.annotate_code
-        if code != '':
-            exec_code_str = code.format(**code_substitutions)
+        exec_code_str = self.GetCodeStr(Script=False)
+        if exec_code_str != '':
             print("EXEC", exec_code_str)
             if 'im_in' in exec_global_vars:
                 print("XXXX-vv", exec_global_vars['im_in'].__class__.__name__)
@@ -327,7 +425,7 @@ class ProcessStep(object):
             # maybe assert an error if there was annotation code which
             # didn't create an image
             if self.exec_im is None:
-                step_display_image = base_image
+                step_display_image = latest_base_image
             else:
                 step_display_image = self.exec_im
         if step_display_image is not None:
@@ -400,6 +498,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.statusFrame.AddButton('Open File', command=self.OnOpenImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open Process', command=self.OpenProcessFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Save Process', command=self.SaveProcessFile, row=SAME_ROW, col=NEXT_COL)
+        self.statusFrame.AddButton('Script', command=ProcessStep.WriteScript, row=SAME_ROW, col=NEXT_COL)
 
         ProcessStep.app = self
         self.new_step = None
@@ -424,8 +523,10 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             colorcode = OpticChiasm.IM_BGR
         if isinstance(new_image, OpticChiasm.Image):
             ProcessStep.steps[0].source_im = new_image
+            ProcessStep.steps[0].source_path = path
         else:
             ProcessStep.steps[0].source_im = OpticChiasm.Image(im=new_image, colorcode=colorcode)
+            ProcessStep.steps[0].source_path = path
         ProcessStep.steps[0].ClearInfo()
         if path is not None:
             ProcessStep.steps[0].AddInfo('Path', path)
