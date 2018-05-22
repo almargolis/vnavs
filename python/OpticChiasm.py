@@ -196,6 +196,7 @@ class Image(object):
         return RectFromSymbolicPP(self._im, p1, p2)
 
     def ChaseLine(self, hsvspec, rect,
+			end_y=0,
                             sliceheight=20,
                             kernel_dim=3, iterations=1):
         # don't modify source specs, make a working copy to step through
@@ -221,7 +222,7 @@ class Image(object):
             # adjust hsvspec and rect for next slice
             # +/- x, match color and intensity
             line_rect.y_min, line_rect.y_max = line_rect.y_min - sliceheight, line_rect.y_min
-            if line_rect.y_min < 0:
+            if line_rect.y_min < end_y:
                 return False                    # past top of image
             if prev_segment is not None:
                 # else, leave x alone. maybe should advance like prev good segment
@@ -264,7 +265,7 @@ class Image(object):
         next_hsv_spec = None
         if rect_list is not None:
             # used im_masked because im_dilated includes out of range hsv values
-            next_hsv_spec = NextHsvSpec(im_hsv, im_masked, rect_list[0])
+            next_hsv_spec = NextHsvSpec(im_hsv, mask=im_masked, rect=rect_list[0])
             if rect is not None:
                 for this in rect_list:              # adjust to original image coordinates
                     this.center_x += rect.x_min
@@ -756,6 +757,14 @@ class OpenCvRect(object):
     def AsOpenCvRect(self):
         return [[self.center_x, self.center_y], [self.width, self.height], angle]
 
+    def TopY(self, x):
+        # This is incomplete. Need to consider angle.
+        # Return y coordinate of top line at position x.
+        top = self.center_y - (self.height / 2.0)
+        if top < 0.0:
+            top = 0.0
+        return top
+
     @property
     def p1(self):
         # return upper/right corner point of right rectangle
@@ -769,6 +778,14 @@ class OpenCvRect(object):
         half_width = self.width / 2
         half_height = self.height / 2
         return (int(self.center_x + half_width), int(self.center_y + half_width))
+
+def OpenCvRectFromOpenCvImage(im):
+    shape = im.shape
+    height = shape[0]
+    width = shape[1]
+    center = (float(width / 2.0), float(height / 2.0))
+    dims = (width, height)
+    return OpenCvRect((center, dims, 0.0))
 
 def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumLines=3):
     # returns a list of the largest contours as minimum sized rectangles
@@ -1008,8 +1025,11 @@ class HsvSpec(object):
                             saturation=self.saturation, saturationrange=self.saturationrange,
                             value=self.value, valuerange=self.valuerange)
 
-def NextHsvSpec(hsvImage, hueMask, rect, minrange=20):
+def NextHsvSpec(hsvImage, mask=None, rect=None, minrange=20):
+    # hsvImage is an OpenCvImage. rect is an OpenCvRect.
     # Creates an HsvSpec based on the upper part of this image.
+    # Optionally considers only image pixels hilighted (>0) by mask.
+    # Looks at either center of image or center of optional rect.
     # Used by Image.ChaseLine()
     def CalcRange(hist):
         # check if rng reasonable, avg close to hist[0], colorwrap
@@ -1018,18 +1038,20 @@ def NextHsvSpec(hsvImage, hueMask, rect, minrange=20):
         if rng < minrange:
             rng = minrange
         return avg, rng
-    print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(hueMask), rect)
+    print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(mask), rect)
     value_ct = 0
     values = []
     values.append([0, 255, 0])		# sum, min value, max value)
     values.append([0, 255, 0])		# sum, min value, max value)
     values.append([0, 255, 0])		# sum, min value, max value)
+    if rect is None:
+        rect = OpenCvRectFromOpenCvImage(hsvImage)
     x = int(rect.center_x)
     y = int(rect.center_y)
-    for this_y in range(y, 0, -1):
-        print("NextHsvSpec() Loop", this_y, x)
-        print("NextHsvSpec() Loop", this_y, x, hueMask[this_y, x], hsvImage[this_y, x])
-        if hueMask[this_y, x] > 0:
+    top_y = int(rect.TopY(x))
+    for this_y in range(y, top_y, -1):
+        #print("NextHsvSpec() Loop", this_y, x, hueMask[this_y, x], hsvImage[this_y, x])
+        if (mask is None) or (mask[this_y, x] > 0):
             value_ct += 1
             hsv = hsvImage[this_y, x]
             for ix, this_byte in enumerate(hsv):
@@ -1529,6 +1551,7 @@ def ResolveSymbolicIndex(c, ext, p1=None):
     return res
 
 class Rect(object):
+    # This is a right rectangle. See OpenCvRect for rotated rectangle.
     __slots__ = ('y_min', 'y_max', 'x_min', 'x_max')
     def __init__(self, y_min, y_max, x_min, x_max):
         #assert y_min < y_max		# maybe just reorder instead. If we do that,
@@ -1552,6 +1575,10 @@ class Rect(object):
     @property
     def p2(self):
         return(self.x_max, self.y_max)
+
+def RectFromOpenCvImage(im):
+    shape = im.shape
+    return Rect(0, shape[0], 0, shape[1])
 
 def RectFromSymbolicYX(im, y_range, x_range):
     height, width, channels = im.shape

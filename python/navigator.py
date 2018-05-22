@@ -73,6 +73,8 @@ class PID(object):
         self.i_time_last = time.time()				# time in seconds
 
     def GetOutput(self, current_state):
+        if current_state is None:
+            return None
         time_now = time.time()
         dt = time_now - self.i_time_last
         self.error = current_state - self.target_value
@@ -88,9 +90,13 @@ class PID(object):
         self.i_time_last = time_now
         self.prev_error = self.error
         self.pid_out = self.p_out + self.i_out + self.d_out
-        return self.pid_out * self.output_scale
+        scaled_output = self.pid_out * self.output_scale
+        print("PID.GetOutput()", self.target_value, current_state, scaled_output)
+        return scaled_output
 
     def GetOutputInt(self, current_state):
+        if current_state is None:
+            return None
         return int(self.GetOutput(current_state))
 
 def CheckYawForCompletedManuever(current_yaw, nav):
@@ -251,21 +257,30 @@ class MissionStep(object):
         #print("PublishNavigation", payload)
 
 class StepLine(MissionStep):
-    __slots__ = ('next_time', 'speed', 'waypoint')
+    __slots__ = ('next_time', 'speed', 'pid')
     def __init__(self, mission, section):
         super().__init__(mission, section)
         self.next_time = None
         self.pid = PID(SetPoint=285, OutputScale=0.5, KI=0, KD=0)
 
-    def Load(self, parts):
-        # key = parts[0]
-        # self.navigator.LoadPersistentData()
-        # value = self.navigator.persistent_data[key]
-        # self.waypoint = engineer_1.PositionStringToPosition(value)
-        self.speed = int(parts[1])
+    def Load(self, parm_pos, parm_kword):
+        self.speed = int(parm_pos[2])
         self.next_time = 0
 
     def DoMissionStep(self, loop_ct):
+        if 'Kp' in self.mission.mission_specs:
+            self.pid.p_gain = self.mission.mission_specs['Kp']
+        if 'Ki' in self.mission.mission_specs:
+            self.pid.p_gain = self.mission.mission_specs['Ki']
+        if 'Kd' in self.mission.mission_specs:
+            self.pid.p_gain = self.mission.mission_specs['Kd']
+        try:
+            crop1_start_x = int(self.mission.mission_specs['l1x'])
+            crop1_width = int(self.mission.mission_specs['l1w'])
+            self.pid.target_value = crop1_start_x + int(crop1_width / 2)
+            print("StepLine()", self.pid.target_value, crop1_start_x, crop1_width)
+        except:
+            pass
         self.pid.Reset()
         if time.time() > self.next_time:
             self.nav.steering = self.pid.GetOutputInt(self.navigator.line_x)
@@ -284,12 +299,12 @@ class StepGpsWaypoint(MissionStep):
         self.waypoint = None
         self.next_time = None
 
-    def Load(self, parts):
-        key = parts[0]
+    def Load(self, parm_pos, parm_kword):
+        key = parm_pos[1]
         self.navigator.LoadPersistentData()
         value = self.navigator.persistent_data[key]
         self.waypoint = engineer_1.PositionStringToPosition(value)
-        self.speed = int(parts[1])
+        self.speed = int(parm_pos[2])
         self.next_time = time.time()
 
     def DoMissionStep(self, loop_ct):
@@ -348,9 +363,9 @@ class StepMove(MissionStep):
         self.timer = 1
         self.end_time = None
 
-    def Load(self, parts):
-        self.speed = int(parts[0])
-        self.timer = float(parts[1])
+    def Load(self, parm_pos, parm_kword):
+        self.speed = int(parm_pos[1])
+        self.timer = float(parm_pos[2])
 
     def DoMissionStep(self, loop_ct):
         print("StepMove.DoMissionStep()", loop_ct, self.end_time, time.time())
@@ -370,7 +385,7 @@ class StepMagic(MissionStep):
         self.last_imageFn = None
         self.movement_started = False
 
-    def Load(self, parts):
+    def Load(self, parm_pos, parm_kword):
         pass
 
     def DoMissionStep(self, loop_ct):
@@ -422,9 +437,9 @@ class StepAccMotion(MissionStep):
     def __init__(self, mission):
         super().__init__(mission)
 
-    def Load(self, parts):
-        self.direction = parts[1]
-        self.distance = float(parts[2])
+    def Load(self, parm_pos, parm_kword):
+        self.direction = parm_pos[1]
+        self.distance = float(parm_pos[2])
 
     def DoMissionStep(self, loop_ct):
     #def DoMissionStep(self, nav):
@@ -439,15 +454,23 @@ class StepAccMotion(MissionStep):
         nav.nav = step
         nav.PublishNavigation()
         return True
-
+#
+# Message Step
+#
 class StepMessage(MissionStep):
-    def __init__(self, mission, section, topic):
+    __slots__ = ('topic', 'payload')
+    def __init__(self, mission, section):
         super().__init__(mission, section)
-        self.topic = topic
+
+    def Load(self, parm_pos, parm_kword):
+        self.topic = parm_pos[1]
+        self.payload = parm_kword
 
     def DoMissionStep(self, loop_ct):
         print("StepMessage", self.topic, self.parms)
-        self.mission.navigator.Publish(self.topic, self.parms)
+        self.mission.navigator.Publish(self.topic, self.payload)
+        if self.topic == vconst.mission_specs_topic:
+            self.mission.mission_specs = self.payload
         return True
 
 class StepSleep(MissionStep):
@@ -469,6 +492,7 @@ class Mission(object):
         self.missionDir = self.navigator.missionDir
         self.mission_name = payload[MISSION_NAME]
         self.mission_script = payload[MISSION_SCRIPT].split('\n')
+        self.mission_specs = {}
         self.mission_steps = []
         self.mission_step_ix = 0
         self.mission_step_loop_ct = 0
@@ -489,7 +513,21 @@ class Mission(object):
                 step = None
                 # This is a new mission command
                 parts = line[1:].split(':')
-                step_type = parts[0].strip()
+                parm_kword = {}
+                parm_pos = []
+                for this in parts:
+                    eq = this.find('=')
+                    if eq > 0:
+                        key = this[:eq].strip()
+                        value = this[eq+1:].strip()
+                    else:
+                        key = ''
+                        value = this.strip()
+                    if key == '':
+                        parm_pos.append(this.strip())
+                    else:
+                        parm_kword[key] = value
+                step_type = parm_pos[0]
                 if step_type == 'begin':
                     section = 'begin'
                 elif step_type == 'run':
@@ -505,15 +543,11 @@ class Mission(object):
                 elif step_type == 'move':
                     step = StepMove(self, section)
                 elif step_type == 'msg':
-                    step = StepMessage(self, section, parts[1].strip())
+                    step = StepMessage(self, section)
                 elif step_type == 'sleep':
                     step = StepSleep(self, section, parts[1].strip())
                 if step is not None:
-                    if len(parts) > 1:
-                        posparms = parts[1:]
-                    else:
-                        posparms = []
-                    step.Load(posparms)
+                    step.Load(parm_pos, parm_kword)
                     self.mission_steps.append(step)
             else:
                 # This is a parameter of the step being loaded
