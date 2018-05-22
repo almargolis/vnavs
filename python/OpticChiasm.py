@@ -1548,6 +1548,10 @@ class Rect(object):
         return res
 
     @property
+    def center(self):
+        return (int((self.x_min + self.x_max) / 2), int((self.y_min + self.y_max) / 2))
+
+    @property
     def p1(self):
         return(self.x_min, self.y_min)
 

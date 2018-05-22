@@ -53,6 +53,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						vconst.engineer_1_gps_topic,
 						vconst.engineer_1_imu_topic,
 						vconst.helmsman_orders_topic,
+						'mission/specs',
 						vconst.navigator_service_ack_topic,
 						vconst.navigator_plot_topic
 						],
@@ -127,6 +128,8 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
 
         self.f1_helmsman_entry.Focus()
+
+        self.line_rect = None
 
     def OpenScriptFile(self):
         fn = self.message_tab.DoFileNameDialog(Dir=self.scriptsDir)
@@ -265,15 +268,36 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             #parts = line_at.split(',')
             #line_x = int(parts[0])
             #line_y = int(parts[1])
-            #cv2.line(im, (line_x, line_y-50), (line_x, line_y+50), OpticChiasm.DRAW_BGR_BLACK, 5)
+        if self.line_rect is not None:
+            cv2.line(im._im, self.line_rect.p1, self.line_rect.p2, OpticChiasm.DRAW_BGR_BLACK, 5)
+            ctr = self.line_rect.center
+            fwd = (ctr[0], ctr[1]-10)
+            cv2.line(im._im, ctr, fwd, OpticChiasm.DRAW_BGR_WHITE, 5)
         self.f1_img1.UpdateImage(source_im=im.im)
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.f1_fps.ReplaceValue('{} fps'.format(payload['capture_fps']))
         self.pic_fn = None
 
+
+
+    def MarkLine(self, spec):
+        print("MakerFaire", spec)
+        try:
+            crop1_start_x = int(spec['l1x'])
+            crop1_start_y = int(spec['l1y'])
+            crop1_height = int(spec['l1h'])
+            crop1_width = int(spec['l1w'])
+        except:
+            print("MAKER", spec)
+            return []
+        self.line_rect = OpticChiasm.Rect(crop1_start_y-crop1_height, crop1_start_y, crop1_start_x, crop1_start_x+crop1_width)
+       
     def DoLoop(self):
         #speed = int(self.f1_speed_control.get())
         #self.f1_speed_display.configure(text=str(speed))
+        payload = self.GetLatestPayload('mission/specs')
+        if payload is not None:
+            self.MarkLine(payload)
         payload = self.GetLatestPayload(vconst.cameraman_pic_ready_topic)
         if payload is not None:
             if 'annotated' in payload:
