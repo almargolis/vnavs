@@ -1415,7 +1415,7 @@ if __name__ == "__main__":
         n.Connect()
     elif sys.argv[1] == 'f':
         #s = FileServer(Verbose=verbose)
-        s = FileServer(Verbose=True)
+        s = FileServer(Verbose=False)
         s.Serve()
     elif sys.argv[1] == 'm':
         s = FastMqttServer(Verbose=verbose)
