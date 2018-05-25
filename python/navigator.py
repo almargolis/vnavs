@@ -269,11 +269,11 @@ class StepLine(MissionStep):
 
     def DoMissionStep(self, loop_ct):
         if 'Kp' in self.mission.mission_specs:
-            self.pid.p_gain = self.mission.mission_specs['Kp']
+            self.pid.p_gain = float(self.mission.mission_specs['Kp'])
         if 'Ki' in self.mission.mission_specs:
-            self.pid.p_gain = self.mission.mission_specs['Ki']
+            self.pid.p_gain = float(self.mission.mission_specs['Ki'])
         if 'Kd' in self.mission.mission_specs:
-            self.pid.p_gain = self.mission.mission_specs['Kd']
+            self.pid.p_gain = float(self.mission.mission_specs['Kd'])
         try:
             crop1_start_x = int(self.mission.mission_specs['l1x'])
             crop1_width = int(self.mission.mission_specs['l1w'])
@@ -467,7 +467,7 @@ class StepMessage(MissionStep):
         self.payload = parm_kword
 
     def DoMissionStep(self, loop_ct):
-        print("StepMessage", self.topic, self.parms)
+        print("StepMessage", self.topic, self.payload)
         self.mission.navigator.Publish(self.topic, self.payload)
         if self.topic == vconst.mission_specs_topic:
             self.mission.mission_specs = self.payload

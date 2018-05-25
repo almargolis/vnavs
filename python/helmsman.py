@@ -50,6 +50,7 @@ class vehicle(object):
     def __init__(self):
         self.board = Arduino('/dev/ttyUSB0')
         self.motor = self.board.get_pin('d:9:s')
+        self.governor = 0
         self.tickBits = 2
         self.tickMax = (1 << self.tickBits)
         self.tickMask = (1 << self.tickBits) - 1
@@ -61,7 +62,7 @@ class vehicle(object):
         # mot_jump_f and mot_jump_r are SPEEDS, they are an increment above the pulse dead zone
         self.mot_jump_f = 3			# This is the minimum speed to start moving from stop
         self.mot_jump_r = -1			# This is the minimum speed to start moving from stop
-        self.mot_ramp_increment = 0			# Current ramping increment
+        self.mot_ramp_increment = 0		# Current ramping increment
         self.mot_this_pulse = 0
         self.mot_this_tick = 0
         self.mot_last_pulse = 0
@@ -109,6 +110,11 @@ class vehicle(object):
 
     def NewSpeedGoal(self, speed_goal):
         new_speed_goal = int(speed_goal)
+        if self.governor > 0:
+            if  (new_speed_goal > 0) and (new_speed_goal > self.governor):
+                new_speed_goal = self.governor
+            elif  (new_speed_goal < 0) and (new_speed_goal < (-self.governor)):
+                new_speed_goal = -self.governor
         if new_speed_goal == self.mot_speed_goal:
             return
         # the goal has changed, need to reset ramping variables
@@ -314,6 +320,8 @@ SPEED_STOP = 0
 
 STEER_STRAIGHT = 0
 
+HELMSMAN_GOVERNOR = 'governor'
+
 HELMSMAN_STATE = 'state'
 HELMSMAN_SPEED = 'speed'
 HELMSMAN_SPEED_SCALE_MIN = 'speed_scale_min'
@@ -326,7 +334,10 @@ HELMSMAN_TIMER = 'timer'
 class helmsman(vnavs_mqtt.mqtt_node):
     def __init__(self):
         self.orders_q = queue.Queue(10)
-        super().__init__(Subscriptions=[vconst.helmsman_orders_topic], SingleThreaded=False, BrokerType='F', Verbose=False)
+        super().__init__(Subscriptions=[
+						vconst.helmsman_orders_topic,
+						vconst.helmsman_controls_topic
+				], SingleThreaded=False, BrokerType='F', Verbose=False)
         self.v = vehicle()
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
         self.deadman_time = 0		# E-Stop if time.time() exceeds this
@@ -340,6 +351,10 @@ class helmsman(vnavs_mqtt.mqtt_node):
                 self.orders_q.get_nowait()
             except queue.Empty:
                 return
+
+    def rmsg_helmsman_controls(self, payload):
+        if HELMSMAN_GOVERNOR in payload:
+            self.v.governor = int(payload[HELMSMAN_GOVERNOR])
 
     def rmsg_helmsman_orders(self, payload):
         #print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
@@ -423,7 +438,7 @@ class helmsman(vnavs_mqtt.mqtt_node):
         return int(request_value)
 
     def DoLoop(self):
-        print("STATE", self.state)
+        print("STATE", self.state, "Governor", self.v.governor)
         if not self.mqttc.connected:
             self.v.Estop()
             return
