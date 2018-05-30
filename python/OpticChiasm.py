@@ -1570,6 +1570,12 @@ class Rect(object):
         res = Rect(self.y_min, self.y_max, self.x_min, self.x_max)
         return res
 
+    def AsPayload(self):
+        p = {}
+        for this in self.__slots__:
+            p[this] = getattr(self, this)
+        return p
+
     @property
     def center(self):
         return (int((self.x_min + self.x_max) / 2), int((self.y_min + self.y_max) / 2))
@@ -1585,6 +1591,13 @@ class Rect(object):
 def RectFromOpenCvImage(im):
     shape = im.shape
     return Rect(0, shape[0], 0, shape[1])
+
+def RectFromPayload(payload):
+    y_min = int(payload['y_min'])
+    y_max = int(payload['y_max'])
+    x_min = int(payload['x_min'])
+    x_max = int(payload['x_max'])
+    return Rect(y_min, y_max, x_min, x_max)
 
 def RectFromSymbolicYX(im, y_range, x_range):
     height, width, channels = im.shape

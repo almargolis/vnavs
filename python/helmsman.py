@@ -330,6 +330,7 @@ HELMSMAN_HEADING = 'heading'
 HELMSMAN_HEADING_SCALE_MIN = 'heading_scale_min'
 HELMSMAN_HEADING_SCALE_MAX = 'heading_scale_max'
 HELMSMAN_TIMER = 'timer'
+HELMSMAN_P_ERROR = 'p_error'
 HELMSMAN_I_ACCUMULATOR = 'i_accumulator'
 HELMSMAN_DERIVATIVE = 'derivative'
 
