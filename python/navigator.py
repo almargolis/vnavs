@@ -243,6 +243,8 @@ class MissionStep(object):
         payload = {}
         payload[helmsman.HELMSMAN_HEADING] = self.nav.steering
         payload[helmsman.HELMSMAN_SPEED] = self.nav.speed
+        payload[helmsman.HELMSMAN_I_ACCUMULATOR] = self.nav.i_accumulator
+        payload[helmsman.HELMSMAN_DERIVATIVE] = self.nav.derivative
         payload[helmsman.HELMSMAN_TIMER] = timer
         self.navigator.Publish(vconst.helmsman_orders_topic, payload)
         if self.nav.untrustedGpsUpdates < 0:
@@ -285,6 +287,8 @@ class StepLine(MissionStep):
         if time.time() > self.next_time:
             self.nav.steering = self.pid.GetOutputInt(self.navigator.line_x)
             self.nav.speed = self.speed
+            self.nav.i_accumulator = self.pid.i_accumulator
+            self.nav.derivative = self.pid.derivative
             print("StepLine.DoMissionStep() LINE", self.navigator.line_x, self.nav.speed, self.nav.steering)
             self.PublishNavigation()
             self.next_time = time.time() + 1.0
@@ -355,22 +359,25 @@ class StepGpsWaypoint(MissionStep):
             self.PublishNavigation()
 
 class StepMove(MissionStep):
-    __slots__ = ('speed', 'timer', 'end_time')
+    __slots__ = ('speed', 'steering', 'timer', 'end_time')
 
     def __init__(self, mission, section):
         super().__init__(mission, section)
         self.speed = 0
+        self.steering = 0
         self.timer = 1
         self.end_time = None
 
     def Load(self, parm_pos, parm_kword):
-        self.speed = int(parm_pos[1])
-        self.timer = float(parm_pos[2])
+        self.speed = int(parm_kword['speed'])
+        self.steering = int(parm_kword['steering'])
+        self.timer = float(parm_kword['timer'])
 
     def DoMissionStep(self, loop_ct):
         print("StepMove.DoMissionStep()", loop_ct, self.end_time, time.time())
         if loop_ct == 1:
             self.nav.speed = self.speed
+            self.nav.steering = self.steering
             self.PublishNavigation(timer=self.timer)
             self.end_time = time.time() + self.timer
             return False
@@ -646,6 +653,8 @@ class NavStep(object):
         self.softKeepSeconds = 0
         self.hardTimeLimit = 0
         self.softTimeLimit = 0
+        self.i_accumulator = 0
+        self.derivative = 0
 
 class navigator(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
