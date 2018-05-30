@@ -117,6 +117,9 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.waypoint_distance = mission_info_frame.AddLabelInfo('Waypoint Distance:')
         self.helmsman_speed = mission_info_frame.AddLabelInfo('Helmsman Speed:')
         self.helmsman_steer = mission_info_frame.AddLabelInfo('Helmsman Steering:')
+        self.helmsman_p_error = mission_info_frame.AddLabelInfo('Helmsman P_Error:')
+        self.helmsman_i_accumulator = mission_info_frame.AddLabelInfo('Helmsman I_Accumulator:')
+        self.helmsman_derivative = mission_info_frame.AddLabelInfo('Helmsman Derivative:')
 
         self.message_tab = self.notebook.AddTab('Message')
         self.mt_file_name = self.message_tab.AddEntryField('Script File', width=25)
@@ -339,14 +342,21 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
         payload = self.GetLatestPayload(vconst.helmsman_orders_topic)
         if payload is not None:
-            speed = "?"
-            steer = "?"
             if helmsman.HELMSMAN_SPEED in payload:
                 speed = payload[helmsman.HELMSMAN_SPEED]
-            self.helmsman_speed.ReplaceValue(speed)
+                self.helmsman_speed.ReplaceValue(speed)
             if helmsman.HELMSMAN_HEADING in payload:
                 steer = payload[helmsman.HELMSMAN_HEADING]
-            self.helmsman_steer.ReplaceValue(steer)
+                self.helmsman_steer.ReplaceValue(steer)
+            if helmsman.HELMSMAN_P_ERROR in payload:
+                p_error = payload[helmsman.HELMSMAN_P_ERROR]
+                self.helmsman_p_error.ReplaceValue(p_error)
+            if helmsman.HELMSMAN_I_ACCUMULATOR in payload:
+                i_accumulator = payload[helmsman.HELMSMAN_I_ACCUMULATOR]
+                self.helmsman_i_accumulator.ReplaceValue(i_accumulator)
+            if helmsman.HELMSMAN_DERIVATIVE in payload:
+                derivative = payload[helmsman.HELMSMAN_DERIVATIVE]
+                self.helmsman_derivative.ReplaceValue(derivative)
 
         # if topic[-5:] == 'abend':
         #    t = payload['traceback']
