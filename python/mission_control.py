@@ -53,7 +53,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 						vconst.engineer_1_gps_topic,
 						vconst.engineer_1_imu_topic,
 						vconst.helmsman_orders_topic,
-						'mission/specs',
+						vconst.mission_mark_topic,
 						vconst.navigator_service_ack_topic,
 						vconst.navigator_plot_topic
 						],
@@ -281,26 +281,13 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.f1_fps.ReplaceValue('{} fps'.format(payload['capture_fps']))
         self.pic_fn = None
 
-
-
-    def MarkLine(self, spec):
-        print("MakerFaire", spec)
-        try:
-            crop1_start_x = int(spec['l1x'])
-            crop1_start_y = int(spec['l1y'])
-            crop1_height = int(spec['l1h'])
-            crop1_width = int(spec['l1w'])
-        except:
-            print("MAKER", spec)
-            return []
-        self.line_rect = OpticChiasm.Rect(crop1_start_y-crop1_height, crop1_start_y, crop1_start_x, crop1_start_x+crop1_width)
-       
     def DoLoop(self):
         #speed = int(self.f1_speed_control.get())
         #self.f1_speed_display.configure(text=str(speed))
-        payload = self.GetLatestPayload('mission/specs')
+        payload = self.GetLatestPayload(vconst.mission_mark_topic)
         if payload is not None:
-            self.MarkLine(payload)
+            print("mission/mark", payload)
+            self.line_rect = OpticChiasm.RectFromPayload(payload)
         payload = self.GetLatestPayload(vconst.cameraman_pic_ready_topic)
         if payload is not None:
             if 'annotated' in payload:
