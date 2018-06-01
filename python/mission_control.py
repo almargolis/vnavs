@@ -89,11 +89,14 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
 
         mission_tab = self.notebook.AddTab('Mission')
-        self.f1_helmsman_entry = mission_tab.AddEntryField('Helmsman', width=75)
-        self.f1_engineer_1_entry = mission_tab.AddEntryField('Engineer_1', width=75)
-        self.mission_name_entry = mission_tab.AddEntryField('Mission', width=15, value='table')
+
+        mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
+        self.mission_name_entry = mission_frame.AddEntryField('Mission', width=15, value='table')
+        mission_frame.AddButton('Load/Init', command=self.OnMissionLoad, row=SAME_ROW, col=NEXT_COL)
+        self.mission_stage_entry = mission_frame.AddDropdown(caption='Stage', row=SAME_ROW, col=NEXT_COL)
+        mission_frame.AddButton('Execute', command=self.OnStageExecute, row=SAME_ROW, col=NEXT_COL)
+
         buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        buttonframe.AddButton('Start', command=self.StartMission, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Cancel', command=self.CancelMission, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Snap', command=self.SnapPic, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
@@ -129,8 +132,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
 
         self.alert_tab = self.notebook.AddTab('Alerts')
         self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
-
-        self.f1_helmsman_entry.Focus()
 
         self.line_rect = None
 
@@ -189,9 +190,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             new_payload[k] = v
         return new_payload
 
-    def rmsg_helmsman_orders(self, payload):
-        self.f1_helmsman_entry.ReplaceValue(self.filter_payload(payload))
-
     def rmsg_navigator_status(self, payload):
         #print("NAV STAT", payload)
         self.f1_helmsman_status.set(payload)
@@ -231,17 +229,28 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         payload['capture_publish'] = 'file'
         self.Publish(vconst.cameraman_orders_topic, payload)
 
-    def StartMission(self):
+    def OnMissionLoad(self):
         mission_name = self.mission_name_entry.Value()
         fp = mission_name + '.mis'
         f = open(fp, 'r')
         mission_script = f.read()
         f.close()
+        m = navigator.Mission(name=mission_name, script=mission_script.split('\n'))
+        stages = list(m.stages_list)
+        if 'init' in stages:
+            stages.remove('init')
+        if len(stages) > 0:
+            self.mission_stage_entry.ReplaceChoices(stages)
+        else:
+            self.mission_stage_entry.ReplaceChoices(['None'])
         payload = {}
         payload['mission_name'] = mission_name
         payload['mission_script'] = mission_script
         self.Publish(vconst.mission_begin_topic, payload)
         print("STARTNAV", payload)
+
+    def OnStageExecute(self):
+        pass
 
     def CancelMission(self):
         payload = {}

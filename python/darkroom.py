@@ -492,7 +492,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
         self.pic_fn = None
         self.pic_source = None
 
-        self.source_widget = self.statusFrame.AddDropDown(s_items=[SRC_LOCAL_CAMERA, SRC_BOT_CAMERA], command=self.OnSelectSource, row=SAME_ROW, col=NEXT_COL)
+        self.source_widget = self.statusFrame.AddDropdown(s_items=[SRC_LOCAL_CAMERA, SRC_BOT_CAMERA], command=self.OnSelectSource, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Capture', command=self.OnCaptureImage, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Continuous', command=self.OnContinuousImage, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open File', command=self.OnOpenImageFile, row=SAME_ROW, col=NEXT_COL)

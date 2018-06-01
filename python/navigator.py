@@ -541,30 +541,66 @@ class MissionStage(object):
         self.name = name
         self.steps = []
 
-class Mission(object):
-    __slots__ = ('active_stage', 'mission_active', 'mission_data', 'missionDir', 'mission_name', 'mission_script', 'navigator', 'stage_step_ix', 'stage_step_loop_ct', 'stages')
+class MissionStepDef(object):
+    def __init__(self, kword, sclass=None, func=None, defs=None):
+        self.name = kword
+        self.sclass = sclass
+        self.func = func
+        if defs is not None:
+            defs[self.name] = self
 
-    def __init__(self, navigator, payload):
+
+class Mission(object):
+    __slots__ = ('active_stage', 'mission_active', 'mission_data', 'mission_name', 'mission_script', 'navigator', 'stage_step_ix', 'stage_step_loop_ct', 'stages_dict', 'stages_list')
+
+    def __init__(self, navigator=None, name='', script=None):
         self.active_stage = None
         self.navigator = navigator
         self.mission_data = {}
-        self.missionDir = self.navigator.missionDir
-        self.mission_name = payload[MISSION_NAME]
-        self.mission_script = payload[MISSION_SCRIPT].split('\n')
+        self.mission_name = name
+        self.mission_script = script
         self.mission_specs = {}
-        self.stages = {}
+        self.stages_dict = {}
+        self.stages_list = []
         self.stage_step_ix = 0
         self.stage_step_loop_ct = 0
         self.mission_active = True
-        self.LoadMission()
-        if 'init' in self.stages:
-            self.active_stage = self.stages['init']
-        print("Mission Loaded", self.stages)
+        if self.mission_script is not None:
+            self.LoadMission(self.mission_script)
+        if 'init' in self.stages_list:
+            self.active_stage = self.stages_dict['init']
 
-    def LoadMission(self):
+    def LoadMission(self, script):
+        def StartLog(stage, parm_pos):
+            while len(parm_pos) < 2:
+                parm_pos.append('')
+            parm_pos[1] = vconst.mission_log_start_topic
+            return StepMessage(stage)
+        def StopLog(stage, parm_pos):
+            while len(parm_pos) < 2:
+                parm_pos.append('')
+            parm_pos[1] = vconst.mission_log_stop_topic
+            return StepMessage(stage)
+
+        step_defs = {}
+        MissionStepDef('data',		sclass=StepData, defs=step_defs)
+        MissionStepDef('gps',		sclass=StepGpsWaypoint, defs=step_defs)
+        MissionStepDef('follow_line',	sclass=StepFollowLine, defs=step_defs)
+        MissionStepDef('log_start',	func=StartLog, defs=step_defs)
+        MissionStepDef('log_stop',	func=StopLog, defs=step_defs)
+        MissionStepDef('magic',		sclass=StepMagic, defs=step_defs)
+        MissionStepDef('move',		sclass=StepMove, defs=step_defs)
+        MissionStepDef('message',	sclass=StepMessage, defs=step_defs)
+        MissionStepDef('sleep',		sclass=StepSleep, defs=step_defs)
+
+
+        self.mission_script = script
         print("LOAD", self.mission_name)
         this_stage = None
+        line_no = 0
+        err_ct = 0
         for this in self.mission_script:
+            line_no += 1
             line = this.strip()
             if line == '':
                 continue
@@ -596,43 +632,29 @@ class Mission(object):
                     else:
                         parm_kword[key] = value
                 step_type = parm_pos[0]
-                if step_type == 'data':
-                    step = StepData(this_stage)
-                elif step_type == 'end':
-                    step = StepEnd(this_stage)
-                elif step_type == 'gps':
-                    step = StepGpsWaypoint(this_stage)
-                elif step_type == 'follow_line':
-                    step = StepFollowLine(this_stage)
-                elif step_type == 'log_start':
-                    while len(parm_pos) < 2:
-                        parm_pos.append('')
-                    parm_pos[1] = vconst.mission_log_start_topic
-                    step = StepMessage(this_stage)
-                elif step_type == 'log_stop':
-                    while len(parm_pos) < 2:
-                        parm_pos.append('')
-                    parm_pos[1] = vconst.mission_log_stop_topic
-                    step = StepMessage(this_stage)
-                elif step_type == 'magic':
-                    step = StepMagic(this_stage)
-                elif step_type == 'move':
-                    step = StepMove(this_stage)
-                elif step_type == 'message':
-                    step = StepMessage(this_stage)
-                elif step_type == 'sleep':
-                    step = StepSleep(this_stage)
-                elif step_type == 'stage':
+                if step_type == 'stage':
                     stage_name = parm_pos[1]
                     print("LoadMission() Add Stage", stage_name)
                     stage = MissionStage(self, stage_name)
-                    self.stages[stage_name] = stage
+                    self.stages_list.append(stage_name)
+                    self.stages_dict[stage_name] = stage
                     this_stage = stage
-                if step is None:
-                    print("LoadMission() Unknown step type", step_type)
+                elif step_type in step_defs:
+                    if this_stage is None:
+                        print("LoadMission() Stage must be defined before work step")
+                        err_ct += 1
+                    else:
+                        sdef = step_defs[step_type]
+                        if sdef.func is None:
+                            step = sdef.sclass(this_stage)
+                        else:
+                            step = sdef.func(this_stage, parm_pos) 
+                        step.Load(parm_pos, parm_kword, parm_mission)
+                        this_stage.steps.append(step)
                 else:
-                    step.Load(parm_pos, parm_kword, parm_mission)
-                    this_stage.steps.append(step)
+                    print("LoadMission() Unknown step type", step_type)
+                    err_ct += 1
+        print("Mission Loaded", self.stages_list)
 
     def DoMission(self):
         if not self.mission_active:
@@ -641,8 +663,8 @@ class Mission(object):
             if self.navigator.new_mission_stage_payload is not None:
                 if 'name' in self.navigator.new_mission_stage_payload:
                     stage_name = self.navigator.new_mission_stage_payload['name']
-                    if stage_name in self.stages:
-                        self.active_stage = self.stages[stage_name]
+                    if stage_name in self.stages_list:
+                        self.active_stage = self.stages_dict[stage_name]
                         self.stage_step_ix = 0
                         self.stage_step_loop_ct = 0
                 self.navigator.new_mission_stage_payload = None
@@ -699,7 +721,7 @@ class Mission(object):
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_name) + '.mis'
+        fp = os.path.join(self.navigator.missionDir, mission_name) + '.mis'
         f = open(fp, "w")
         for p in self.waypoints:
             f.write(u'W,%f,%f\n' % (p[1][0], p[1][1]))
@@ -710,7 +732,7 @@ class Mission(object):
         mission_name = self.missionName
         if MissionName is not None:
             mission_name = MissionName
-        fp = os.path.join(self.missionDir, mission_name) + '.nav'
+        fp = os.path.join(self.navigator.missionDir, mission_name) + '.nav'
         f = open(fp, "w")
         for p in self.waypoints:
             if p[0] == 'W':
@@ -948,7 +970,9 @@ class navigator(vnavs_mqtt.mqtt_node):
                 mission_payload = self.new_mission_begin_payload
                 self.new_mission_begin_payload = None
                 self.new_mission_cancel_payload = None
-                self.mission = Mission(self, mission_payload)
+                name = mission_payload[MISSION_NAME]
+                script = mission_payload[MISSION_SCRIPT].split('\n')
+                self.mission = Mission(self, name=name, script=script)
 
         if self.mission is not None:
             if self.new_mission_begin_payload is not None:

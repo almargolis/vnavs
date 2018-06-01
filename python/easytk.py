@@ -204,6 +204,18 @@ class TkWidgetDef(object):
             print("RememberPosition/new", new_TkWidgetDef.ReprPos())
             print("RememberPosition/parent", self.ReprPos())
 
+    def ReplaceChoices(self, choices):
+        if isinstance(self.tkw, Tkinter.OptionMenu):
+            # adpated from https://stackoverflow.com/questions/17580218/changing-the-options-of-a-optionmenu-when-clicking-a-button
+            current_selection = self.tkd.get()
+            self.tkw['menu'].delete(0, 'end')
+            for this_choice in choices:
+                self.tkw['menu'].add_command(label=this_choice, command=Tkinter._setit(self.tkd, this_choice))
+            if current_selection in choices:
+                self.tkd.set(current_selection)
+            else:
+                self.tkd.set(choices[0])
+    
     def ReplaceValue(self, new_value, Caption=None):
         debug = "ReplaceValue({0}): tkw {1} '{2}' -- ".format(new_value, self.tkw.__class__.__name__, self.Value())
         if self.tkd is None:
@@ -402,13 +414,17 @@ class TkWidgetDef(object):
         self.children.append(frame)
         return frame
 
-    def AddDropDown(self, caption=None, s_items=[], Selection=None, row=NEXT_ROW, col=SAME_COL, command=None):
+    def AddDropdown(self, caption=None, s_items=['None'], Selection=None, row=NEXT_ROW, col=SAME_COL, command=None):
         # If command is specified, this uses variable trace to provide an on_change event.
         # The callback supplies three paramters that are meaningful to tk but not useful to the application,
         # so the callback declarations should be something like "def command(self, *args).
         # I am leaving this as a required idiom when using easytk. There is something to be said for creating
         # an OnChange event for easytk, but I would then have to track more tk internals in order to identify
         # the control that changed.
+        #
+        # If s_items is an empty list, Tkinter.OptionMenu() raises the confusing exception:
+        #     TypeError: __init__() takes at least 4 arguments (3 given)
+        #
         if self.debug_this:
             print("AddDropDown", row, col, caption)
         row, col = self.Position(row=row, col=col)
