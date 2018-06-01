@@ -1593,10 +1593,18 @@ def RectFromOpenCvImage(im):
     return Rect(0, shape[0], 0, shape[1])
 
 def RectFromPayload(payload):
-    y_min = int(payload['y_min'])
-    y_max = int(payload['y_max'])
-    x_min = int(payload['x_min'])
-    x_max = int(payload['x_max'])
+    if 'y_min' in payload:
+        y_min = int(payload['y_min'])
+        y_max = int(payload['y_max'])
+        x_min = int(payload['x_min'])
+        x_max = int(payload['x_max'])
+    else:
+        y_min = int(payload['y'])
+        x_min = int(payload['x'])
+        w = int(payload['w'])
+        h = int(payload['h'])
+        x_max = x_min + w
+        y_max = y_min + h
     return Rect(y_min, y_max, x_min, x_max)
 
 def RectFromSymbolicYX(im, y_range, x_range):
