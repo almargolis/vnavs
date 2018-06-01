@@ -14,7 +14,6 @@ import time
 
 import paho.mqtt.client as mqtt
 
-import OpticChiasm
 import vnavs_const as vconst
 
 if sys.version_info[0] < 3:
@@ -970,7 +969,7 @@ class mqtt_node(object):
     __slots__ = ('ack_pending', 'ack_payload', 'ack_topic', 'args', 'arrivedReads', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'debug', 'exception_ct', 'exception_last_time',
 					'imageDir', 'lastSocketError', 'loop_sleep',
-					'mission_data', 'mqttc', 'node_name', 'pendingReads',
+					'mqttc', 'node_name', 'pendingReads',
 					'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
 					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
 
@@ -1002,7 +1001,6 @@ class mqtt_node(object):
         self.ack_pending = None
         self.ack_payload = None
         self.ack_topic = AckTopic
-        self.mission_data = {}
         self.vnavs_pid = int(time.time())		# non-repeating with ~ 1 second
         self.vnavs_mid = 0				# Publish() sequence
         self.block_if_not_connected = BlockIfNotConnected
@@ -1336,21 +1334,6 @@ class mqtt_node(object):
                 print("Node stale message {} - {} = {}".format(time.time(), send_time, send_diff))
                 #raise Exception("node message stale")
         #
-        if message.topic == vconst.mission_data_topic:
-            # nobody subscribes to this
-            dtype = payload[vconst.dtype_field_name]
-            dname = payload[vconst.dname_field_name]
-            if dtype == 'o_rect':
-                y_min = int(payload['y'])
-                x_min = int(payload['x'])
-                w = int(payload['w'])
-                h = int(payload['h'])
-                d = OpticChiasm.Rect(y_min, y_min+h, x_min, x_min+h)
-                self.mission_data[dname] = d
-            return
-        if message.topic == vconst.mission_init_topic:
-            # may also be subscribed to for other initializations
-            self.mission_data = {}
         if message.topic in self.pendingReads:
             del self.pendingReads[message.topic]
             self.arrivedReads[message.topic] = payload

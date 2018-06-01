@@ -231,13 +231,21 @@ def NavigateTowardWaypoint(current_yaw, current_position, waypoint, nav, navigat
 
 
 class MissionStep(object):
-    __slots__ = ('mission', 'nav', 'navigator', 'parms', 'stage')
+    __slots__ = ('mission', 'mission_vars', 'nav', 'navigator', 'parm_pos', 'parm_kword', 'parm_mission', 'stage')
     def __init__(self, stage):
         self.mission = stage.mission
+        self.mission_vars = []
         self.nav = NavStep()
         self.navigator = self.mission.navigator
         self.stage = stage
-        self.parms = {}
+        self.parm_pos = None
+        self.parm_kword = None
+        self.parm_mission = None
+
+    def Load(self, parm_pos, parm_kword, parm_mission):
+        self.parm_pos = parm_pos
+        self.parm_kword = parm_kword
+        self.parm_mission = parm_mission
 
     def PublishNavigation(self, timer=6):
         payload = {}
@@ -259,15 +267,30 @@ class MissionStep(object):
             self.nav.hardTimeLimit = time.time() + self.nav.hardKeepSeconds
         #print("PublishNavigation", payload)
 
-class StepEnd(MissionStep):
+class StepData(MissionStep):
+    slots = ('dname', 'dtype')
 
     def __init__(self, stage):
         super().__init__(stage)
 
-    def Load(self, parm_pos, parm_kword):
+    def DoStageStepInit(self):
+        self.dname = self.parm_pos[1]
+        self.dtype = self.parm_pos[2]
+
+    def DoStageStepRun(self, loop_ct):
+        if self.dtype == 'o_rect':
+            d = OpticChiasm.RectFromPayload(self.parm_kword)
+        self.mission.mission_data[self.dname] = d
+        return True
+
+class StepEnd(MissionStep):
+    def __init__(self, stage):
+        super().__init__(stage)
+
+    def DoStageStepInit(self):
         pass
 
-    def DoStageStep(self, loop_ct):
+    def DoStageStepRun(self, loop_ct):
         self.mission.EndMission()
         return True
 
@@ -278,11 +301,11 @@ class StepFollowLine(MissionStep):
         self.next_time = None
         self.pid = PID(SetPoint=285, OutputScale=0.5, KI=0, KD=0)
 
-    def Load(self, parm_pos, parm_kword):
-        self.speed = int(parm_pos[2])
+    def DoStageStepInit(self):
+        self.speed = int(self.parm_pos[2])
         self.next_time = 0
 
-    def DoStageStep(self, loop_ct):
+    def DoStageStepRun(self, loop_ct):
         if 'Kp' in self.mission.mission_specs:
             self.pid.p_gain = float(self.mission.mission_specs['Kp'])
         if 'Ki' in self.mission.mission_specs:
@@ -303,7 +326,7 @@ class StepFollowLine(MissionStep):
             self.nav.p_error = self.pid.error
             self.nav.i_accumulator = self.pid.i_accumulator
             self.nav.derivative = self.pid.derivative
-            print("StepFollowLine.DoStageStep() LINE", self.navigator.line_x, self.nav.speed, self.nav.steering)
+            print("StepFollowLine.DoStageStepRun() LINE", self.navigator.line_x, self.nav.speed, self.nav.steering)
             self.PublishNavigation()
             self.next_time = time.time() + 1.0
             self.next_time = time.time() + 0.5
@@ -317,25 +340,25 @@ class StepGpsWaypoint(MissionStep):
         self.waypoint = None
         self.next_time = None
 
-    def Load(self, parm_pos, parm_kword):
-        key = parm_pos[1]
+    def DoStageStepInit(self):
+        key = self.parm_pos[1]
         self.navigator.LoadPersistentData()
         value = self.navigator.persistent_data[key]
         self.waypoint = engineer_1.PositionStringToPosition(value)
-        self.speed = int(parm_pos[2])
+        self.speed = int(self.parm_pos[2])
         self.next_time = time.time()
 
-    def DoStageStep(self, loop_ct):
+    def DoStageStepRun(self, loop_ct):
         # should check freshness of GPS and IMU data
         current_position = self.navigator.gps_data.Position()
         delta = current_position.DistanceToWaypoint(self.waypoint)
         if delta.distance_to_waypoint <= WAYPOINT_WINDOW_METERS:
-            print("StepGpsWaypoint.DoStageStep() reached waypoint", delta.distance_to_waypoint)
+            print("StepGpsWaypoint.DoStageStepRun() reached waypoint", delta.distance_to_waypoint)
             self.nav.Init()
             self.PublishNavigation()
             return True
         if time.time() > self.next_time:
-            print("StepGpsWaypoint.DoStageStep() navigate", delta.distance_to_waypoint)
+            print("StepGpsWaypoint.DoStageStepRun() navigate", delta.distance_to_waypoint)
             NavigateTowardWaypoint(self.navigator.imu_data.imu_yaw, current_position, self.waypoint, self.nav, navigator=self.navigator)
             self.PublishNavigation()
             self.next_time = time.time() + 1.0
@@ -382,13 +405,13 @@ class StepMove(MissionStep):
         self.timer = 1
         self.end_time = None
 
-    def Load(self, parm_pos, parm_kword):
-        self.speed = int(parm_kword['speed'])
-        self.steering = int(parm_kword['steering'])
-        self.timer = float(parm_kword['timer'])
+    def DoStageStepInit(self):
+        self.speed = int(self.parm_kword['speed'])
+        self.steering = int(self.parm_kword['steering'])
+        self.timer = float(self.parm_kword['timer'])
 
-    def DoStageStep(self, loop_ct):
-        print("StepMove.DoStageStep()", loop_ct, self.end_time, time.time())
+    def DoStageStepRun(self, loop_ct):
+        print("StepMove.DoStageStepRun()", loop_ct, self.end_time, time.time())
         if loop_ct == 1:
             self.nav.speed = self.speed
             self.nav.steering = self.steering
@@ -406,10 +429,10 @@ class StepMagic(MissionStep):
         self.last_imageFn = None
         self.movement_started = False
 
-    def Load(self, parm_pos, parm_kword):
+    def DoStageStepInit(self):
         pass
 
-    def DoStageStep(self, loop_ct):
+    def DoStageStepRun(self, loop_ct):
         if self.navigator.imageFn is None:
             # Don't do anything till navigator gets an image.
             # This is safe at start of mission but dangerous if moving
@@ -458,12 +481,12 @@ class StepAccMotion(MissionStep):
     def __init__(self, stage):
         super().__init__(stage)
 
-    def Load(self, parm_pos, parm_kword):
-        self.direction = parm_pos[1]
-        self.distance = float(parm_pos[2])
+    def DoStageStepInit(self):
+        self.direction = self.parm_pos[1]
+        self.distance = float(self.parm_pos[2])
 
-    def DoStageStep(self, loop_ct):
-    #def DoStageStep(self, nav):
+    def DoStageStepRun(self, loop_ct):
+    #def DoStageStepRun(self, nav):
         step = NavStep()
         step.steering = 'A0'
         if self.direction == 'F':
@@ -479,16 +502,19 @@ class StepAccMotion(MissionStep):
 # Message Step
 #
 class StepMessage(MissionStep):
-    __slots__ = ('topic', 'payload')
+    __slots__ = ('payload', 'topic')
+
     def __init__(self, stage):
         super().__init__(stage)
+        self.topic = ''
+        self.payload = {}
 
-    def Load(self, parm_pos, parm_kword):
-        self.topic = parm_pos[1]
-        self.payload = parm_kword
+    def DoStageStepInit(self):
+        self.topic = self.parm_pos[1]
+        self.payload = self.parm_kword
 
-    def DoStageStep(self, loop_ct):
-        print("StepMessage", self.topic, self.payload)
+    def DoStageStepRun(self, loop_ct):
+        #print("StepMessage", self.topic, self.payload)
         self.mission.navigator.Publish(self.topic, self.payload)
         if self.topic == vconst.mission_specs_topic:
             self.mission.mission_specs = self.payload
@@ -499,7 +525,7 @@ class StepSleep(MissionStep):
         super().__init__(stage)
         self.interval = interval
 
-    def DoStageStep(self, loop_ct):
+    def DoStageStepRun(self, loop_ct):
         time.sleep(float(self.interval))
         return True
 
@@ -512,15 +538,16 @@ class MissionStage(object):
 
     def __init__(self, mission, name):
         self.mission = mission
-        self.name - name
+        self.name = name
         self.steps = []
 
 class Mission(object):
-    __slots__ = ('active_stage', 'mission_active', 'missionDir', 'mission_name', 'mission_script', 'navigator', 'stage_step_ix', 'stage_step_loop_ct', 'stages')
+    __slots__ = ('active_stage', 'mission_active', 'mission_data', 'missionDir', 'mission_name', 'mission_script', 'navigator', 'stage_step_ix', 'stage_step_loop_ct', 'stages')
 
     def __init__(self, navigator, payload):
         self.active_stage = None
         self.navigator = navigator
+        self.mission_data = {}
         self.missionDir = self.navigator.missionDir
         self.mission_name = payload[MISSION_NAME]
         self.mission_script = payload[MISSION_SCRIPT].split('\n')
@@ -531,7 +558,8 @@ class Mission(object):
         self.mission_active = True
         self.LoadMission()
         if 'init' in self.stages:
-            self.active_stage = self.stage['init']
+            self.active_stage = self.stages['init']
+        print("Mission Loaded", self.stages)
 
     def LoadMission(self):
         print("LOAD", self.mission_name)
@@ -548,9 +576,10 @@ class Mission(object):
             else:
                 step = None
                 # This is a new mission command
-                parts = line[1:].split(':')
+                parts = line.split(':')
                 parm_kword = {}
                 parm_pos = []
+                parm_mission = []
                 for this in parts:
                     eq = this.find('=')
                     if eq > 0:
@@ -560,15 +589,15 @@ class Mission(object):
                         key = ''
                         value = this.strip()
                     if key == '':
-                        parm_pos.append(this.strip())
+                        parm_pos.append(value)
+                        if value[0] == '$':
+                            # also in parm_pos so positions don't shift
+                            parm_mission.append(value[1:])
                     else:
                         parm_kword[key] = value
                 step_type = parm_pos[0]
                 if step_type == 'data':
-                    parm_kword[vconst.dname_field_name] = parm_pos[1]
-                    parm_kword[vconst.dtype_field_name] = parm_pos[2]
-                    parm_pos[1] = vconst.mission_data_topic
-                    step = StepMessage(this_stage)
+                    step = StepData(this_stage)
                 elif step_type == 'end':
                     step = StepEnd(this_stage)
                 elif step_type == 'gps':
@@ -576,9 +605,13 @@ class Mission(object):
                 elif step_type == 'follow_line':
                     step = StepFollowLine(this_stage)
                 elif step_type == 'log_start':
+                    while len(parm_pos) < 2:
+                        parm_pos.append('')
                     parm_pos[1] = vconst.mission_log_start_topic
                     step = StepMessage(this_stage)
                 elif step_type == 'log_stop':
+                    while len(parm_pos) < 2:
+                        parm_pos.append('')
                     parm_pos[1] = vconst.mission_log_stop_topic
                     step = StepMessage(this_stage)
                 elif step_type == 'magic':
@@ -591,12 +624,14 @@ class Mission(object):
                     step = StepSleep(this_stage)
                 elif step_type == 'stage':
                     stage_name = parm_pos[1]
+                    print("LoadMission() Add Stage", stage_name)
                     stage = MissionStage(self, stage_name)
                     self.stages[stage_name] = stage
                     this_stage = stage
-                if step is not None:
-                    # SYNTAX ERROR is this_stage is none
-                    step.Load(parm_pos, parm_kword)
+                if step is None:
+                    print("LoadMission() Unknown step type", step_type)
+                else:
+                    step.Load(parm_pos, parm_kword, parm_mission)
                     this_stage.steps.append(step)
 
     def DoMission(self):
@@ -618,7 +653,13 @@ class Mission(object):
             return
         self.stage_step_loop_ct += 1
         step = self.active_stage.steps[self.stage_step_ix]
-        if step.DoStageStep(self.stage_step_loop_ct):
+        if self.stage_step_loop_ct == 1:
+            print("DoLoop()", self.active_stage.name, self.stage_step_ix, step.__class__.__name__)
+            for this in step.parm_mission:
+                d = self.mission_data[this]
+                step.parm_kword.update(d.AsPayload())
+            step.DoStageStepInit()
+        if step.DoStageStepRun(self.stage_step_loop_ct):
             # The step returns true to indicate that it is done.
             # Otherwise it repeats on the next DoMission().
             self.stage_step_ix += 1
@@ -981,9 +1022,9 @@ class navigator(vnavs_mqtt.mqtt_node):
         # See what the mission step wants to do
         #
         if self.mission.stage_step_ix < len(self.mission.mission_steps):
-            print("DoLoop/DoStageStep", self.mission.stage_step_ix)
+            print("DoLoop/DoStageStepRun", self.mission.stage_step_ix)
             step = self.mission.mission_steps[self.mission.stage_step_ix]
-            mission_step_finis = step.DoStageStep(self)
+            mission_step_finis = step.DoStageStepRun(self)
             if mission_step_finis:
                 self.mission.stage_step_ix += 1
         else:
