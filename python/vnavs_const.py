@@ -8,19 +8,20 @@
 # file.
 #
 
-mission_begin_topic = 'mission/begin'
+mission_async_event_topic = 'mission/async_event'
+mission_load_topic = 'mission/load'
+mission_execute_topic = 'mission/execute'
 mission_cancel_topic = 'mission/cancel'
 mission_data_topic = 'mission/data'
 mission_init_topic = 'mission/init'
 mission_end_topic = 'mission/end'
-mission_e_stop_topic = 'mission/estop'
 mission_log_start_topic = 'mission/log_start'
 mission_log_stop_topic = 'mission/log_stop'
 mission_mark_topic = 'mission/mark'
 mission_paused_topic = 'mission/paused'
 mission_resume_topic = 'mission/resume'
-mission_specs_topic = 'mission/specs'
 mission_stage_topic = 'mission/stage'
+mission_sync_event_topic = 'mission/sync_event'
 
 system_abend_topic = 'system/abend'
 system_message_error_topic = 'system/nak'

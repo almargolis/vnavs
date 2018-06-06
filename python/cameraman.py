@@ -150,6 +150,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
 
     def __init__(self, Verbose=True):
         super().__init__(Subscriptions=[
+						vconst.cameraman_mark_topic,
 						vconst.cameraman_orders_topic,
 						vconst.cameraman_process_topic,
 						vconst.mission_specs_topic
@@ -186,6 +187,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.loop_mode = 'idle'			# idle, single, run, pause
         self.loop_format = 'jpeg'		# jpeg, bgr
         self.loop_publish = 'file'
+        self.mark_rect = None
         self.mission_specs = None
         self.mission_hsv_spec = None
         self.capture_format = 'jpeg'		# jpeg, bgr
@@ -232,6 +234,10 @@ class cameraman(vnavs_mqtt.mqtt_node):
                         print("Payload Error @ %s, invalid value '%s'." % (key, value))
                 if not fld_error:
                     setattr(self, key, value)
+
+    def rmsg_mark(self, payload):
+        print(payload)
+        self.mark_rect = OpticChiasm.RectFromPayload(payload)
 
     def rmsg_cameraman_orders(self, payload):
         print(payload)
@@ -497,6 +503,11 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 # we need an OpenCv image for post processing
                 if burst_loop_publish == 'file':
                     img = cv2.imread(im_path)
+            if self.mark_rect is not None:
+                rect = self.mark_rect
+                self.mark_rect = None
+                im_in = OpticChiasm.Image(img, colorcode=OpticChiasm.IM_BGR)
+                hsv_spec = OpticChiasm(im_in.ImAsHsv(), rect=rect)
             if len(self.post_processes) > 0:
                 annotated = img.copy()
                 for this in self.post_processes:

@@ -1021,11 +1021,27 @@ class HsvSpec(object):
         return "(H {} {} S {} {} V {} {})".format(self.hue, self.huerange,
 							self.saturation, self.saturationrange,
 							self.value, self.valuerange)
-
+    def AsPayload(self):
+        p = {}
+        for this in self.__slots__:
+            p[this] = getattr(self, this)
+        return p
+    
     def copy(self):
         return HsvSpec(hue=self.hue, huerange=self.huerange,
                             saturation=self.saturation, saturationrange=self.saturationrange,
                             value=self.value, valuerange=self.valuerange)
+
+def HsvSpecFromPayload(payload):
+    hue = int(payload['hue'])
+    huerange = int(payload['huerange'])
+    saturation = int(payload['saturation'])
+    saturationrange = int(payload['saturationrange'])
+    value = int(payload['value'])
+    valuerange = int(payload['valuerange'])
+    return HsvSpec(hue=hue, huerange=huerange,
+                            saturation=saturation, saturationrange=saturationrange,
+                            value=value, valuerange=valuerange)
 
 def NextHsvSpec(hsvImage, mask=None, rect=None, minrange=20):
     # hsvImage is an OpenCvImage. rect is an OpenCvRect.
