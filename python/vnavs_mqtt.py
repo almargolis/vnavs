@@ -1206,7 +1206,7 @@ class mqtt_node(object):
                     if (self.ack_topic is not None) and (self.ack_topic == this_topic):
                         pass			# doesn't require handler
                     if self.wildcard_handler is None:
-                        print("No message handler for topic '%s'" % (this_topic))
+                        print("No message handler for topic '%s'" % (this_subscription.topic))
                 this_subscription.handler_method = handler_method
             if this_subscription.mode != SUB_MODE_READER:
                 self.mqttc.subscribe(this_subscription.topic, 0)
@@ -1258,6 +1258,7 @@ class mqtt_node(object):
     def Publish(self, topic, payload, Ack_Topic=None, SaveSeq=False):
         # payload is a dict to be converted to JSON)
         if not self.mqttc.connected:
+            print("Publish() Not connected, not sent")
             # for now, silently ignore publish errors. Need to do better
             return
         payload['_topic'] = topic
@@ -1289,6 +1290,7 @@ class mqtt_node(object):
             payload['_ackPid'] = payload['_sendPid']
         if '_sendSeq' in payload:
             payload['_ackSeq'] = payload['_sendSeq']
+        return payload			# not really needed since original payload is modified
 
     def PublishAck(self, payload, error=None):
         self.PrepareResponse(payload)

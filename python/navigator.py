@@ -551,11 +551,13 @@ class MissionStepDef(object):
 
 
 class Mission(object):
-    __slots__ = ('active_stage', 'mission_active', 'mission_data', 'mission_name', 'mission_script', 'navigator', 'stage_step_ix', 'stage_step_loop_ct', 'stages_dict', 'stages_list')
+    __slots__ = ('active_stage', 'mission_data', 'mission_id', 'mission_loaded', 'mission_name', 'mission_script',
+						'navigator', 'stage_step_ix', 'stage_step_loop_ct', 'stages_dict', 'stages_list')
 
     def __init__(self, navigator=None, name='', script=None):
         self.active_stage = None
         self.navigator = navigator
+        self.mission_id = None
         self.mission_data = {}
         self.mission_name = name
         self.mission_script = script
@@ -564,7 +566,7 @@ class Mission(object):
         self.stages_list = []
         self.stage_step_ix = 0
         self.stage_step_loop_ct = 0
-        self.mission_active = True
+        self.mission_loaded = False
         if self.mission_script is not None:
             self.LoadMission(self.mission_script)
         if 'init' in self.stages_list:
@@ -654,16 +656,31 @@ class Mission(object):
                 else:
                     print("LoadMission() Unknown step type", step_type)
                     err_ct += 1
+        self.mission_loaded = True
         print("Mission Loaded", self.stages_list)
 
     def DoMission(self):
-        if not self.mission_active:
+        if not self.mission_loaded:
             return
+        # At this time, we trust mission control to send rational stage requests.
+        # We probably need a production/testing mode flag.
+        # In testing, anything goes. In production, init must be first and other sequence
+        # controls may be prudent.
         if self.active_stage is None:
-            if self.navigator.new_mission_stage_payload is not None:
-                if 'name' in self.navigator.new_mission_stage_payload:
-                    stage_name = self.navigator.new_mission_stage_payload['name']
+            # We get here if prior stage has been completed or if a newly loaded mission.
+            if self.navigator.mission_sync_event_payload is not None:
+                if 'mission_stage' in self.navigator.mission_sync_payload:
+                    stage_name = self.navigator.mission_sync_event_payload['mission_stage']
                     if stage_name in self.stages_list:
+                        # This is a valid request to start a new stage.
+                        if stage_name == 'init':
+                            # This is the start of a mission
+                            self.mission_id = "{}_{}".format(self.mission_name, datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+                            self.navigator.PrepareResponse(payload)
+                            payload['mission_id] = self.mission_id
+                            self.navigator.Publish(vconst.mission_init_topic, payload)
+                        payload['mission_id] = self.mission_id
+                        self.navigator.Publish(vconst.mission_stage_started_topic, payload)
                         self.active_stage = self.stages_dict[stage_name]
                         self.stage_step_ix = 0
                         self.stage_step_loop_ct = 0
@@ -671,6 +688,11 @@ class Mission(object):
         if self.active_stage is None:
             return					# waiting for external event (from mission control)
         if self.stage_step_ix >= len(self.active_stage.steps):
+            payload = {}
+            payload['mission_id] = self.mission_id
+            payload['mission_name'] = self.mission_name
+            payload['mission_stage'] = self.active_stage.name
+            self.navigator.Publish(vconst.mission_stage_completed_topic, payload)
             self.active_stage = None
             return
         self.stage_step_loop_ct += 1
@@ -702,9 +724,9 @@ class Mission(object):
 
     def EndMission(self):
         # This is a hard stop, closing all operations and data collection.
-        self.mission_active = False
+        self.mission_loaded = False
         # Putting the camera in idle mode may be redundant but doesn't do any harm.
-        # Making sure we are in idle mode helps avoid crashes due to mission_active out of
+        # Making sure we are in idle mode helps avoid crashes due to mission_loaded out of
         # storage.
         # The mission end topic stops logging of data. This should only happen 
         # once per mission from here, but redundant messages should not be harmful.
@@ -773,9 +795,9 @@ class navigator(vnavs_mqtt.mqtt_node):
 						vconst.cameraman_pic_ready_topic,
 						vconst.engineer_1_gps_topic,
 						vconst.engineer_1_imu_topic,
-						vconst.mission_begin_topic,
+						vconst.mission_load_topic,
 						vconst.mission_cancel_topic,
-						vconst.mission_stage_topic,
+						vconst.mission_sync_event_topic,
 						vconst.navigator_service_topic,
 						'data/save',
 						'data/get'
@@ -790,7 +812,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         self.line_x = None
         self.pausedMode = None
         self.mission = None
-        self.new_mission_begin_payload = None
+        self.mission_sync_event_payload = None
         self.new_mission_cancel_payload = None
         self.new_mode_payload = None
         self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
@@ -950,32 +972,32 @@ class navigator(vnavs_mqtt.mqtt_node):
                 if len(list_of_OpenCvRect) > 0:
                     self.line_x = list_of_OpenCvRect[0].center_x
 
-        payload = self.GetLatestPayload(vconst.mission_begin_topic)
+        payload = self.GetLatestPayload(vconst.mission_load_topic)
         if payload is not None:
-            self.new_mission_begin_payload = payload		# get the latest request if multiples received
-            self.new_mission_stage_payload = None
+            self.mission_load_payload = payload
+            self.new_mission_sync_event_payload = None
 
-        payload = self.GetLatestPayload(vconst.mission_stage_topic)
+        payload = self.GetLatestPayload(vconst.mission_sync_event_topic)
         if payload is not None:
-            self.new_mission_stage_payload = payload
+            self.new_mission_sync_event_payload = payload
 
         payload = self.GetLatestPayload(vconst.mission_cancel_topic)
         if payload is not None:
             self.new_mission_cancel_payload = payload
-            self.new_mission_begin_payload = None
-            self.new_mission_stage_payload = None
+            self.new_mission_load_payload = None
+            self.mission_sync_event_payload = None
 
         if self.mission is None:
-            if self.new_mission_begin_payload is not None:
-                mission_payload = self.new_mission_begin_payload
-                self.new_mission_begin_payload = None
+            if self.mission_load_payload is not None:
+                mission_payload = self.mission_sync_event_payload
+                self.mission_sync_event_payload = None
                 self.new_mission_cancel_payload = None
                 name = mission_payload[MISSION_NAME]
                 script = mission_payload[MISSION_SCRIPT].split('\n')
                 self.mission = Mission(self, name=name, script=script)
 
         if self.mission is not None:
-            if self.new_mission_begin_payload is not None:
+            if self.mission_load_payload is not None:
                 # A new mission has been received, cancel the existing mission
                 self.mission.StartWrapup()
             elif self.new_mission_cancel_payload is not None:
@@ -983,80 +1005,9 @@ class navigator(vnavs_mqtt.mqtt_node):
                 self.new_mission_cancel_payload = None
                 self.mission.StartWrapup()
             self.mission.DoMission()			# do mission work
-            if not self.mission.mission_active:
+            if not self.mission.mission_loaded:
                 self.mission = None
             return
-        return		# the following code needs to be moved to mission
-        # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
-        #
-        # Handle message data within this thread.
-        #
-        self.ChangeMode()
-        # We might not want to ProcessSerivceRequest() here if any of them take much time.
-        # Maybe only run when in paused or manual mode.
-        self.ProcessServiceRequest()
-        #
-        if not self.mqttc.connected:
-            return
-        if self.mode != 'G':
-            return				# not in navigator control mode
-        #
-        # Navigation are scheduled movements of the robot. They can take a relatively long period of time
-        # compared to how often this DoLoop() is executed. Once started, they generally continue till
-        # completed. Completion can be determined by mission_active to a fixed time, fixed sensor output or
-        # a mission step decision.
-        #
-        # Several navigation steps may be queued up in self.navSteps. These are often components of a
-        # manuever like a back-up Y turn.
-        #
-        # If we have an active navigation steps, check if should be terminated.
-        #
-        if self.nav is not None:
-            #if (self.nav.hardTimeLimit > 0) or self.gpsReadyForNavigation:
-            #    print("TL {} GPS Rdy: {}".format(self.nav.hardTimeLimit, self.gpsReadyForNavigation))
-            if self.nav.hardTimeLimit > 0:
-                # if there is a time limit, just follow those orders until they expire.
-                # if there is an unexpired time limit, untrustedGpsUpdates is ignored, we don't get that far.
-                if  self.nav.hardTimeLimit > time.time():
-                    # we want to maintain the the current navigation orders until completed by yaw or time
-                    if not self.CheckYawForCompletedManuever():
-                        return				# not ended, continue timed order
-            if self.nav.dist_max is not None:
-                if self.acc_dist_f > self.nav.dist_max:
-                    self.EStop()
-                    self.nav = None
-                else:
-                    #print("FWD", self.acc_dist_f,  self.nav.dist_max, (self.nav.dist_max - self.acc_dist_f))
-                    return
-            if self.nav.dist_min is not None:
-                if self.acc_dist_f < self.nav.dist_max:
-                    self.EStop()
-                    self.nav = None
-                else:
-                    return
-        #
-        # The previous navigation step has expired or ended by IMU yaw, check if there are any other
-        # scheduled naviagation steps.
-        #
-        if len(self.navSteps) > 0:
-            self.nav = self.navSteps.pop(0)
-            self.PublishNavigation()
-            return				# new orders came from stack
-        #
-        # See what the mission step wants to do
-        #
-        if self.mission.stage_step_ix < len(self.mission.mission_steps):
-            print("DoLoop/DoStageStepRun", self.mission.stage_step_ix)
-            step = self.mission.mission_steps[self.mission.stage_step_ix]
-            mission_step_finis = step.DoStageStepRun(self)
-            if mission_step_finis:
-                self.mission.stage_step_ix += 1
-        else:
-            if self.nav is None:
-                # If we are out of mission steps and the last navigation step has terminated
-                # come to a stop.
-                self.EStop()
-        self.stats.Print("MSGS")
 
     def EStop(self):
         payload = {}

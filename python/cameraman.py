@@ -153,7 +153,6 @@ class cameraman(vnavs_mqtt.mqtt_node):
 						vconst.cameraman_mark_topic,
 						vconst.cameraman_orders_topic,
 						vconst.cameraman_process_topic,
-						vconst.mission_specs_topic
 					],
 							SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.burst_fps_rate = 0			# capture speed of last burst
@@ -536,7 +535,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
             payload['capture_fps'] = self.burst_fps_rate
             payload['center_line'] = rect_list
             self.Publish(vconst.cameraman_pic_ready_topic, payload)
-            print("P", self.mqttc.connected)
+            print("P", self.mqttc.connected, payload)
             if self.camera.iso != self.iso:
                 # The camera may not use the exact ISO specified. Save the corrected value in
                 # self.iso so we don't keep repeating the request.
