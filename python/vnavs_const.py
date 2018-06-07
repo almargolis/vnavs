@@ -10,7 +10,6 @@
 
 mission_async_event_topic = 'mission/async_event'
 mission_load_topic = 'mission/load'
-mission_execute_topic = 'mission/execute'
 mission_cancel_topic = 'mission/cancel'
 mission_data_topic = 'mission/data'
 mission_init_topic = 'mission/init'

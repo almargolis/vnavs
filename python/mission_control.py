@@ -48,8 +48,9 @@ BOT_1_MAP_TRANSPOSE = [
 
 class MissionControl(vnavs_mqtt.mqtt_node):
     def __init__(self, Verbose=False):
+        Verbose = True
         super().__init__(Subscribe_Latest=[
-                      				  vconst.cameraman_pic_ready_topic,
+                      				vconst.cameraman_pic_ready_topic,
 						vconst.engineer_1_gps_topic,
 						vconst.engineer_1_imu_topic,
 						vconst.helmsman_orders_topic,
@@ -84,15 +85,12 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.image.img_fname_suffix = ''
         self.image.do_save_snaps = False
         self.pic_fn = None
-        self.pic_get = True
-        if vnavs_mqtt.ARG_IMAGE_GET in self.args:
-            self.pic_get = self.args[vnavs_mqtt.ARG_IMAGE_GET]
 
         mission_tab = self.notebook.AddTab('Mission')
 
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         self.mission_name_entry = mission_frame.AddEntryField('Mission', width=15, value='table')
-        mission_frame.AddButton('Load/Init', command=self.OnMissionLoad, row=SAME_ROW, col=NEXT_COL)
+        mission_frame.AddButton('Load', command=self.OnMissionLoad, row=SAME_ROW, col=NEXT_COL)
         self.mission_stage_entry = mission_frame.AddDropdown(caption='Stage', row=SAME_ROW, col=NEXT_COL)
         mission_frame.AddButton('Execute', command=self.OnStageExecute, row=SAME_ROW, col=NEXT_COL)
 
@@ -133,6 +131,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.alert_tab = self.notebook.AddTab('Alerts')
         self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
 
+        self.mission = None
         self.line_rect = None
 
     def OpenScriptFile(self):
@@ -230,27 +229,34 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.Publish(vconst.cameraman_orders_topic, payload)
 
     def OnMissionLoad(self):
+        # This loads mission here and sends it to navigator.
+        # This is an error checking step. It does not execute mission.
+        # This needs to be enhanced to do and display mission syntax checking.
         mission_name = self.mission_name_entry.Value()
         fp = mission_name + '.mis'
         f = open(fp, 'r')
         mission_script = f.read()
         f.close()
-        m = navigator.Mission(name=mission_name, script=mission_script.split('\n'))
-        stages = list(m.stages_list)
-        if 'init' in stages:
-            stages.remove('init')
-        if len(stages) > 0:
-            self.mission_stage_entry.ReplaceChoices(stages)
+        self.mission = navigator.Mission(name=mission_name, script=mission_script.split('\n'))
+        if len(self.mission.stages_list) > 0:
+            self.mission_stage_entry.ReplaceChoices(self.mission.stages_list)
         else:
             self.mission_stage_entry.ReplaceChoices(['None'])
         payload = {}
         payload['mission_name'] = mission_name
         payload['mission_script'] = mission_script
-        self.Publish(vconst.mission_begin_topic, payload)
+        self.Publish(vconst.mission_load_topic, payload)
         print("STARTNAV", payload)
 
     def OnStageExecute(self):
-        pass
+        this_stage = self.mission_stage_entry.Value()
+        payload = {}
+        payload['mission_name'] = self.mission.mission_name
+        payload['mission_stage'] = this_stage
+        self.Publish(vconst.mission_sync_event_topic, payload)
+        next_stage_ix = self.mission.stages_list.index(this_stage) + 1
+        if next_stage_ix < len(self.mission.stages_list):
+            self.mission_stage_entry.ReplaceValue(self.mission.stages_list[next_stage_ix])
 
     def CancelMission(self):
         payload = {}
@@ -266,11 +272,10 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             print("NO PIC AVAILABLE")
             return
         path = os.path.join(self.downloadDir, self.pic_fn)
-        #print("ProcessImage()", self.pic_fn, path)
-        if self.pic_get:
-            if not self.file_client.GetFile(self.pic_fn, path=path):
-                print("Unable to fetch PIC", self.pic_fn)
-                return
+        print("ProcessImage()", path)
+        if not self.file_client.GetFile(self.pic_fn, path=path):
+            print("Unable to fetch PIC", self.pic_fn)
+            return
         im = OpticChiasm.ReadImage(path)
         if 'center_line' in payload:
             line_at = payload['center_line']
