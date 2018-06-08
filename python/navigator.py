@@ -11,6 +11,7 @@ except ImportError:
     np = None
     OpticChiasm = None
 
+import datetime
 import json
 import math
 import os
@@ -675,11 +676,11 @@ class Mission(object):
                         # This is a valid request to start a new stage.
                         if stage_name == 'init':
                             # This is the start of a mission
-                            self.mission_id = "{}_{}".format(self.mission_name, datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+                            self.mission_id = "{}_{}".format(self.mission_name, datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
                             self.navigator.PrepareResponse(payload)
-                            payload['mission_id] = self.mission_id
+                            payload['mission_id'] = self.mission_id
                             self.navigator.Publish(vconst.mission_init_topic, payload)
-                        payload['mission_id] = self.mission_id
+                        payload['mission_id'] = self.mission_id
                         self.navigator.Publish(vconst.mission_stage_started_topic, payload)
                         self.active_stage = self.stages_dict[stage_name]
                         self.stage_step_ix = 0
@@ -689,7 +690,7 @@ class Mission(object):
             return					# waiting for external event (from mission control)
         if self.stage_step_ix >= len(self.active_stage.steps):
             payload = {}
-            payload['mission_id] = self.mission_id
+            payload['mission_id'] = self.mission_id
             payload['mission_name'] = self.mission_name
             payload['mission_stage'] = self.active_stage.name
             self.navigator.Publish(vconst.mission_stage_completed_topic, payload)
