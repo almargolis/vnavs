@@ -338,7 +338,7 @@ class helmsman(vmqtt.mqtt_node):
     def __init__(self):
         self.orders_q = queue.Queue(10)
         super().__init__(Subscriptions=[
-						vmqtt.Subscription(vconst.helmsman_orders_topic, async=True, handler=OnHelmsmanOrders),
+						vmqtt.Subscription(vconst.helmsman_orders_topic, async=True, handler=self.OnHelmsmanOrders),
 						vmqtt.Subscription(vconst.helmsman_controls_topic, async=True, handler=self.OnHelmsmanControls)
 				], SingleThreaded=False, BrokerType='F', Verbose=False)
         self.v = vehicle()

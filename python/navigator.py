@@ -791,7 +791,7 @@ class NavStep(object):
 
 class navigator(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscribe=[
+        super().__init__(Subscriptions=[
 						# vmqtt.Subscription('navigator/mode', handler=self.DoNavigatorMode),
 						vmqtt.Subscription(vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady),
 						vmqtt.Subscription(vconst.engineer_1_gps_topic, handler=self.DoEngineer1Gps),
@@ -803,7 +803,6 @@ class navigator(vmqtt.mqtt_node):
 						vmqtt.Subscription('data/save', async=True, handler=self.OnDataSave),
 						vmqtt.Subscription('data/get', async=True, handler=self.OnDataGet)
 					],
-					Readers=[],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.missionDir = self.config.get("Pilot", "MissionDir")
         self.gps_data = engineer_1.GpsDataRecord()
@@ -813,6 +812,7 @@ class navigator(vmqtt.mqtt_node):
         self.line_x = None
         self.pausedMode = None
         self.mission = None
+        self.mission_load_payload = None
         self.mission_sync_event_payload = None
         self.new_mission_cancel_payload = None
         self.new_mode_payload = None
@@ -976,7 +976,7 @@ class navigator(vmqtt.mqtt_node):
     def DoMissionSyncEvent(self, payload):
         self.new_mission_sync_event_payload = payload
 
-    def DoMissionCancelEvent(self, payload):
+    def DoMissionCancel(self, payload):
         self.new_mission_cancel_payload = payload
         self.new_mission_load_payload = None
         self.mission_sync_event_payload = None
@@ -986,8 +986,8 @@ class navigator(vmqtt.mqtt_node):
 
         if self.mission is None:
             if self.mission_load_payload is not None:
-                mission_payload = self.mission_sync_event_payload
-                self.mission_sync_event_payload = None
+                mission_payload = self.mission_load_payload
+                self.mission_load_payload = None
                 self.new_mission_cancel_payload = None
                 name = mission_payload[MISSION_NAME]
                 script = mission_payload[MISSION_SCRIPT].split('\n')
