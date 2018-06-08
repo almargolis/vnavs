@@ -11,29 +11,41 @@ import threading
 import time
 import traceback
 
-import vnavs_mqtt
+import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
-class translate_mosquitto_to_fast(vnavs_mqtt.mqtt_node):
+class translate_mosquitto_to_fast(vmqtt.mqtt_node):
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=['cameraman/orders', 'helmsman/orders', 'navigator/mode', 'navigator/waypoint'],
+        super().__init__(Subscriptions=[
+                                            vmqtt.Subscription(vconst.cameraman_orders_topic, async=True,
+                                                        handler=self.OnMessage, handler_needs_topic=True),
+                                            vmqtt.Subscription(vconst.helmsman_orders_topic, async=True,
+                                                        handler=self.OnMessage, handler_needs_topic=True),
+                                            vmqtt.Subscription(vconst.navigator_mode_topic, async=True,
+                                                        handler=self.OnMessage, handler_needs_topic=True),
+                                            vmqtt.Subscription(vconst.navigator_waypoint_topic, async=True,
+                                                        handler=self.OnMessage, handler_needs_topic=True),
+                                        ],
 					SingleThreaded=True, SelectTimeoutSecs=0.0, BrokerType='M', Streamer=False, Verbose=Verbose)
         self.fastBroker = None
 
-    def rmsg_wildcard(self, topic, payload):
+    def OnMessage(self, topic, payload):
         print("Send {} to fast {}".format(topic, payload))
-        parts = topic.split('/')
         self.fastBroker.Publish(topic, payload)
 
-class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
+class translate_fast_to_mosquitto(vmqtt.mqtt_node):
     def __init__(self, Verbose=True):
-        super().__init__(Subscriptions=['cameraman/pic_ready'], SingleThreaded=True, SelectTimeoutSecs=0.0, BrokerType='F', Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=[
+                                        vmqtt.Subscription(vconst.cameraman_pic_ready_topic, async=True,
+                                                        handler=self.OnMessage, handler_needs_topic=True),
+                                    ],
+                    SingleThreaded=True, SelectTimeoutSecs=0.0, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.mosquitto = translate_mosquitto_to_fast()
         self.mosquitto.fastBroker = self
         self.mosquitto.ConnectToMqttServer()
 
-    def rmsg_wildcard(self, topic, payload):
+    def OnMessage(self, topic, payload):
         print("Send {} to fast {}".format(topic, payload))
         self.mosquitto.Publish(topic, payload)
 
@@ -45,4 +57,4 @@ class translate_fast_to_mosquitto(vnavs_mqtt.mqtt_node):
 
 if __name__ == '__main__':
     if sys.argv[1] == 'node':
-        vnavs_mqtt.LaunchNode(translate_fast_to_mosquitto)
+        vmqtt.LaunchNode(translate_fast_to_mosquitto)

@@ -21,7 +21,7 @@ import cameraman
 import easytk
 from easytk import FIRST_ROW, SAME_ROW, NEXT_ROW, OVERLAY_ROW, SAME_COL, NEXT_COL, LEFT_COL, RIGHT_COL, OVERLAY_COL
 import OpticChiasm
-import vnavs_mqtt
+import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 
 BOT_1_MAP_TRANSPOSE = [
@@ -435,7 +435,7 @@ class ProcessStep(object):
         return
 
 
-class Darkroom(vnavs_mqtt.mqtt_node):
+class Darkroom(vmqtt.mqtt_node):
     __slots__ = (
 				'camera_iso', 'camera_last_filename', 'camera_shutter_speed',
 				'delete_process_step_ix', 'downloadDir', 'file_client', 'image',
@@ -448,13 +448,13 @@ class Darkroom(vnavs_mqtt.mqtt_node):
 				'thumbnailFrame', 'tk'
 		)
     def __init__(self):
-        super().__init__(Subscriptions=[vconst.cameraman_pic_ready_topic],
+        super().__init__(Subscriptions=[vmqtt.Subscription(vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady)],
 					SingleThreaded=True, BrokerType='F',
 					AutomaticallyConnect=False, BlockIfNotConnected=False, SelectTimeoutSecs=0.1,
 					Verbose=False)
         self.load_process_file_name = None
         self.delete_process_step_ix = None
-        self.file_client = vnavs_mqtt.FileClient(Verbose=False)
+        self.file_client = vmqtt.FileClient(Verbose=False)
         self.downloadDir = self.config.get("FileClient", "DownloadDir")
         self.downloadDir = os.path.expanduser(self.downloadDir)               # this expands tilde in path
         self.scriptsDir = self.config.get("MissionControl", "Scripts")
@@ -655,7 +655,7 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             self.new_step = ProcessStep(Where=tabid)
 
 
-    def rmsg_cameraman_pic_ready(self, payload):
+    def DoCammeramanPicReady(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
         #print("rmsg_cameraman_pic_ready()", payload)
@@ -682,6 +682,8 @@ class Darkroom(vnavs_mqtt.mqtt_node):
             # while a new process is being loaded. I am a little surprised that
             # we get here during that process.
             return
+
+        self.HandleAllSynchronousPayloads()
 
         if self.delete_process_step_ix is not None:
             self.DeleteProcessStep(self.delete_process_step_ix)

@@ -17,7 +17,7 @@ except:
     SenseHat = None
 
 
-import vnavs_mqtt
+import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
@@ -40,7 +40,7 @@ DDT_STR = 'str'
 # VnavsData provides a mechanism for reliably processing data with a minimum of code.
 #
 # It provides a centralized data dictionary and editing tools to help avoid
-# data interpretation errors when code is developed by multiple people over a 
+# data interpretation errors when code is developed by multiple people over a
 # period of time.
 #
 class VnavsAttribute(object):
@@ -177,20 +177,20 @@ class Position(object):
                 note += ' '
             note += '@ ' + `self.speed`
         return '({}, {}, {})'.format(self.latitude, self.longitude, note)
-        
+
     def DistanceToWaypoint(self, waypoint):
         # Adapted from https://stackoverflow.com/questions/4913349/haversine-formula-in-python-bearing-and-distance-between-two-gps-points
         #
         # calculate haversine(pointA, pointB):
         #
-        # convert decimal degrees to radians 
+        # convert decimal degrees to radians
         position_latitude_radians, position_longitude_radians, waypoint_latitude_radians, waypoint_longitude_radians = map(
-							math.radians, [self.latitude, self.longitude, waypoint.latitude, waypoint.longitude]) 
-        longitude_difference_radians = waypoint_longitude_radians - position_longitude_radians 
-        latitude_difference_radians = waypoint_latitude_radians - position_latitude_radians 
+							math.radians, [self.latitude, self.longitude, waypoint.latitude, waypoint.longitude])
+        longitude_difference_radians = waypoint_longitude_radians - position_longitude_radians
+        latitude_difference_radians = waypoint_latitude_radians - position_latitude_radians
         a = math.sin(latitude_difference_radians/2)**2 \
 						+ (math.cos(position_latitude_radians) * math.cos(waypoint_latitude_radians) * math.sin(longitude_difference_radians/2)**2)
-        c = 2 * math.asin(math.sqrt(a)) 
+        c = 2 * math.asin(math.sqrt(a))
         r = 6371 * 1000				# Radius of earth in meters. Use 3956 for miles
         distance_to_waypoint = c * r
 
@@ -271,7 +271,7 @@ class GpsDevice(object):
                 # we have data, so it must be OK now
                 print("Data ready", self.gps_port.in_waiting)
                 return self.gps_port.baudrate
-        
+
     def IncreaseUpdateRate(self):
         msg_str = "$PMTK251,38400*27" + '\r\n'
         print("SendGpsCommand", `msg_str`)
@@ -394,7 +394,7 @@ class GpsDevice(object):
 
         return False
 
-class engineer_1(vnavs_mqtt.mqtt_node):
+class engineer_1(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[], SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.heading = 0

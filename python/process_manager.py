@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-import vnavs_mqtt
+import vnavs_mqtt as vmqtt
 
 SYSTEMCTL = '/bin/systemctl'
 
@@ -84,10 +84,9 @@ def PiShutdown():
     output = process.communicate()[0]
     print(output)
 
-class process(vnavs_mqtt.mqtt_node):
+class process(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[],
-					Readers=[],
 					SingleThreaded=False, BlockIfNotConnected=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.system =  platform.system()
         if self.system == 'Linux':
@@ -119,6 +118,6 @@ class process(vnavs_mqtt.mqtt_node):
 
 if __name__ == '__main__':
     if sys.argv[1] == 'run':
-        vnavs_mqtt.LaunchNode(process)
+        vmqtt.LaunchNode(process)
     p = LinuxProcess()
     p.WirelessNetworks()
