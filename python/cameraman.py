@@ -21,7 +21,7 @@ try:
 except:
     picamera = None
 
-import vnavs_mqtt
+import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 
 import OpticChiasm
@@ -33,7 +33,7 @@ def signal_handler(signal, frame):
         global stop_process
         print('You pressed Ctrl+C!')
         stop_process = True
-        vnavs_mqtt.stop_process = True
+        vmqtt.stop_process = True
 signal.signal(signal.SIGINT, signal_handler)
 
 RACE_SPEED = 2
@@ -125,7 +125,7 @@ class macbook_camera(object):
                 self.capture(output, **kwargs)
                 yield 'buffer'
 
-class cameraman(vnavs_mqtt.mqtt_node):
+class cameraman(vmqtt.mqtt_node):
     __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
                     'camera', 'camera_resolution',
                     'capture_format', 'capture_publish',
@@ -150,9 +150,9 @@ class cameraman(vnavs_mqtt.mqtt_node):
 
     def __init__(self, Verbose=True):
         super().__init__(Subscriptions=[
-						vconst.cameraman_mark_topic,
-						vconst.cameraman_orders_topic,
-						vconst.cameraman_process_topic,
+						vmqtt.Subscription(vconst.cameraman_mark_topic, async=True, handler=self.OnCameramanMark),
+						vmqtt.Subscription(vconst.cameraman_orders_topic, async=True, handler=self.OnCameramanOrders),
+						vmqtt.Subscription(vconst.cameraman_process_topic, async=True, handler=self.OnCameramanProcess)
 					],
 							SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.burst_fps_rate = 0			# capture speed of last burst
@@ -199,7 +199,7 @@ class cameraman(vnavs_mqtt.mqtt_node):
         self.last_fn = ''
         self.last_format = ''
 
-    def rmsg_cameraman_process(self, payload):
+    def OnCameramanProcess(self, payload):
         if payload['Type'] == 'clear':
             self.post_processes = []
         else:
@@ -234,11 +234,11 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 if not fld_error:
                     setattr(self, key, value)
 
-    def rmsg_mark(self, payload):
+    def OnCameramanMark(self, payload):
         print(payload)
         self.mark_rect = OpticChiasm.RectFromPayload(payload)
 
-    def rmsg_cameraman_orders(self, payload):
+    def OnCameramanOrders(self, payload):
         print(payload)
         self.ValidateMessage(self.orders_parms, payload)
 
@@ -563,6 +563,5 @@ class cameraman(vnavs_mqtt.mqtt_node):
                 break
 
 if __name__ == '__main__':
-    h = cameraman()
-    h.Loop()
-    h.Disconnect()
+    if sys.argv[1] == 'node':
+        vmqtt.LaunchNode(cameraman)

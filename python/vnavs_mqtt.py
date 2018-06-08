@@ -25,12 +25,6 @@ else:
 
 config_file_path = os.path.expanduser("~/vnavs.ini")
 
-SUB_HANDLER_METHOD_PREFIX = 'rmsg_'
-SUB_WILDCARD_METHOD_NAME = SUB_HANDLER_METHOD_PREFIX + 'wildcard'
-SUB_MODE_LATEST = 'L'
-SUB_MODE_HANDLER = 'H'
-SUB_MODE_READER = 'R'
-
 stop_process = False
 
 TCPIP_STD_BUFLEN = 4096
@@ -638,7 +632,7 @@ class FileClient(SocketWrapperClient):
                 # need to do something specific here to restart / recover transfer
                 # or neatly notify as not complete.
                 # got an "invalid literal" exception. maybe due to noisy network.
-                raise 
+                raise
             #print("FILE LEN", file_len)
             buf_len = p + file_len + 1
             if len(self.buffer) == buf_len:
@@ -936,7 +930,7 @@ def Publish(topic, payload, ResponseTopic=None):
         subscriptions = [ResponseTopic]
         save_seq = True
     node = mqtt_node(Subscriptions=subscriptions, BrokerType='F', SingleThreaded=True,
-			AckTopic=ResponseTopic) 
+			AckTopic=ResponseTopic)
     print("BrokerType", node.broker_type)
     try:
         node.ConnectToMqttServer()
@@ -956,24 +950,29 @@ def Publish(topic, payload, ResponseTopic=None):
         node.CheckMqttPendingActivity()
     return node.ack_payload
 
-class mqtt_subscription(object):
-    __slots__ = ('handler_method', 'last_payload', 'mode', 'topic')
+class Subscription(object):
+    __slots__ = ('async', 'handler_method', 'last_payload', 'request_only', 'topic')
 
-    def __init__(self, topic, mode):
+    def __init__(self, topic, handler=None, request_only=False, async=False, LatestOnly=True):
+        self.async = async                  # process asyncronously
         self.topic = topic
-        self.mode = mode
-        self.handler_method = None
+        self.request_only = request_only
+        self.handler_method = handler
         self.last_payload = None
+        if LatestOnly:
+            self.queue = Queue.Queue()
+        else:
+            self.queue = None
 
 class mqtt_node(object):
-    __slots__ = ('ack_pending', 'ack_payload', 'ack_topic', 'args', 'arrivedReads', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
+    __slots__ = ('ack_pending', 'ack_payload', 'ack_topic', 'args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'debug', 'exception_ct', 'exception_last_time',
 					'imageDir', 'lastSocketError', 'loop_sleep',
-					'mqttc', 'node_name', 'pendingReads',
+					'mqttc', 'node_name',
 					'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
 					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
 
-    def __init__(self, node_name=None, Subscribe_Latest=None, Subscriptions=None, Readers=None, AckTopic=None,
+    def __init__(self, node_name=None, Subscriptions=[], AckTopic=None,
 				LoopSleep=0.01,
 				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0,
 				BrokerType='F', Streamer=False, Verbose=True):
@@ -1015,18 +1014,8 @@ class mqtt_node(object):
         self.single_threaded = SingleThreaded
         self.select_timeout = SelectTimeoutSecs
         self.subscriptions = {}
-        if Readers is not None:
-            for this in Readers:
-                new_sub = mqtt_subscription(this, SUB_MODE_READER)
-                self.subscriptions[this] = new_sub
-        if Subscriptions is not None:
-            for this in Subscriptions:
-                new_sub = mqtt_subscription(this, SUB_MODE_HANDLER)
-                self.subscriptions[this] = new_sub
-        if Subscribe_Latest is not None:
-            for this in Subscribe_Latest:
-                new_sub = mqtt_subscription(this, SUB_MODE_LATEST)
-                self.subscriptions[this] = new_sub
+        for this in Subscriptions:
+            self.subscriptions[this.topic] = this
         self.wildcard_handler = None
         self.broker_type = BrokerType
         self.InitMqttClient()
@@ -1036,8 +1025,6 @@ class mqtt_node(object):
         self.exception_ct = 0
         self.loop_sleep = LoopSleep
         self.lastSocketError = None
-        self.pendingReads = {}
-        self.arrivedReads = {}
         if node_name is None:
             self.node_name = self.__class__.__name__
         else:
@@ -1196,34 +1183,6 @@ class mqtt_node(object):
             return s
         return s[:max_chars] + ' [...]'
 
-    def RegisterMessageHandlers(self):
-        self.wildcard_handler = getattr(self, SUB_WILDCARD_METHOD_NAME, None)
-        for this_subscription in self.subscriptions.values():
-            if this_subscription.mode == SUB_MODE_HANDLER:
-                handler_name = SUB_HANDLER_METHOD_PREFIX + this_subscription.topic.replace('/', '_')
-                handler_method = getattr(self, handler_name, None)
-                if handler_method is None:
-                    if (self.ack_topic is not None) and (self.ack_topic == this_topic):
-                        pass			# doesn't require handler
-                    if self.wildcard_handler is None:
-                        print("No message handler for topic '%s'" % (this_subscription.topic))
-                this_subscription.handler_method = handler_method
-            if this_subscription.mode != SUB_MODE_READER:
-                self.mqttc.subscribe(this_subscription.topic, 0)
-
-    def Get(self, topic, timeout=1.0):
-        # Get the most recent message without repeats and automatically request more.
-        # Expect frequent None
-        if not self.mqttc.connected:
-            # for now, silently ignore publish errors. Need to do better
-            return
-        if topic in self.arrivedReads:
-            payload = self.arrivedReads[topic]
-            del self.arrivedReads[topic]
-            return payload
-        self.Read(topic)
-        return None
-
     def GetLatestPayload(self, topic):
         # This methodology risks loosing a latest message that arrives between the line
         # where the payload is copied and the line where the subscription object payload is cleared.
@@ -1234,26 +1193,21 @@ class mqtt_node(object):
         if topic not in self.subscriptions:
             raise Exception("GetLatestPayload() unknown topic '{}'".format(topic))
         subscription = self.subscriptions[topic]
-        if subscription.mode != SUB_MODE_LATEST:
-            raise Exception("GetLatestPayload() unexpected mode '{}' for topic '{}'".format(subscription.mode, topic))
         if subscription.last_payload is None:
             return None					# avoids tiny chance of clearing payload that arrives mid-method
         payload, subscription.last_payload = subscription.last_payload, None
         return payload
 
-    def Read(self, topic, timeout=1.0):
-        if not self.mqttc.connected:
-            # for now, silently ignore publish errors. Need to do better
-            return
-        # maybe check if its in subscription / reader list
-        if topic in self.pendingReads:
-            t = self.pendingReads[topic]
-            if (time.time() - t) < timeout:
-                return					# read still reasonably pending
-            print("TIMEOUT", topic)
-        self.mqttc.read(topic)
-        # error messages ???
-        self.pendingReads[topic] = time.time()
+    def HandleAllSynchronousPayloads(self):
+        for this in self.subscriptions.values():
+            if this.handler_method is None:
+                continue
+            if this.async:
+                # messages was handled as soon as it arrived
+                continue
+            payload = self.GetLatestPayload(this.topic)
+            if payload is not None:
+                this.handler_method(payload)
 
     def Publish(self, topic, payload, Ack_Topic=None, SaveSeq=False):
         # payload is a dict to be converted to JSON)
@@ -1314,7 +1268,9 @@ class mqtt_node(object):
 
     def on_connect(self, client, userdata, flags, rc):
         print("on_connect() rc: " + str(rc))
-        self.RegisterMessageHandlers()
+        for this_subscription in self.subscriptions.values():
+            if not this_subscription.request_only:
+                self.mqttc.subscribe(this_subscription.topic, 0)
 
     def on_message(self, client, userdata, message):
         if self.verbose:
@@ -1336,25 +1292,14 @@ class mqtt_node(object):
                 print("Node stale message {} - {} = {}".format(time.time(), send_time, send_diff))
                 #raise Exception("node message stale")
         #
-        if message.topic in self.pendingReads:
-            del self.pendingReads[message.topic]
-            self.arrivedReads[message.topic] = payload
-            return
-        if subscription.mode == SUB_MODE_LATEST:
+        if subscription.async:
+            # Handle immediately. Most commonly in multi-thread mode, so handler_method
+            # needs to be thread safe and typically small/fast.
+            subscription.handler_method(payload)
+        else:
             subscription.last_payload = payload
-        elif subscription.mode == SUB_MODE_HANDLER:
-            if subscription.handler_method is None:
-                if self.wildcard_handler is not None:
-                    error = self.wildcard_handler(message.topic, payload)
-                elif (self.ack_topic is not None) and (self.ack_topic == message.topic):
-                    # No handler required. Save specific response.
-                    if (self.ack_pending is not None) and ('_ackSeq' in payload) and (payload['_ackSeq'] == self.ack_pending):
-                        self.ack_payload = payload
-                        error = None
-                else:
-                    error = ' no handler for topic'
-            else:
-                error = subscription.handler_method(payload)
+        # NEED TO HANDLE QUEUE and maybe acks/nak
+
         # Acks get sent automagically as needed.
         # Only a small percentage of messages get ack-ed, based on
         # the state of error and the _ack payload property.

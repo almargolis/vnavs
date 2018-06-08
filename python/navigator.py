@@ -19,7 +19,7 @@ from geopy.distance import great_circle
 import sys
 import time
 
-import vnavs_mqtt
+import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import engineer_1
 import helmsman
@@ -651,7 +651,7 @@ class Mission(object):
                         if sdef.func is None:
                             step = sdef.sclass(this_stage)
                         else:
-                            step = sdef.func(this_stage, parm_pos) 
+                            step = sdef.func(this_stage, parm_pos)
                         step.Load(parm_pos, parm_kword, parm_mission)
                         this_stage.steps.append(step)
                 else:
@@ -729,7 +729,7 @@ class Mission(object):
         # Putting the camera in idle mode may be redundant but doesn't do any harm.
         # Making sure we are in idle mode helps avoid crashes due to mission_loaded out of
         # storage.
-        # The mission end topic stops logging of data. This should only happen 
+        # The mission end topic stops logging of data. This should only happen
         # once per mission from here, but redundant messages should not be harmful.
         self.navigator.EStop()
         payload = {}
@@ -789,19 +789,19 @@ class NavStep(object):
         self.i_accumulator = 0
         self.derivative = 0
 
-class navigator(vnavs_mqtt.mqtt_node):
+class navigator(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscribe_Latest=[
-						'navigator/mode',
-						vconst.cameraman_pic_ready_topic,
-						vconst.engineer_1_gps_topic,
-						vconst.engineer_1_imu_topic,
-						vconst.mission_load_topic,
-						vconst.mission_cancel_topic,
-						vconst.mission_sync_event_topic,
-						vconst.navigator_service_topic,
-						'data/save',
-						'data/get'
+        super().__init__(Subscribe=[
+						# vmqtt.Subscription('navigator/mode', handler=self.DoNavigatorMode),
+						vmqtt.Subscription(vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady),
+						vmqtt.Subscription(vconst.engineer_1_gps_topic, handler=self.DoEngineer1Gps),
+						vmqtt.Subscription(vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu),
+						vmqtt.Subscription(vconst.mission_load_topic, handler=self.DoMissionLoad),
+						vmqtt.Subscription(vconst.mission_cancel_topic, handler=self.DoMissionCancel),
+						vmqtt.Subscription(vconst.mission_sync_event_topic, handler=self.DoMissionSyncEvent),
+						# vmqtt.Subscription(vconst.navigator_service_topic, handler=self.DoNavigatorService),
+						vmqtt.Subscription('data/save', async=True, handler=self.OnDataSave),
+						vmqtt.Subscription('data/get', async=True, handler=self.OnDataGet)
 					],
 					Readers=[],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
@@ -825,7 +825,7 @@ class navigator(vnavs_mqtt.mqtt_node):
         if self.persistent_data is None:
             return					# its was never loaded
         self.persistent_data['test'] = 'test'
-        
+
         path = os.path.expanduser('~/vnavs.data')
         d = json.dumps(self.persistent_data)
         f = open(path, 'w')
@@ -853,16 +853,16 @@ class navigator(vnavs_mqtt.mqtt_node):
         else:
             self.persistent_data = json.loads(d)
 
-    def rmsg_data_save(self, payload):
-        print("rmsg_data_save()", payload)
+    def OnDataSave(self, payload):
+        print("OnDataSave()", payload)
         key = payload['key']
         value = payload['value']
         self.LoadPersistentData()
         self.persistent_data[key] = value
         self.DumpPersistentData()
 
-    def rmsg_data_get(self, payload):
-        print("rmsg_data_get()", payload)
+    def OnDataGet(self, payload):
+        print("OnDataGet()", payload)
         key = payload['key']
         self.LoadPersistentData()
         value = self.persistent_data[key]
@@ -953,40 +953,36 @@ class navigator(vnavs_mqtt.mqtt_node):
 
         self.Publish(vconst.navigator_service_ack_topic, payload)
 
+    def DoEngineer1Gps(self, payload):
+        self.gps_data.LoadPayload(payload)
+        self.stats.Count('GpsRcv')
+        self.gpsReadyForNavigation = True
+
+    def DoEngineer1Imu(self, payload):
+        self.imu_data.LoadPayload(payload)
+        self.stats.Count('ImuRcv')
+
+    def DoCameramanPicReady(self, payload):
+        if 'center_line' in payload:
+            line_at = payload['center_line']
+            list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
+            if len(list_of_OpenCvRect) > 0:
+                self.line_x = list_of_OpenCvRect[0].center_x
+
+    def DoMissionLoad(self, payload):
+        self.mission_load_payload = payload
+        self.new_mission_sync_event_payload = None
+
+    def DoMissionSyncEvent(self, payload):
+        self.new_mission_sync_event_payload = payload
+
+    def DoMissionCancelEvent(self, payload):
+        self.new_mission_cancel_payload = payload
+        self.new_mission_load_payload = None
+        self.mission_sync_event_payload = None
+
     def DoLoop(self):
-        payload = self.GetLatestPayload(vconst.engineer_1_gps_topic)
-        if payload is not None:
-            self.gps_data.LoadPayload(payload)
-            self.stats.Count('GpsRcv')
-            self.gpsReadyForNavigation = True
-
-        payload = self.GetLatestPayload(vconst.engineer_1_imu_topic)
-        if payload is not None:
-            self.imu_data.LoadPayload(payload)
-            self.stats.Count('ImuRcv')
-
-        payload = self.GetLatestPayload(vconst.cameraman_pic_ready_topic)
-        if payload is not None:
-            if 'center_line' in payload:
-                line_at = payload['center_line']
-                list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
-                if len(list_of_OpenCvRect) > 0:
-                    self.line_x = list_of_OpenCvRect[0].center_x
-
-        payload = self.GetLatestPayload(vconst.mission_load_topic)
-        if payload is not None:
-            self.mission_load_payload = payload
-            self.new_mission_sync_event_payload = None
-
-        payload = self.GetLatestPayload(vconst.mission_sync_event_topic)
-        if payload is not None:
-            self.new_mission_sync_event_payload = payload
-
-        payload = self.GetLatestPayload(vconst.mission_cancel_topic)
-        if payload is not None:
-            self.new_mission_cancel_payload = payload
-            self.new_mission_load_payload = None
-            self.mission_sync_event_payload = None
+        self.HandleAllSynchronousPayloads()
 
         if self.mission is None:
             if self.mission_load_payload is not None:
@@ -1254,7 +1250,7 @@ def RunMap():
 
 if __name__ == '__main__':
     if sys.argv[1] == 'node':
-        vnavs_mqtt.LaunchNode(navigator)
+        vmqtt.LaunchNode(navigator)
     elif sys.argv[1] == 'map':
         RunMap()
     elif sys.argv[1] == 'test':

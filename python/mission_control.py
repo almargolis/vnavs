@@ -33,7 +33,7 @@ except ImportError:
 import engineer_1
 import helmsman
 import navigator
-import vnavs_mqtt
+import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
@@ -46,17 +46,16 @@ BOT_1_MAP_TRANSPOSE = [
 
 # BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
-class MissionControl(vnavs_mqtt.mqtt_node):
+class MissionControl(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         Verbose = True
-        super().__init__(Subscribe_Latest=[
-                      				vconst.cameraman_pic_ready_topic,
-						vconst.engineer_1_gps_topic,
-						vconst.engineer_1_imu_topic,
-						vconst.helmsman_orders_topic,
-						vconst.mission_mark_topic,
-						vconst.navigator_service_ack_topic,
-						vconst.navigator_plot_topic
+        super().__init__(Subscriptions=[
+                            vmqtt.Subscription(vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady),
+                            vmqtt.Subscription(vconst.engineer_1_gps_topic, handler=self.DoEngineer1Gps),
+                            vmqtt.Subscription(vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu),
+                            vmqtt.Subscription(vconst.helmsman_orders_topic, handler=self.DoHelmsmanOrders),
+                            vmqtt.Subscription(vconst.mission_mark_topic, handler=self.DoMissionMark),
+                            vmqtt.Subscription(vconst.navigator_plot_topic, handler=self.DoNavigatorPlot)
 						],
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
@@ -66,7 +65,7 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.downloadDir = os.path.expanduser(self.downloadDir)               # this expands tilde in path
 
         self.scriptsDir = self.config.get("MissionControl", "Scripts")
-        self.file_client = vnavs_mqtt.FileClient(Verbose=False)
+        self.file_client = vmqtt.FileClient(Verbose=False)
 
         self.tk = easytk.EasyTk(debug=True)
         self.tk.tkw.title("VNAVS Mission Control")
@@ -189,13 +188,6 @@ class MissionControl(vnavs_mqtt.mqtt_node):
             new_payload[k] = v
         return new_payload
 
-    def rmsg_navigator_status(self, payload):
-        #print("NAV STAT", payload)
-        self.f1_helmsman_status.set(payload)
-        if 'filename' in payload:
-            self.pic_fn = payload['filename']
-            #print("NAV FILE", self.pic_fn)
-
     def ClearWaypoints(self):
         payload = {}
         payload['request'] = 'ClearWaypoints'
@@ -295,74 +287,64 @@ class MissionControl(vnavs_mqtt.mqtt_node):
         self.f1_fps.ReplaceValue('{} fps'.format(payload['capture_fps']))
         self.pic_fn = None
 
-    def DoLoop(self):
-        #speed = int(self.f1_speed_control.get())
-        #self.f1_speed_display.configure(text=str(speed))
-        payload = self.GetLatestPayload(vconst.mission_mark_topic)
-        if payload is not None:
-            print("mission/mark", payload)
-            self.line_rect = OpticChiasm.RectFromPayload(payload)
-        payload = self.GetLatestPayload(vconst.cameraman_pic_ready_topic)
-        if payload is not None:
+    def DoMissionMark(self, payload):
+        print("mission/mark", payload)
+        self.line_rect = OpticChiasm.RectFromPayload(payload)
+
+    def DoCameramanPicReady(self, payload):
             if 'annotated' in payload:
                 self.pic_fn = payload['annotated']
             else:
                 self.pic_fn = payload['filename']
             self.ProcessImage(payload)
 
-        payload = self.GetLatestPayload(vconst.engineer_1_gps_topic)
-        if payload is not None:
-            self.gps_speed.ReplaceValue(payload[engineer_1.GPS_SPEED])
-            latitude = None
-            longitude = None
-            if engineer_1.GPS_LATITUDE in payload:
-                latitude = payload[engineer_1.GPS_LATITUDE]
-            if engineer_1.GPS_LONGITUDE in payload:
-                longitude = payload[engineer_1.GPS_LONGITUDE]
-            if (latitude is not None) and (longitude is not None):
-                position = "{},{}".format(latitude, longitude)
-                self.gps_position.ReplaceValue(position)
+    def DoEngineer1Gps(self, payload):
+        self.gps_speed.ReplaceValue(payload[engineer_1.GPS_SPEED])
+        latitude = None
+        longitude = None
+        if engineer_1.GPS_LATITUDE in payload:
+            latitude = payload[engineer_1.GPS_LATITUDE]
+        if engineer_1.GPS_LONGITUDE in payload:
+            longitude = payload[engineer_1.GPS_LONGITUDE]
+        if (latitude is not None) and (longitude is not None):
+            position = "{},{}".format(latitude, longitude)
+            self.gps_position.ReplaceValue(position)
 
-        payload = self.GetLatestPayload(vconst.engineer_1_imu_topic)
-        if payload is not None:
-            self.imu_heading.ReplaceValue(payload[engineer_1.IMU_YAW])
+    def DoEngineer1Imu(self, payload):
+        self.imu_heading.ReplaceValue(payload[engineer_1.IMU_YAW])
 
-        payload = self.GetLatestPayload(vconst.navigator_plot_topic)
-        if payload is not None:
-            self.waypoint_heading.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_HEADING])
-            self.waypoint_distance.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_DISTANCE])
-            latitude = None
-            longitude = None
-            if navigator.NAVIGATOR_WAYPOINT_LATITUDE in payload:
-                latitude = payload[navigator.NAVIGATOR_WAYPOINT_LATITUDE]
-            if navigator.NAVIGATOR_WAYPOINT_LONGITUDE in payload:
-                longitude = payload[navigator.NAVIGATOR_WAYPOINT_LONGITUDE]
-            if (latitude is not None) and (longitude is not None):
-                position = "{},{}".format(latitude, longitude)
-                self.waypoint_position.ReplaceValue(position)
+    def DoNavigatorPlot(self, payload):
+        self.waypoint_heading.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_HEADING])
+        self.waypoint_distance.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_DISTANCE])
+        latitude = None
+        longitude = None
+        if navigator.NAVIGATOR_WAYPOINT_LATITUDE in payload:
+            latitude = payload[navigator.NAVIGATOR_WAYPOINT_LATITUDE]
+        if navigator.NAVIGATOR_WAYPOINT_LONGITUDE in payload:
+            longitude = payload[navigator.NAVIGATOR_WAYPOINT_LONGITUDE]
+        if (latitude is not None) and (longitude is not None):
+            position = "{},{}".format(latitude, longitude)
+            self.waypoint_position.ReplaceValue(position)
 
-        payload = self.GetLatestPayload(vconst.helmsman_orders_topic)
-        if payload is not None:
-            if helmsman.HELMSMAN_SPEED in payload:
-                speed = payload[helmsman.HELMSMAN_SPEED]
-                self.helmsman_speed.ReplaceValue(speed)
-            if helmsman.HELMSMAN_HEADING in payload:
-                steer = payload[helmsman.HELMSMAN_HEADING]
-                self.helmsman_steer.ReplaceValue(steer)
-            if helmsman.HELMSMAN_P_ERROR in payload:
-                p_error = payload[helmsman.HELMSMAN_P_ERROR]
-                self.helmsman_p_error.ReplaceValue(p_error)
-            if helmsman.HELMSMAN_I_ACCUMULATOR in payload:
-                i_accumulator = payload[helmsman.HELMSMAN_I_ACCUMULATOR]
-                self.helmsman_i_accumulator.ReplaceValue(i_accumulator)
-            if helmsman.HELMSMAN_DERIVATIVE in payload:
-                derivative = payload[helmsman.HELMSMAN_DERIVATIVE]
-                self.helmsman_derivative.ReplaceValue(derivative)
+    def DoHelmsmanOrders(self, payload):
+        if helmsman.HELMSMAN_SPEED in payload:
+            speed = payload[helmsman.HELMSMAN_SPEED]
+            self.helmsman_speed.ReplaceValue(speed)
+        if helmsman.HELMSMAN_HEADING in payload:
+            steer = payload[helmsman.HELMSMAN_HEADING]
+            self.helmsman_steer.ReplaceValue(steer)
+        if helmsman.HELMSMAN_P_ERROR in payload:
+            p_error = payload[helmsman.HELMSMAN_P_ERROR]
+            self.helmsman_p_error.ReplaceValue(p_error)
+        if helmsman.HELMSMAN_I_ACCUMULATOR in payload:
+            i_accumulator = payload[helmsman.HELMSMAN_I_ACCUMULATOR]
+            self.helmsman_i_accumulator.ReplaceValue(i_accumulator)
+        if helmsman.HELMSMAN_DERIVATIVE in payload:
+            derivative = payload[helmsman.HELMSMAN_DERIVATIVE]
+            self.helmsman_derivative.ReplaceValue(derivative)
 
-        # if topic[-5:] == 'abend':
-        #    t = payload['traceback']
-        #    self.alert_text.ReplaceValue(t)
-
+    def DoLoop(self):
+        self.HandleAllSynchronousPayloads()
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
@@ -376,7 +358,7 @@ def RunGps(waypoint):
         print("RunGps() requesting waypoint", waypoint)
         payload = {}
         payload['key'] = waypoint
-        value_payload = vnavs_mqtt.Publish('data/get', payload, ResponseTopic='data/value')
+        value_payload = vmqtt.Publish('data/get', payload, ResponseTopic='data/value')
         value = value_payload['value']
         start_position = engineer_1.PositionStringToPosition(value)
     while start_position is None:
@@ -404,11 +386,11 @@ def SaveGps(waypoint):
             payload = {}
             payload['key'] = waypoint
             payload['value'] = this_position
-            vnavs_mqtt.Publish('data/save', payload)
+            vmqtt.Publish('data/save', payload)
 
 if __name__ == '__main__':
     if sys.argv[1] == 'gui':
-        vnavs_mqtt.LaunchNode(MissionControl)
+        vmqtt.LaunchNode(MissionControl)
     elif sys.argv[1] == 'gps':
         if len(sys.argv) > 2:
             waypoint = sys.argv[2]

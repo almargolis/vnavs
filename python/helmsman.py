@@ -18,7 +18,7 @@ except ImportError:
     Arduino = None
     util = None
 
-import vnavs_mqtt
+import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
@@ -159,7 +159,7 @@ class vehicle(object):
             if self.mot_ramp_increment > RAMP_NONE:
                 if self.mot_speed_ramp >= self.mot_speed_goal:
                     self.mot_speed_ramp = self.mot_speed_goal
-                    self.mot_ramp_increment = RAMP_NONE 
+                    self.mot_ramp_increment = RAMP_NONE
             else:
                 if self.mot_speed_ramp <= self.mot_speed_goal:
                     self.mot_speed_ramp = self.mot_speed_goal
@@ -334,12 +334,12 @@ HELMSMAN_P_ERROR = 'p_error'
 HELMSMAN_I_ACCUMULATOR = 'i_accumulator'
 HELMSMAN_DERIVATIVE = 'derivative'
 
-class helmsman(vnavs_mqtt.mqtt_node):
+class helmsman(vmqtt.mqtt_node):
     def __init__(self):
         self.orders_q = queue.Queue(10)
         super().__init__(Subscriptions=[
-						vconst.helmsman_orders_topic,
-						vconst.helmsman_controls_topic
+						vmqtt.Subscription(vconst.helmsman_orders_topic, async=True, handler=OnHelmsmanOrders),
+						vmqtt.Subscription(vconst.helmsman_controls_topic, async=True, handler=self.OnHelmsmanControls)
 				], SingleThreaded=False, BrokerType='F', Verbose=False)
         self.v = vehicle()
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
@@ -355,11 +355,11 @@ class helmsman(vnavs_mqtt.mqtt_node):
             except queue.Empty:
                 return
 
-    def rmsg_helmsman_controls(self, payload):
+    def OnHelmsmanControls(self, payload):
         if HELMSMAN_GOVERNOR in payload:
             self.v.governor = int(payload[HELMSMAN_GOVERNOR])
 
-    def rmsg_helmsman_orders(self, payload):
+    def OnHelmsmanOrders(self, payload):
         #print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
         if HELMSMAN_STATE in payload:
             print("--------------------")
@@ -542,11 +542,6 @@ class helmsman(vnavs_mqtt.mqtt_node):
 
 """
 
-def Test_Helmsman_Node():
-    h = helmsman()
-    h.Loop()
-    h.Disconnect()
-
 if __name__ == '__main__':
-    #Test_Mqtt_Node()
-    Test_Helmsman_Node()
+    if sys.argv[1] == 'node':
+        vmqtt.LaunchNode(helmsman)
