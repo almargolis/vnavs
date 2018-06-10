@@ -2,8 +2,10 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import datetime
 import json
 import multiprocessing
+import numpy as np
 import os
 import select
 import socket
@@ -36,6 +38,9 @@ ARG_FALSE = 'false'
 ARG_CWD = 'cwd'
 
 stop_process = False
+
+def NowStr():
+     return datetime.datetime.now().strftime('%Y%m%d%H%M%S')
 
 class FileClient(vcomms.SocketWrapperClient):
     def __init__(self, Verbose=False):
@@ -279,10 +284,12 @@ def LaunchNode(node_class):
 def Publish(topic, payload, ResponseTopic=None):
     if ResponseTopic is None:
         subscriptions = []
-        save_seq = False
+        conf = None
+        save_payload = False
     else:
-        subscriptions = [ResponseTopic]
-        save_seq = True
+        subscriptions = [Subscription(ResponseTopic)]
+        conf = 'Publish' + NowStr()
+        save_payload = True
     node = mqtt_node(Subscriptions=subscriptions, BrokerType='F', SingleThreaded=True,
 			AckTopic=ResponseTopic)
     print("BrokerType", node.broker_type)
@@ -295,14 +302,12 @@ def Publish(topic, payload, ResponseTopic=None):
             node.ConnectToMqttServer()
         except:
             pass
-    node.Publish(topic, payload, SaveSeq=save_seq)
+    node.Publish(topic, payload, ConfRequest=conf)
     while node.mqttc.sent_ct < 1:
         node.CheckMqttPendingActivity()
     if ResponseTopic is None:
-        return
-    while node.ack_payload is None:
-        node.CheckMqttPendingActivity()
-    return node.ack_payload
+        return None
+    return node.WaitForPayload(conf)
 
 class Subscription(object):
     __slots__ = ('async', 'handler_method', 'last_payload', 'request_only', 'topic')
@@ -319,9 +324,40 @@ class Subscription(object):
         else:
             self.queue = None
 
+class ConfirmationRequest(object):
+    __slots__ = ('checked_time', 'conf_id', 'confirmed_time', 'payload', 'request_time')
+
+    def __init__(self, conf_id):
+        self.checked_time = None
+        self.conf_id = conf_id
+        self.confirmed_time = None
+        self.payload = None
+        self.request_time = time.time()
+
+    def __repr__(self):
+        conf = "not confirmed"
+        if self.confirmed_time is not None:
+            conf = "confirmed"
+        chk = "not checked"
+        if self.checked_time is not None:
+            chk = "checked"
+        return "( CONF {} - {} - {} )".format(self.conf_id, conf, chk)
+
+def JsonShowTypes(payload):
+    for key, value in payload.items():
+        print(key, value.__class__.__name__, value)
+
+class JsonNumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.int64):
+            obj_out = int(obj)
+            #print("JsonNumpyEncoder()", obj.__class__.__name__, obj_out.__class__.__name__)
+            return obj_out
+        return super().default(obj)
+
 class mqtt_node(object):
-    __slots__ = ('ack_pending', 'ack_payload', 'ack_topic', 'args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
-					'config', 'debug', 'exception_ct', 'exception_last_time',
+    __slots__ = ('args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
+					'config', 'confirmation_pending', 'debug', 'exception_ct', 'exception_last_time',
 					'imageDir', 'lastSocketError', 'loop_sleep',
 					'mqttc', 'node_name',
 					'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
@@ -352,9 +388,7 @@ class mqtt_node(object):
                 self.args[key] = val
             else:
                 self.args[this] = True
-        self.ack_pending = None
-        self.ack_payload = None
-        self.ack_topic = AckTopic
+        self.confirmation_pending = {}
         self.vnavs_pid = int(time.time())		# non-repeating with ~ 1 second
         self.vnavs_mid = 0				# Publish() sequence
         self.block_if_not_connected = BlockIfNotConnected
@@ -567,7 +601,7 @@ class mqtt_node(object):
                 else:
                     this.handler_method(payload)
 
-    def Publish(self, topic, payload, Ack_Topic=None, SaveSeq=False):
+    def Publish(self, topic, payload, ConfRequest=None):
         # payload is a dict to be converted to JSON)
         if not self.mqttc.connected:
             print("Publish() Not connected, not sent")
@@ -577,52 +611,68 @@ class mqtt_node(object):
         payload['_sender'] = self.node_name
         payload['_sendTime'] = time.time()
         payload['_sendPid'] = self.vnavs_pid
-        if Ack_Topic is not None:
-            payload['_ack'] = Ack_Topic
         self.vnavs_mid += 1
         payload['_sendSeq'] = self.vnavs_mid
-        if SaveSeq:
-            self.ack_pending = self.vnavs_mid
-        res, mid = self.mqttc.publish(topic, json.dumps(payload))
+        if ConfRequest is not None:
+            payload['_confRequest'] = ConfRequest
+            self.confirmation_pending[ConfRequest] = ConfirmationRequest(ConfRequest)
+            print("Publish() has confirmation request", payload)
+        #JsonShowTypes(payload)
+        j = json.dumps(payload, cls=JsonNumpyEncoder)
+        #print("Publish() JSON", j)
+        res, mid = self.mqttc.publish(topic, j)
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
 
-    def PrepareResponse(self, payload):
+    def PrepareResponse(self, payload, ConfResponse=False):
         # Prepares payload to be used as a response.
         # Copy identifier fields so recipients can match source message
         # so it knows request is completed and where to continue its process.
         # Info about original message is always there thanks to Publish()
-        sourceTopic = payload['_topic']
-        sourceSender = payload['_sender']
-        payload['_ackSourceTopic'] = sourceTopic
-        payload['_ackSourceSender'] = sourceSender
+        new_payload = {}
         if '_topic' in payload:
-            payload['_ack'] = payload['_topic']
+            new_payload['_ackTopic'] = payload['_topic']
         if '_sendPid' in payload:
-            payload['_ackPid'] = payload['_sendPid']
+            new_payload['_ackPid'] = payload['_sendPid']
         if '_sendSeq' in payload:
-            payload['_ackSeq'] = payload['_sendSeq']
-        return payload			# not really needed since original payload is modified
+            new_payload['_ackSeq'] = payload['_sendSeq']
+        if ConfResponse:
+            if '_confRequest' in payload:
+                new_payload['_isConfirmation'] = payload['_confRequest']
+        return new_payload
 
-    def PublishAck(self, payload, error=None):
-        self.PrepareResponse(payload)
-        if '_sender' not in payload:
-            print("SENDER", payload)
-        sender = payload['_sender']
-        if not ('_ack' in payload):
-            # ack was not requested, so only send if there was an error
-            if error is None:
-                return
-            payload['_ackStatus'] = error
-            self.Publish(vconst.system_message_error_topic, payload)
-            return
-        # An ack was requested
-        topic = payload['_ack']
-        if error is None:
-            error = 'ack'
-        payload['_ackStatus'] = error
-        del payload['_ack']				# ack not needed, avoids ack-ing ack loops
-        self.Publish(topic, payload)
+    def GetConfRequest(self, payload):
+        return payload.get('_confRequest', None)
+
+    def CheckConfirmation(self, conf):
+        res = False
+        if conf in self.confirmation_pending:
+            c = self.confirmation_pending[conf]
+            if c.payload is not None:
+                res = True
+                if c.checked_time is None:
+                    c.checked_time = time.time
+        self.ScrubConfirmations()
+        if res:
+            return c.payload
+        else:
+            return None
+
+    def ScrubConfirmations(self):
+        # This should delete checked confirmations after a little while
+        #print("ScrubConfirmation()", self.confirmation_pending)
+        return
+
+    def WaitForPayload(self, conf):
+        # This was created for limited use where convenience matters more than the ability
+        # to handle exception cases.
+        while True:
+            if not (conf in self.confirmation_pending):
+                return None					# maybe should be exception
+            payload = self.CheckConfirmation('conf')
+            if payload is not None:
+                return payload
+            self.CheckMqttPendingActivity()
 
     def on_connect(self, client, userdata, flags, rc):
         print("on_connect() rc: " + str(rc))
@@ -650,6 +700,15 @@ class mqtt_node(object):
                 print("Node stale message {} - {} = {}".format(time.time(), send_time, send_diff))
                 #raise Exception("node message stale")
         #
+        if '_isConfirmation' in payload:
+            print("on_message() Message received with confirmation:", payload)
+            conf_id = payload['_isConfirmation']
+            # it may be that some other node wants the confirmation
+            if conf_id in self.confirmation_pending:
+                # it should only be confirmed once, but we don't check for duplicates
+                c = self.confirmation_pending[conf_id]
+                c.confirmed_time = time.time
+                c.payload = payload
         if subscription.async:
             # Handle immediately. Most commonly in multi-thread mode, so handler_method
             # needs to be thread safe and typically small/fast.
@@ -659,12 +718,6 @@ class mqtt_node(object):
                 subscription.handler_method(payload)
         else:
             subscription.last_payload = payload
-        # NEED TO HANDLE QUEUE and maybe acks/nak
-
-        # Acks get sent automagically as needed.
-        # Only a small percentage of messages get ack-ed, based on
-        # the state of error and the _ack payload property.
-        #self.PublishAck(payload, error=error)
 
     def on_log(self, client, userdata, level, buf):
         print(buf)

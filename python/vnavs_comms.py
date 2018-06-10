@@ -650,7 +650,11 @@ class FastMqttServer(SocketWrapperServer):
                 print("PUBLISH", topic, "No Subscribers")
             if topic == vconst.mission_init_topic:
                 payload_dict = json.loads(payload)
-                mission_id = payload_dict['mission_id']
+                print("ProcessMessage()", payload_dict)
+                if 'mission_id' in payload_dict:
+                    mission_id = payload_dict['mission_id']
+                else:
+                    mission_id = 'MISSION'				# this is really an error
                 self.archiver.Open(mission_id)
             if topic == vconst.mission_end_topic:
                 self.archiver.Close()

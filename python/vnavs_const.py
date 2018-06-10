@@ -8,10 +8,12 @@
 # file.
 #
 
+data_save_topic = 'data/save'
+data_get_topic = 'data/get'
+
 mission_async_event_topic = 'mission/async_event'
 mission_load_topic = 'mission/load'
 mission_cancel_topic = 'mission/cancel'
-mission_data_topic = 'mission/data'
 mission_init_topic = 'mission/init'
 mission_end_topic = 'mission/end'
 mission_log_start_topic = 'mission/log_start'
@@ -39,7 +41,9 @@ helmsman_orders_topic = 'helmsman/orders'
 
 navigator_service_topic = 'navigator/service'
 navigator_service_ack_topic = 'navigator_service_ack'
+navigator_mode_topic = 'navigator/mode'
 navigator_plot_topic = 'navigator/plot'
+navigator_waypoint_topic = 'navigator/waypoint'
 
 dname_field_name = '_dname_'
 dtype_field_name = '_dtype_'

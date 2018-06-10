@@ -117,7 +117,7 @@ class process(vmqtt.mqtt_node):
                     PrintProcResult(proc)
 
 if __name__ == '__main__':
-    if sys.argv[1] == 'run':
+    if sys.argv[1] == 'node':
         vmqtt.LaunchNode(process)
     p = LinuxProcess()
     p.WirelessNetworks()

@@ -127,15 +127,13 @@ class macbook_camera(object):
 
 class cameraman(vmqtt.mqtt_node):
     __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
-                    'camera', 'camera_resolution',
-                    'capture_format', 'capture_publish',
-                    'image_ct',
-                    'iso',
-                    'idle_image_id', 'idle_image_id_max',
-                    'last_fn', 'last_format',
-                    'loop_format', 'loop_mode', 'loop_publish'
-                    'orders_parms', 'post_processes', 'run',
-                    'shutter_speed',
+			'camera', 'camera_resolution',
+			'capture_format', 'capture_publish',
+			'image_ct', 'iso', 'idle_image_id', 'idle_image_id_max',
+			'last_fn', 'last_format', 'loop_format', 'loop_mode', 'loop_publish'
+			'mark_hsv_spec', 'mark_payload', 'mark_rect',
+			'orders_parms', 'post_processes', 'run',
+			'shutter_speed',
                     )
     orders_parms = [
 			{'key': 'loop_mode', 'values': ['idle', 'pause', 'run', 'single'] },
@@ -186,9 +184,9 @@ class cameraman(vmqtt.mqtt_node):
         self.loop_mode = 'idle'			# idle, single, run, pause
         self.loop_format = 'jpeg'		# jpeg, bgr
         self.loop_publish = 'file'
+        self.mark_payload = None
+        self.mark_hsv_spec = None
         self.mark_rect = None
-        self.mission_specs = None
-        self.mission_hsv_spec = None
         self.capture_format = 'jpeg'		# jpeg, bgr
         self.capture_publish = 'file'		# file, stream
         self.post_processes = []
@@ -237,14 +235,11 @@ class cameraman(vmqtt.mqtt_node):
     def OnCameramanMark(self, payload):
         print(payload)
         self.mark_rect = OpticChiasm.RectFromPayload(payload)
+        self.mark_payload = payload
 
     def OnCameramanOrders(self, payload):
         print(payload)
         self.ValidateMessage(self.orders_parms, payload)
-
-    def rmsg_mission_specs(self, payload):
-        self.mission_specs = payload
-        self.mission_hsv_spec = None
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
@@ -337,65 +332,24 @@ class cameraman(vmqtt.mqtt_node):
             self.iso = 800
 
     def MakerFaire2018(self, im):
-        spec = self.mission_specs		# copy to be thread safe
-        print("MakerFaire", spec)
+        rect_list = []
+        if self.mark_rect is None:
+            return rect_list
+        if self.mark_hsv_spec is None:
+            return rect_list
 
-        default_hue = 90
-        default_huerange = 30
-        default_saturation = 0
-        default_saturationrange = 40
-        default_value = 170
-        default_valuerange = 30
-        try:
-            crop1_start_x = int(spec['l1x'])
-            crop1_start_y = int(spec['l1y'])
-            crop1_height = int(spec['l1h'])
-            crop1_width = int(spec['l1w'])
-            end_y = int(spec['end_y'])
-        except:
-            return []
-
-        if 'hue' in spec:
-            hue = int(spec['hue'])
-        else:
-            hue = default_hue
-        if 'huerange' in spec:
-            huerange = int(spec['huerange'])
-        else:
-            huerange = default_huerange
-        if 'saturation' in spec:
-            saturation = int(spec['saturation'])
-        else:
-            saturation = default_saturation
-        if 'saturationrange' in spec:
-            saturationrange = int(spec['saturationrange'])
-        else:
-            saturationrange = default_saturationrange
-        if 'value' in spec:
-            value = int(spec['value'])
-        else:
-            value = default_value
-        if 'valuerange' in spec:
-            valuerange = int(spec['valuerange'])
-        else:
-            valuerange = default_valuerange
-        kernel_dim = 11
+        kernel_dim = 7
         iterations = 1
-        #
+        box_reps = 10
+        end_y = self.mark_rect.TopY(0) - (self.mark_rect.height * box_reps)
+        if end_y < 0:
+            end_y = 0
+
         im_in = OpticChiasm.Image(im, colorcode=OpticChiasm.IM_BGR)
-        rect=OpticChiasm.Rect(crop1_start_y-crop1_height, crop1_start_y, crop1_start_x, crop1_start_x+crop1_width)
-        if self.mission_hsv_spec is None:
-            """
-            hsvspec = OpticChiasm.HsvSpec(
-                                hue=hue, huerange=huerange,
-                                saturation=saturation, saturationrange=saturationrange,
-                                value=value, valuerange=valuerange)
-            """
-            self.mission_hsv_spec = OpticChiasm.NextHsvSpec(im_in.Crop(rect).ImAsHSV())
-        rect_list = im_in.ChaseLine(hsvspec=self.mission_hsv_spec, rect=rect, end_y=end_y,
+        rect_list = im_in.ChaseLine(hsvspec=self.mark_hsv_spec, rect=self.mark_rect, end_y=end_y,
                                 kernel_dim=kernel_dim, iterations=iterations)
         list_list = OpticChiasm.ListOfOpenCvRectAsListOfDicts(rect_list)
-        print("MAKER ==>", list_list)
+        #print("MAKER ==>", list_list)
         return list_list
 
     def ImageBurst(self):
@@ -453,7 +407,7 @@ class cameraman(vmqtt.mqtt_node):
             else:
                 # capture_continuous returns burst_dest if it is a buffer
                 im_fn = image_file_name_format.format(counter=self.image_ct)
-                print("CAPT", im_fn, self.imageDir)
+                #print("CAPT", im_fn, self.imageDir)
                 im_path = os.path.join(self.imageDir, im_fn)
                 file_written = True
                 if capture_format == 'jpeg':
@@ -502,11 +456,19 @@ class cameraman(vmqtt.mqtt_node):
                 # we need an OpenCv image for post processing
                 if burst_loop_publish == 'file':
                     img = cv2.imread(im_path)
-            if self.mark_rect is not None:
-                rect = self.mark_rect
-                self.mark_rect = None
-                im_in = OpticChiasm.Image(img, colorcode=OpticChiasm.IM_BGR)
-                hsv_spec = OpticChiasm(im_in.ImAsHsv(), rect=rect)
+            if self.mark_payload is not None:
+                # self.mark_rect was unconditionally created when the message was received.
+                # The rectangle might be used for muiltiple things.
+                # if the payload has a save parameter, get an hsv spec for the marked area.
+                if 'save' in self.mark_payload:
+                    im_in = OpticChiasm.Image(img, colorcode=OpticChiasm.IM_BGR)
+                    self.mark_hsv_spec = OpticChiasm.NextHsvSpec(im_in.ImAsHSV(), rect=self.mark_rect)
+                    hsv_payload = self.PrepareResponse(self.mark_payload, ConfResponse=True)
+                    hsv_payload.update(self.mark_hsv_spec.AsPayload())
+                    print("MARK HSV", hsv_payload)
+                    hsv_payload[vconst.dname_field_name]  = self.mark_payload['save']
+                    self.Publish(vconst.data_save_topic, hsv_payload)
+                self.mark_payload = None		# only do the HSV processing once
             if len(self.post_processes) > 0:
                 annotated = img.copy()
                 for this in self.post_processes:
@@ -535,7 +497,7 @@ class cameraman(vmqtt.mqtt_node):
             payload['capture_fps'] = self.burst_fps_rate
             payload['center_line'] = rect_list
             self.Publish(vconst.cameraman_pic_ready_topic, payload)
-            print("P", self.mqttc.connected, payload)
+            #print("P", self.mqttc.connected, payload)
             if self.camera.iso != self.iso:
                 # The camera may not use the exact ISO specified. Save the corrected value in
                 # self.iso so we don't keep repeating the request.
