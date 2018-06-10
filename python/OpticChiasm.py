@@ -1046,6 +1046,7 @@ def HsvSpecFromPayload(payload):
 def NextHsvSpec(hsvImage, mask=None, rect=None, minrange=20):
     # hsvImage is an OpenCvImage. rect is an OpenCvRect.
     # Creates an HsvSpec based on the upper part of this image.
+    # It considers only the center x and y from center to top.
     # Optionally considers only image pixels hilighted (>0) by mask.
     # Looks at either center of image or center of optional rect.
     # Used by Image.ChaseLine()
@@ -1597,12 +1598,27 @@ class Rect(object):
         return (int((self.x_min + self.x_max) / 2), int((self.y_min + self.y_max) / 2))
 
     @property
+    def center_x(self):
+        return int((self.x_min + self.x_max) / 2)
+
+    @property
+    def center_y(self):
+        return int((self.y_min + self.y_max) / 2)
+
+    @property
+    def height(self):
+        return self.y_max - self.y_min
+
+    @property
     def p1(self):
         return(self.x_min, self.y_min)
 
     @property
     def p2(self):
         return(self.x_max, self.y_max)
+
+    def TopY(self, x=None):
+        return self.y_min
 
 def RectFromOpenCvImage(im):
     shape = im.shape
