@@ -648,10 +648,10 @@ class FastMqttServer(SocketWrapperServer):
                 self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
             else:
                 print("PUBLISH", topic, "No Subscribers")
-            if topic == vconst.mission_begin_topic:
+            if topic == vconst.mission_init_topic:
                 payload_dict = json.loads(payload)
-                mission_name = payload_dict['mission_name']
-                self.archiver.Open(mission_name)
+                mission_id = payload_dict['mission_id']
+                self.archiver.Open(mission_id)
             if topic == vconst.mission_end_topic:
                 self.archiver.Close()
             self.archiver.Archive(self.message_in_ct, server_time, payload)
