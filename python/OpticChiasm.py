@@ -725,6 +725,7 @@ def ListOfOpenCvRectFromListofDicts(in_list):
     return res
 
 def OpenCvRectFromDict(d):
+    print("OpenCvRectFromDict()", d)
     return OpenCvRect(((d['center_x'], d['center_y']),
                         (d['width'], d['height']),
                         d['angle']))

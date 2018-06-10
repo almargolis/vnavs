@@ -599,7 +599,8 @@ class TkWidgetDef(object):
             self.rgb_im = rgb_im
             self.pil_im = Image.fromarray(self.rgb_im)
         elif source_im is not None:
-            print("UpdateImage() source_im", source_im.__class__.__name__, source_im.shape)
+            if self.debug_this:
+                print("UpdateImage() source_im", source_im.__class__.__name__, source_im.shape)
             if (OpticChiasm is None) or (not isinstance(source_im, OpticChiasm.Image)):
                 # this is an OpenCv image
                 if len(source_im.shape) > 2:

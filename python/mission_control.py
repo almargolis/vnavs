@@ -48,13 +48,17 @@ BOT_1_MAP_TRANSPOSE = [
 
 class MissionControl(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        Verbose = True
+        #Verbose = True
         super().__init__(Subscriptions=[
                             vmqtt.Subscription(vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady),
                             vmqtt.Subscription(vconst.engineer_1_gps_topic, handler=self.DoEngineer1Gps),
                             vmqtt.Subscription(vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu),
                             vmqtt.Subscription(vconst.helmsman_orders_topic, handler=self.DoHelmsmanOrders),
                             vmqtt.Subscription(vconst.mission_mark_topic, handler=self.DoMissionMark),
+                            vmqtt.Subscription(vconst.mission_stage_started_topic, 
+							handler=self.DoMissionStatus, handler_needs_topic=True),
+                            vmqtt.Subscription(vconst.mission_stage_completed_topic, 
+							handler=self.DoMissionStatus, handler_needs_topic=True),
                             vmqtt.Subscription(vconst.navigator_plot_topic, handler=self.DoNavigatorPlot)
 						],
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
@@ -92,6 +96,7 @@ class MissionControl(vmqtt.mqtt_node):
         mission_frame.AddButton('Load', command=self.OnMissionLoad, row=SAME_ROW, col=NEXT_COL)
         self.mission_stage_entry = mission_frame.AddDropdown(caption='Stage', row=SAME_ROW, col=NEXT_COL)
         mission_frame.AddButton('Execute', command=self.OnStageExecute, row=SAME_ROW, col=NEXT_COL)
+        self.mission_status = mission_frame.AddLabel('Ready', row=SAME_ROW, col=NEXT_COL)
 
         buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         buttonframe.AddButton('Cancel', command=self.CancelMission, row=SAME_ROW, col=NEXT_COL)
@@ -264,7 +269,7 @@ class MissionControl(vmqtt.mqtt_node):
             print("NO PIC AVAILABLE")
             return
         path = os.path.join(self.downloadDir, self.pic_fn)
-        print("ProcessImage()", path)
+        #print("ProcessImage()", path)
         if not self.file_client.GetFile(self.pic_fn, path=path):
             print("Unable to fetch PIC", self.pic_fn)
             return
@@ -272,7 +277,7 @@ class MissionControl(vmqtt.mqtt_node):
         if 'center_line' in payload:
             line_at = payload['center_line']
             list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
-            print("ProcessImage() center_line ", list_of_OpenCvRect)
+            #print("ProcessImage() center_line ", list_of_OpenCvRect)
             im.DrawLinePoints(list_of_OpenCvRect)
             #parts = line_at.split(',')
             #line_x = int(parts[0])
@@ -312,6 +317,11 @@ class MissionControl(vmqtt.mqtt_node):
 
     def DoEngineer1Imu(self, payload):
         self.imu_heading.ReplaceValue(payload[engineer_1.IMU_YAW])
+
+    def DoMissionStatus(self, topic, payload):
+        print("DoMissionStatus()", payload)
+        status = "{mission_id} {mission_stage} {_topic}".format(**payload)
+        self.mission_status.ReplaceValue(status)
 
     def DoNavigatorPlot(self, payload):
         self.waypoint_heading.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_HEADING])
