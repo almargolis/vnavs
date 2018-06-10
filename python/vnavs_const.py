@@ -39,7 +39,9 @@ helmsman_orders_topic = 'helmsman/orders'
 
 navigator_service_topic = 'navigator/service'
 navigator_service_ack_topic = 'navigator_service_ack'
+navigator_mode_topic = 'navigator/mode'
 navigator_plot_topic = 'navigator/plot'
+navigator_waypoint_topic = 'navigator/waypoint'
 
 dname_field_name = '_dname_'
 dtype_field_name = '_dtype_'
