@@ -179,6 +179,11 @@ class socket_xfer(object):
 # but that is not supported by this object.
 
 class SocketWrapper(object):
+    __slots__ = ('buffer_len', 'config', 'isServer', 'is_aocket_blocking', 'isZeroOneProtocol',
+				'message_in_ct', 'message_out_ct',
+				'os_socket',
+				'sent_ct', 'socket_host', 'socket_port', 'verbose')
+
     def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsServer=False, IsSocketBlocking=False, Port=DEFAULT_PORT, IsZeroOneProtocol=True,
 					Verbose=False):
         self.buffer_len = BufferLen
@@ -209,6 +214,7 @@ class SocketWrapper(object):
         #
         self.isServer = IsServer
         self.isZeroOneProtocol = IsZeroOneProtocol
+        self.message_in_ct = 0
         self.message_out_ct = 0
         self.is_socket_blocking = IsSocketBlocking
         self.InitSocket()
@@ -410,12 +416,13 @@ class SocketWrapperServer(SocketWrapper):
             self.Select(timeout=None)
 
 class SocketWrapperClient(SocketWrapper):
+    __slots__ = ('connected', 'connect_in_progress', 'thread')
+
     def __init__(self, BufferLen=TCPIP_STD_BUFLEN, IniSection=None, IsZeroOneProtocol=True, Verbose=False):
         super().__init__(BufferLen=BufferLen, IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsSocketBlocking=False, Verbose=Verbose)
         self.connected = False
         self.connect_in_progress = False
         self.thread = None
-        self.verbose = Verbose
 
     # connect()
     #
@@ -539,6 +546,8 @@ class SocketWrapperClient(SocketWrapper):
         return False
 
 class FileServer(SocketWrapperServer):
+    __slots__ = ('imageDir')
+
     def __init__(self, Verbose=True):
         super().__init__(BufferLen=TCPIP_XFR_BUFLEN, IniSection="FileServer", Verbose=Verbose)
         self.imageDir = self.config.get("Cameraman", "ImageDir")
@@ -568,6 +577,8 @@ class FileServer(SocketWrapperServer):
             ix += self.buffer_len
 
 class MessageArchiver(object):
+    __slots__ = ('archive_buffer', 'archive_size', 'archive_file')
+
     def __init__(self):
         self.archive_buffer = []
         self.archive_size = 0
@@ -615,13 +626,19 @@ class MessageArchiver(object):
 # volume topics for time sensitive processes.
 #
 class FastMqttServer(SocketWrapperServer):
+    __slots__ = ('archive_dir', 'archiver', 'mission_id', 'mqttPayloads', 'subscriptions')
+
     def __init__(self, Verbose=False):
-        super().__init__(IniSection="MqttFastServer", Port=FAST_MQTT_PORT, Verbose=Verbose)
+        ini_section = "MqttFastServer"
+        super().__init__(IniSection=ini_section , Port=FAST_MQTT_PORT, Verbose=Verbose)
         self.mqttPayloads = {}
         self.subscriptions = {}
         self.message_in_ct = 0
         self.message_out_ct = 0
+        self.mission_id = None
         self.archiver = MessageArchiver()
+        self.archive_dir = self.config.get(ini_section, "ArchiveDir")
+        self.archive_dir = os.path.expanduser(self.archive_dir)               # this expands tilde in path
 
     def ProcessMessage(self, s, message):
         if message[0] == '':
@@ -652,12 +669,16 @@ class FastMqttServer(SocketWrapperServer):
                 payload_dict = json.loads(payload)
                 print("ProcessMessage()", payload_dict)
                 if 'mission_id' in payload_dict:
-                    mission_id = payload_dict['mission_id']
+                    self.mission_id = payload_dict['mission_id']
                 else:
-                    mission_id = 'MISSION'				# this is really an error
-                self.archiver.Open(mission_id)
-            if topic == vconst.mission_end_topic:
+                    self.mission_id = 'MISSION'				# this is really an error
+            elif topic == vconst.mission_log_start_topic:
+                archive_file_path = os.path.join(self.archive_dir, self.mission_id)
+                self.archiver.Open(archive_file_path)
+            elif topic == vconst.mission_log_stop_topic:
                 self.archiver.Close()
+            elif topic == vconst.mission_end_topic:
+                pass
             self.archiver.Archive(self.message_in_ct, server_time, payload)
         elif action == 'read':
             topic = message[1]
