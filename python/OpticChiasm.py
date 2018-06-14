@@ -2,8 +2,10 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import io
 import os, cv2, numpy as np
 import math
+import picamera
 import time
 #from scipy import weave
 from operator import itemgetter
@@ -20,12 +22,15 @@ HSV_ORANGE = int(60.0 * HSV_RATIO)
 HSV_BLUE = int(240.0 * HSV_RATIO)
 HSV_RED = int(350.0 * HSV_RATIO)
 
+# These are OpenCv compatible codes. 
+# Picamera uses lower case and also supports other formats.
 IM_BGR = 'BGR'
 IM_GRAY = 'GRAY'
 IM_HSL = 'HSL'
 IM_HSV = 'HSV'
 IM_RGB = 'RGB'
-IM_COLORCODES = [IM_BGR, IM_GRAY, IM_HSL, IM_HSV, IM_RGB]
+IM_YUV = 'YUV'
+IM_COLORCODES = [IM_BGR, IM_GRAY, IM_HSL, IM_HSV, IM_RGB, IM_YUV]
 
 DRAW_BGR_RED = (0, 0, 255)
 DRAW_BGR_MAGENTA = (255, 0, 255)
@@ -54,10 +59,6 @@ RACE_THRESHOLD = 150
 #   [0,0] is the upper, left corner of the image
 #   The image is stored as an array of horizontal lines, so the index is [y, x]
 #
-def ReadImage(path):
-    im = cv2.imread(path)
-    return Image(im=im, colorcode=IM_BGR)
-
 def ReprOpenCv(im):
     imx = Image(im=im, colorcode=IM_BGR)
     return imx.__repr__()
@@ -69,16 +70,18 @@ class Image(object):
         OpenCv and numpy operations that I find non-intuitive.
     """
     __slots__ = (
-	'colorcode', 'colordepth', 'crop_source', 'crop_x', 'crop_y', 'height', '_im', 'shape', 'width'
+	'colorcode', 'colordepth', 'crop_source', 'crop_x', 'crop_y', 'file_path', 'height', '_im', 'shape', 'width'
     )
 
     def __init__(self, im=None, colorcode=None, opencv_fn=None):
+        self.file_path = opencv_fn
         if opencv_fn is not None:
             im = cv2.imread(opencv_fn)
             colorcode = IM_BGR
-        crop_source = None				# Image() from which this is cropped
-        crop_x = None					# left x starting position of this crop in source image
-        crop_y = None					# upper y` starting position of this crop in source image
+        colorcode = colorcode.upper()			# change picamera format to OpenCv
+        self.crop_source = None				# Image() from which this is cropped
+        self.crop_x = None				# left x starting position of this crop in source image
+        self.crop_y = None				# upper y` starting position of this crop in source image
         self.ReplaceImage(im, colorcode)
 
     def __repr__(self):
@@ -105,6 +108,14 @@ class Image(object):
     @property
     def im(self):			# im is a property to discourage skipping ReplaceImage()
         return self._im
+
+    def ImAsBGR(self):
+        if self._im is None:
+            return None
+        if self.colorcode == IM_BGR:
+            return self._im
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_BGR))
+        return cv2.cvtColor(self._im, transform)
 
     def ImAsRGB(self):
         if self._im is None:
@@ -158,8 +169,13 @@ class Image(object):
                 self.colordepth = 1
         self.shape = (self.height, self.width, self.colordepth)
 
-    def Write(self, fn):
-        cv2.imwrite(fn, self._im)
+    def Write(self, fn=None):
+        if fn is None:
+            fn = self.file_path
+        cv2.imwrite(fn, self.ImAsBGR())
+        # except IOError as e:
+        # IOError: [Errno 28] Out of disk space
+        #                    if e.errno == 28:
 
     def AverageHue(self, rect=None):
         if rect is None:
@@ -272,6 +288,18 @@ class Image(object):
                     this.center_y += rect.y_min
         print("FindColorBlobs()", rect_list)
         return rect_list, next_hsv_spec
+
+def ImageFromPicamera(picam_image, format, file_path=None):
+    # format is picamera style format
+    img = Image()
+    img.file_path = file_path
+    if format == 'bgr':
+        img.ReplaceImage(picam_image.array, IM_BGR)
+    elif format == 'rgb':
+        img.ReplaceImage(picam_image.array, IM_RGB)
+    elif format == 'yuv':
+        img.ReplaceImage(picam_image.array, IM_YUV)
+    return img
 
 #
 # FilterParm.GetValue() must be exception-safe.
@@ -725,7 +753,7 @@ def ListOfOpenCvRectFromListofDicts(in_list):
     return res
 
 def OpenCvRectFromDict(d):
-    print("OpenCvRectFromDict()", d)
+    #print("OpenCvRectFromDict()", d)
     return OpenCvRect(((d['center_x'], d['center_y']),
                         (d['width'], d['height']),
                         d['angle']))

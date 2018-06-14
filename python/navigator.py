@@ -315,17 +315,12 @@ class StepFollowLine(MissionStep):
             self.pid.i_gain = float(self.parm_kword['Ki'])
         if 'Kd' in self.parm_kword:
             self.pid.d_gain = float(self.parm_kword['Kd'])
+        rect = OpticChiasm.RectFromPayload(self.parm_kword) 
+        self.pid.target_value = rect.center_x
         self.next_time = 0
+        self.pid.Reset()
 
     def DoStageStepRun(self, loop_ct):
-        try:
-            crop1_start_x = int(self.mission.mission_specs['l1x'])
-            crop1_width = int(self.mission.mission_specs['l1w'])
-            self.pid.target_value = crop1_start_x + int(crop1_width / 2)
-            print("StepFollowLine()", self.pid.target_value, crop1_start_x, crop1_width)
-        except:
-            pass
-        self.pid.Reset()
         if time.time() > self.next_time:
             self.nav.steering = self.pid.GetOutputInt(self.navigator.line_x)
             self.nav.speed = self.speed

@@ -273,7 +273,7 @@ class MissionControl(vmqtt.mqtt_node):
         if not self.file_client.GetFile(self.pic_fn, path=path):
             print("Unable to fetch PIC", self.pic_fn)
             return
-        im = OpticChiasm.ReadImage(path)
+        im = OpticChiasm.Image(opencv_fn=path)
         if 'center_line' in payload:
             line_at = payload['center_line']
             list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
