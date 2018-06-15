@@ -1,3 +1,7 @@
+from __future__ import absolute_import, division, print_function
+from builtins import (bytes, str, open, super, range,
+                      zip, round, input, int, pow, object)
+
 #
 # This is a standarrdarized data diction for vnavs.
 # The base was developed for the filteer parms in darkroom and then

@@ -134,9 +134,9 @@ class CameramanOrdersDict(vdata.Dict):
                         values=['bgr', 'jpeg', 'yuv']))
 	self.AddAttrib(vdata.DataAttribStr('loop_publish', 'file',
                         values=['file', 'stream']))
-	self.AddAttrib(vdata.DataAttribStr('capture_format',
+	self.AddAttrib(vdata.DataAttribStr('capture_format', 'jpeg',
                         values=['bgr', 'jpeg']))
-	self.AddAttrib(vdata.DataAttribStr('capture_publish',
+	self.AddAttrib(vdata.DataAttribStr('capture_publish', 'file',
                         values=['file', 'stream']))
 	self.AddAttrib(vdata.DataAttribInt('iso', 100,
                         min_value=0, max_value=800))
