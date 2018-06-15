@@ -22,6 +22,7 @@ except:
 
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
+import vnavs_data as vdata
 
 import OpticChiasm
 
@@ -124,6 +125,23 @@ class macbook_camera(object):
                 self.capture(output, **kwargs)
                 yield 'buffer'
 
+class CameramanOrdersDict(vdata.Dict):
+    def __init__(self):
+        super().__init__()
+        self.AddAttrib(vdata.DataAttribStr('loop_mode', 'idle',
+                        values=['idle', 'pause', 'run', 'single']))
+	self.AddAttrib(vdata.DataAttribStr('loop_format', 'jpeg',
+                        values=['bgr', 'jpeg', 'yuv']))
+	self.AddAttrib(vdata.DataAttribStr('loop_publish', 'file',
+                        values=['file', 'stream']))
+	self.AddAttrib(vdata.DataAttribStr('capture_format',
+                        values=['bgr', 'jpeg']))
+	self.AddAttrib(vdata.DataAttribStr('capture_publish',
+                        values=['file', 'stream']))
+	self.AddAttrib(vdata.DataAttribInt('iso', 100,
+                        min_value=0, max_value=800))
+	self.AddAttrib(vdata.DataAttribInt('shutter_speed', 0))
+
 class cameraman(vmqtt.mqtt_node):
     __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
 			'camera', 'camera_resolution',
@@ -131,19 +149,9 @@ class cameraman(vmqtt.mqtt_node):
 			'image_ct', 'iso', 'idle_image_max',
 			'last_fn', 'last_format', 'loop_format', 'loop_mode', 'loop_publish'
 			'mark_hsv_spec', 'mark_payload', 'mark_rect',
-			'orders_parms', 'orders_payload', 'post_processes', 'run',
+			'orders_dict', 'orders_payload', 'post_processes',
 			'shutter_speed',
                     )
-    orders_parms = [
-			{'key': 'loop_mode', 'values': ['idle', 'pause', 'run', 'single'] },
-			{'key': 'loop_format', 'values': ['bgr', 'jpeg', 'yuv'] },
-			{'key': 'loop_publish', 'values': ['file', 'stream'] },
-			{'key': 'capture_format', 'values': ['bgr', 'jpeg'] },
-			{'key': 'capture_publish', 'values': ['file', 'stream'] },
-			{'key': 'run', 'type': 's' },
-			{'key': 'iso', 'type': 'i', 'min': 0, 'max': 800 },
-			{'key': 'shutter_speed', 'type': 'i' }
-    ]
 
     def __init__(self, Verbose=True):
         super().__init__(Subscriptions=[
@@ -197,6 +205,7 @@ class cameraman(vmqtt.mqtt_node):
         self.mark_rect = None
         self.mission_id = None
         self.mission_logging = False
+        self.orders_dict = CameramanOrdersDict()
         self.orders_payload = None
         self.post_processes = []
         self.image_ct = 0			# ct of images captured since __init__
@@ -209,35 +218,6 @@ class cameraman(vmqtt.mqtt_node):
             self.post_processes = []
         else:
             self.post_processes.append(payload)
-
-    def ValidateMessage(self, specs, payload):
-        for this_spec in specs:
-            fld_error = False
-            key = this_spec['key']
-            if key in payload:
-                value = payload[key]
-                if 'type' in this_spec:
-                    p_type = this_spec['type']
-                    if p_type == 'i':
-                        value = int(value)
-                    elif p_type == 's':
-                        value = str(value)
-                if 'min' in this_spec:
-                    p_min = this_spec['min']
-                    if value < p_min:
-                        fld_error = True
-                        print("Payload Error @ %s, '%s' < '%s'." % (key, value, p_min))
-                if 'max' in this_spec:
-                    p_max = this_spec['max']
-                    if value > p_max:
-                        fld_error = True
-                        print("Payload Error @ %s, '%s' > '%s'." % (key, value, p_max))
-                if 'values' in this_spec:
-                    if value not in this_spec['values']:
-                        fld_error = True
-                        print("Payload Error @ %s, invalid value '%s'." % (key, value))
-                if not fld_error:
-                    setattr(self, key, value)
 
     def OnCameramanMark(self, payload):
         print(payload)
@@ -263,7 +243,7 @@ class cameraman(vmqtt.mqtt_node):
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
         if self.orders_payload is not None:
             payload, self.orders_payload = self.orders_payload, None
-            self.ValidateMessage(self.orders_parms, payload)
+            self.orders_parms.ValidatePayload(payload, self)
         self.ImageBurst()
 
     def PostProcess(self, process, Im=None, An=None):
