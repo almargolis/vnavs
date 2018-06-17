@@ -251,9 +251,13 @@ class MissionStep(object):
         self.parm_mission = parm_mission
 
     def PublishNavigation(self, timer=6):
+        mission_specs = self.navigator.GetPersistenData('mission_specs')
+        speed_method = getattr(mission_specs, 'speed_method', 'automatic')
+
         payload = {}
         payload[helmsman.HELMSMAN_HEADING] = self.nav.steering
-        payload[helmsman.HELMSMAN_SPEED] = self.nav.speed
+        if speed_method != 'manual':
+            payload[helmsman.HELMSMAN_SPEED] = self.nav.speed
         payload[helmsman.HELMSMAN_P_ERROR] = self.nav.p_error
         payload[helmsman.HELMSMAN_I_ACCUMULATOR] = self.nav.i_accumulator
         payload[helmsman.HELMSMAN_DERIVATIVE] = self.nav.derivative
@@ -281,10 +285,8 @@ class StepData(MissionStep):
         self.dtype = self.parm_pos[1]
 
     def DoStageStepRun(self, loop_ct):
-        self.navigator.LoadPersistentData()
-        self.parm_kword[vconst.dtype_field_name] = self.dtype
-        self.navigator.persistent_data[self.dname] = self.parm_kword
-        self.navigator.SavePersistentData()
+        self.parm_kword[vconst.dtype_field_name] = self.dtype		# save the data type with the data
+        self.navigator.PutPersistentData(self.dname, self.parm_kword)
         return True
 
 class StepFollowLine(MissionStep):
@@ -914,6 +916,30 @@ class navigator(vmqtt.mqtt_node):
         else:
             self.persistent_data = json.loads(d)
 
+    def GetPersistenData(self, key):
+        self.LoadPersistenData()
+        if keyword in self.persistent_data:
+            return self.TransformPersistenData(self.persistent_data[key])
+        else:
+            return None
+
+    def PutPersistenData(self, key, value):
+        # value should be a dict-like, JSON serializable object
+        self.LoadPersistentData()
+        self.persistent_data[key] = value
+        self.SavePersistentData()
+
+    def TransformPersistenData(self, payload):
+        if not (vconst.dtype_field_name in payload):
+            return payload
+        dtype = payload[vconst.dtype_field_name]
+        if dtype == 'object':
+            transform = object()
+            for key, value in payload.items():
+                setattr(transform, key, value)
+            return transform
+        return payload
+
     def OnDataSave(self, payload):
         print("OnDataSave()", payload)
         if vconst.dname_field_name in payload:
@@ -922,9 +948,7 @@ class navigator(vmqtt.mqtt_node):
         else:
             key = payload['key']
             value = payload['value']
-        self.LoadPersistentData()
-        self.persistent_data[key] = value
-        self.SavePersistentData()
+        self.PutPersistenData(key, value)
 
     def OnDataGet(self, payload):
         print("OnDataGet()", payload)
