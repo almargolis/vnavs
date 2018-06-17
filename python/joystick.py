@@ -27,7 +27,6 @@ def PrintCapability(gamepad):
 class joystick(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[],
-					Readers=[],
 					SingleThreaded=True, BlockIfNotConnected=False,
 					SelectTimeoutSecs=0.01,
 					BrokerType='F', Streamer=False, Verbose=Verbose)
@@ -35,7 +34,14 @@ class joystick(vmqtt.mqtt_node):
         if self.system == 'Linux':
             pass
             ## this only works under linux
-        self.gamepad = evdev.InputDevice('/dev/input/event3')
+        if not self.ConfigureJoystick('/dev/input/event2'):
+            if not self.ConfigureJoystick('/dev/input/event3'):
+                raise Error("No Joystick found!")
+        self.helmsmanChanged = False
+        self.last_publish = 0.0
+
+    def ConfigureJoystick(self, port):
+        self.gamepad = evdev.InputDevice(port)
         PrintCapability(self.gamepad)
         self.gamepadAxis = {}
         capabilities = self.gamepad.capabilities(absinfo=True)
@@ -52,8 +58,7 @@ class joystick(vmqtt.mqtt_node):
         self.speedValue = self.gamepadAxis[self.speedAxisCode].value
         self.directionAxis = self.gamepadAxis[self.directionAxisCode]
         self.directionValue = self.gamepadAxis[self.directionAxisCode].value
-        self.helmsmanChanged = False
-        self.last_publish = 0.0
+        return True
 
     def SaveSpeed(self, event):
         if self.speedValue == event.value:
