@@ -99,7 +99,7 @@ class MissionControl(vmqtt.mqtt_node):
         self.mission_status = mission_frame.AddLabel('Ready', row=SAME_ROW, col=NEXT_COL)
 
         buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        buttonframe.AddButton('Cancel', command=self.CancelMission, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Cancel', command=self.OnCancelMission, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Snap', command=self.SnapPic, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
@@ -255,7 +255,7 @@ class MissionControl(vmqtt.mqtt_node):
         if next_stage_ix < len(self.mission.stages_list):
             self.mission_stage_entry.ReplaceValue(self.mission.stages_list[next_stage_ix])
 
-    def CancelMission(self):
+    def OnCancelMission(self):
         payload = {}
         payload['mission_name'] = self.mission_name_entry.Value()
         self.Publish(vconst.mission_cancel_topic, payload)
