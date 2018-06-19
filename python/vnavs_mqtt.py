@@ -323,9 +323,9 @@ class Subscription(object):
         self.handler_needs_topic = handler_needs_topic
         self.last_payload = None
         if LatestOnly:
-            self.queue = Queue.Queue()
-        else:
             self.queue = None
+        else:
+            self.queue = Queue.Queue()
 
 class ConfirmationRequest(object):
     __slots__ = ('checked_time', 'conf_id', 'confirmed_time', 'payload', 'request_time')

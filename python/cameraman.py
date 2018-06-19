@@ -4,7 +4,6 @@ from builtins import (bytes, str, open, super, range,
 
 import base64
 import cv2
-import datetime
 import io
 import json
 import numpy as np
@@ -23,6 +22,7 @@ except:
 
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
+import vnavs_data as vdata
 
 import OpticChiasm
 
@@ -125,32 +125,42 @@ class macbook_camera(object):
                 self.capture(output, **kwargs)
                 yield 'buffer'
 
+class CameramanOrdersDict(vdata.Dict):
+    def __init__(self):
+        super().__init__()
+        self.AddAttrib(vdata.DataAttribStr('loop_mode', 'idle',
+                        values=['idle', 'pause', 'run', 'single']))
+	self.AddAttrib(vdata.DataAttribStr('loop_format', 'jpeg',
+                        values=['bgr', 'jpeg', 'yuv']))
+	self.AddAttrib(vdata.DataAttribStr('loop_publish', 'file',
+                        values=['file', 'stream']))
+	self.AddAttrib(vdata.DataAttribStr('capture_format', 'jpeg',
+                        values=['bgr', 'jpeg']))
+	self.AddAttrib(vdata.DataAttribStr('capture_publish', 'file',
+                        values=['file', 'stream']))
+	self.AddAttrib(vdata.DataAttribInt('iso', 100,
+                        min_value=0, max_value=800))
+	self.AddAttrib(vdata.DataAttribInt('shutter_speed', 0))
+
 class cameraman(vmqtt.mqtt_node):
     __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
 			'camera', 'camera_resolution',
 			'capture_format', 'capture_publish',
-			'image_ct', 'iso', 'idle_image_id', 'idle_image_id_max',
+			'image_ct', 'iso', 'idle_image_max',
 			'last_fn', 'last_format', 'loop_format', 'loop_mode', 'loop_publish'
 			'mark_hsv_spec', 'mark_payload', 'mark_rect',
-			'orders_parms', 'post_processes', 'run',
+			'orders_dict', 'orders_payload', 'post_processes',
 			'shutter_speed',
                     )
-    orders_parms = [
-			{'key': 'loop_mode', 'values': ['idle', 'pause', 'run', 'single'] },
-			{'key': 'loop_format', 'values': ['bgr', 'jpeg', 'yuv'] },
-			{'key': 'loop_publish', 'values': ['file', 'stream'] },
-			{'key': 'capture_format', 'values': ['bgr', 'jpeg'] },
-			{'key': 'capture_publish', 'values': ['file', 'stream'] },
-			{'key': 'run', 'type': 's' },
-			{'key': 'iso', 'type': 'i', 'min': 0, 'max': 800 },
-			{'key': 'shutter_speed', 'type': 'i' }
-    ]
 
     def __init__(self, Verbose=True):
         super().__init__(Subscriptions=[
 						vmqtt.Subscription(vconst.cameraman_mark_topic, async=True, handler=self.OnCameramanMark),
 						vmqtt.Subscription(vconst.cameraman_orders_topic, async=True, handler=self.OnCameramanOrders),
-						vmqtt.Subscription(vconst.cameraman_process_topic, async=True, handler=self.OnCameramanProcess)
+						vmqtt.Subscription(vconst.cameraman_process_topic, async=True, handler=self.OnCameramanProcess),
+						vmqtt.Subscription(vconst.mission_init_topic, async=True, handler=self.OnMissionInit),
+						vmqtt.Subscription(vconst.mission_log_start_topic, async=True, handler=self.OnMissionLogStart),
+						vmqtt.Subscription(vconst.mission_log_stop_topic, async=True, handler=self.OnMissionLogStop)
 					],
 							SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.burst_fps_rate = 0			# capture speed of last burst
@@ -174,26 +184,32 @@ class cameraman(vmqtt.mqtt_node):
         self.camera.hflip = True
         self.camera.hflip = False
         self.camera.iso = self.iso
+        #
+        # capture format/publish are specs for how to save the captured image
+        #
+        self.capture_format = 'jpeg'		# jpeg, bgr
+        self.capture_publish = 'file'		# file, stream
         self.do_auto_iso = False
         self.do_auto_iso = True
-        self.idle_image_id = 0
-        self.idle_image_id_max = 20
+        self.idle_image_max = 20
         self.iso = self.camera.iso
         self.camera.shutter_speed = self.shutter_speed
-        self.loop_mode = 'run'			# idle, single, run, pause
+        #
+        # loop mode/format/publish are specs for how to configure picamera.capture_continuous().
+        #
         self.loop_mode = 'idle'			# idle, single, run, pause
-        self.loop_format = 'jpeg'		# jpeg, bgr
-        self.loop_publish = 'file'
+        self.loop_format = 'jpeg'		# jpeg, bgr, yuv, rgb
+        self.loop_publish = 'file'		# file, stream
         self.mark_payload = None
         self.mark_hsv_spec = None
         self.mark_rect = None
-        self.capture_format = 'jpeg'		# jpeg, bgr
-        self.capture_publish = 'file'		# file, stream
+        self.mission_id = None
+        self.mission_logging = False
+        self.orders_dict = CameramanOrdersDict()
+        self.orders_payload = None
         self.post_processes = []
-        self.run = ''				# identifier to add to file names
         self.image_ct = 0			# ct of images captured since __init__
         time.sleep(2)				# camera setling time, needed?
-        self.timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
         self.last_fn = ''
         self.last_format = ''
 
@@ -203,47 +219,31 @@ class cameraman(vmqtt.mqtt_node):
         else:
             self.post_processes.append(payload)
 
-    def ValidateMessage(self, specs, payload):
-        for this_spec in specs:
-            fld_error = False
-            key = this_spec['key']
-            if key in payload:
-                value = payload[key]
-                if 'type' in this_spec:
-                    p_type = this_spec['type']
-                    if p_type == 'i':
-                        value = int(value)
-                    elif p_type == 's':
-                        value = str(value)
-                if 'min' in this_spec:
-                    p_min = this_spec['min']
-                    if value < p_min:
-                        fld_error = True
-                        print("Payload Error @ %s, '%s' < '%s'." % (key, value, p_min))
-                if 'max' in this_spec:
-                    p_max = this_spec['max']
-                    if value > p_max:
-                        fld_error = True
-                        print("Payload Error @ %s, '%s' > '%s'." % (key, value, p_max))
-                if 'values' in this_spec:
-                    if value not in this_spec['values']:
-                        fld_error = True
-                        print("Payload Error @ %s, invalid value '%s'." % (key, value))
-                if not fld_error:
-                    setattr(self, key, value)
-
     def OnCameramanMark(self, payload):
         print(payload)
         self.mark_rect = OpticChiasm.RectFromPayload(payload)
         self.mark_payload = payload
 
     def OnCameramanOrders(self, payload):
-        print(payload)
-        self.ValidateMessage(self.orders_parms, payload)
+        # capture orders asynchronously so it can be used to tell the
+        # burst loop to break in order to apply the new orders.
+        self.orders_payload = payload
+
+    def OnMissionInit(self, payload):
+        self.mission_id = payload['mission_id']
+
+    def OnMissionLogStart(self, payload):
+        self.mission_logging = True
+
+    def OnMissionLogStop(self, payload):
+        self.mission_logging = False
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
+        if self.orders_payload is not None:
+            payload, self.orders_payload = self.orders_payload, None
+            self.orders_parms.ValidatePayload(payload, self)
         self.ImageBurst()
 
     def PostProcess(self, process, Im=None, An=None):
@@ -345,8 +345,7 @@ class cameraman(vmqtt.mqtt_node):
         if end_y < 0:
             end_y = 0
 
-        im_in = OpticChiasm.Image(im, colorcode=OpticChiasm.IM_BGR)
-        rect_list = im_in.ChaseLine(hsvspec=self.mark_hsv_spec, rect=self.mark_rect, end_y=end_y,
+        rect_list = im.ChaseLine(hsvspec=self.mark_hsv_spec, rect=self.mark_rect, end_y=end_y,
                                 kernel_dim=kernel_dim, iterations=iterations)
         list_list = OpticChiasm.ListOfOpenCvRectAsListOfDicts(rect_list)
         #print("MAKER ==>", list_list)
@@ -363,106 +362,75 @@ class cameraman(vmqtt.mqtt_node):
         #
         if self.loop_mode == 'pause':
             return
-        burst_loop_mode = self.loop_mode
-        burst_loop_format = self.loop_format
-        burst_loop_publish = self.loop_publish
-        burst_run = self.run
-        if burst_loop_mode == 'idle':
-            # Rotate through a long-ish series of names to avoid race conditions
-            # due to latencies.
-            if self.idle_image_id >= self.idle_image_id_max:
-                self.idle_image_id = 0
-            image_file_name_format = "Idle_%d.jpeg" % (self.idle_image_id)
-            self.idle_image_id += 1
+
+        if self.mission_logging:
+            image_file_name_format = self.mission_id + "{timestamp}_{counter}." + self.loop_format
         else:
-            image_file_name_format = 'R' + self.timestamp
-            if self.run != '':
-                image_file_name_format += '_' + self.run
-            image_file_name_format += '_%d_{counter:04d}.%s' % (self.image_ct, burst_loop_format)
-        if burst_loop_publish == 'stream':
-            if burst_loop_format == 'yuv':
+            image_file_name_format = "Idle_{counter}." + self.loop_format
+        if self.loop_publish == 'file':
+            burst_dest = os.path.join(self.imageDir, image_file_name_format)
+        else:
+            # streams can be jpeg, rgb, bgr, or yuv
+            if self.loop_format == 'yuv':
                 burst_dest = picamera.array.PiYUVArray(self.camera)
-            elif burst_loop_format in [OpticChiasm.IM_RGB, OpticChiasm.IM_BGR]:
+            elif self.loop_format in [OpticChiasm.IM_RGB, OpticChiasm.IM_BGR]:
                 burst_dest = picamera.array.PiRGBArray(self.camera)
             else:				# jpeg
                 burst_dest = io.BytesIO()
-        else:
-            assert burst_loop_format == 'jpeg'
-            burst_dest = os.path.join(self.imageDir, image_file_name_format)
         #
         # Capture some pictures. This might be a single image or a long run of them.
         #
         if self.verbose:
-            print("READY", burst_loop_mode, burst_loop_format, burst_loop_publish, burst_dest)
+            print("READY", self.loop_mode, self.loop_format, self.loop_publish, burst_dest)
         last_time = 0
-        for im_path in self.camera.capture_continuous(burst_dest, format=burst_loop_format, use_video_port=True):
+        burst_image_ct = 0
+        burst_timestamp = vmqtt.NowStr()
+        for picam_return in self.camera.capture_continuous(burst_dest, format=self.loop_format, use_video_port=True):
+            burst_image_ct += 1
             self.image_ct += 1
-            # mqtt can change values asynchronously. copy so values are consistent during capture
-            capture_format = self.capture_format
-            capture_publish = self.capture_publish
-            if burst_loop_publish == 'file':
-                im_fn = os.path.basename(im_path)
-                # the file is already written, make sure its the correct format
-                assert capture_format == burst_loop_format
+            if self.loop_publish == 'file':
+                image_path = picam_return
+                image_fn = os.path.basename(image_path)
+                # the file is already written, make sure its the correct capture format
+                assert self.capture_format == self.loop_format
+                this_image = None			# the image is in a file, not directly modifiable
             else:
                 # capture_continuous returns burst_dest if it is a buffer
-                im_fn = image_file_name_format.format(counter=self.image_ct)
-                #print("CAPT", im_fn, self.imageDir)
-                im_path = os.path.join(self.imageDir, im_fn)
-                file_written = True
-                if capture_format == 'jpeg':
-                    # to keep understandable, keep following if consistent with buffer creation if
-                    if burst_loop_format == 'yuv':
-                        cv2.imwrite(im_path, burst_dest.rgb_array)
-                    elif burst_loop_format in [OpticChiasm.IM_RGB, OpticChiasm.IM_BGR]:
-                        cv2.imwrite(im_path, burst_dest.array)
-                    else:
-                        try:
-                            f = open(im_fn, 'wb')
-                            f.write(burst_dest.getvalue())
-                            f.close()
-                        except IOError as e:
-                            # IOError: [Errno 28] Out of disk space
-                            if e.errno == 28:
-                                file_written = False
-                    if file_written:
-                        self.last_fn = im_fn
-                        self.last_format = capture_format
-                        payload = {}
-                        payload['filename'] = im_fn
-                        payload['capture_format'] = capture_format
-                        payload['capture_publish'] = capture_publish
-                        self.Publish(vconst.cameraman_pic_ready_topic, payload)
-                        last_time = time.time()
+                image_fn = image_file_name_format.format(counter=burst_image_ct, timestamp=burst_timestamp)
+                #print("CAPT", image_fn, self.imageDir)
+                image_path = os.path.join(self.imageDir, image_fn)
+                this_image = OpticChiasm.ImageFromPicamera(burst_dest, self.loop_format, file_path=image_path)
+                if self.capture_publish == 'file':
+                    this_image.Write()
+
                 """
                 if burst_publish == 's':
                     #buffer = burst_dest.getvalue()
                     buffer = burst_dest.array
                     #buffer = pickle.dumps(burst_dest.array)
                     payload = {}
-                    payload['filename'] = im_fn
+                    payload['filename'] = image_fn
                     payload['format'] = burst_format
                     payload['publish'] = burst_publish
                     payload['buflen'] = len(buffer)
                     self.streamer.write(json.dumps(payload) + chr(26) + buffer)
                 """
                 if self.verbose:
-                    print("PIC", im_fn)
+                    print("PIC", image_fn)
             #
-            # At this point we have an image captured and in the requested format.
+            # At this point we have an image captured
             #
             rect_list = None
-            if (len(self.post_processes) > 0) or (burst_loop_mode == 'idle') or True:
+            if (len(self.post_processes) > 0) or (self.mark_payload is not None) or True:
                 # we need an OpenCv image for post processing
-                if burst_loop_publish == 'file':
-                    img = cv2.imread(im_path)
+                if this_image is None:
+                    this_image = OpticChiasm.Image(opencv_fn=image_path)
             if self.mark_payload is not None:
                 # self.mark_rect was unconditionally created when the message was received.
                 # The rectangle might be used for muiltiple things.
                 # if the payload has a save parameter, get an hsv spec for the marked area.
                 if 'save' in self.mark_payload:
-                    im_in = OpticChiasm.Image(img, colorcode=OpticChiasm.IM_BGR)
-                    self.mark_hsv_spec = OpticChiasm.NextHsvSpec(im_in.ImAsHSV(), rect=self.mark_rect)
+                    self.mark_hsv_spec = OpticChiasm.NextHsvSpec(this_image.ImAsHSV(), rect=self.mark_rect)
                     hsv_payload = self.PrepareResponse(self.mark_payload, ConfResponse=True)
                     hsv_payload.update(self.mark_hsv_spec.AsPayload())
                     print("MARK HSV", hsv_payload)
@@ -473,12 +441,12 @@ class cameraman(vmqtt.mqtt_node):
                 annotated = img.copy()
                 for this in self.post_processes:
                     self.PostProcess(this, Im=img, An=annotated)
-                pos = im_fn.rfind('.')
-                an_fn = im_fn[:pos] + '-A' + im_fn[pos:]
+                pos = image_fn.rfind('.')
+                an_fn = image_fn[:pos] + '-A' + im_fn[pos:]
                 an_path = os.path.join(self.imageDir, an_fn)
                 cv2.imwrite(an_path, annotated)
             else:
-                rect_list = self.MakerFaire2018(img)
+                rect_list = self.MakerFaire2018(this_image)
                 annotated = None
             #
             # Imsge process, now publish
@@ -487,13 +455,13 @@ class cameraman(vmqtt.mqtt_node):
             burst_elapsed_time = time.time() - self.burst_fps_start_time
             self.burst_fps_rate = self.burst_fps_ct / burst_elapsed_time
             payload = {}
-            payload['filename'] = im_fn
+            payload['filename'] = image_fn
             if annotated is not None:
                 payload['annotated'] = an_fn
             payload['iso'] = self.camera.iso
             payload['shutter_speed'] = self.camera.exposure_speed
-            payload['capture_format'] = capture_format
-            payload['capture_publish'] = capture_publish
+            payload['capture_format'] = self.capture_format
+            payload['capture_publish'] = self.capture_publish
             payload['capture_fps'] = self.burst_fps_rate
             payload['center_line'] = rect_list
             self.Publish(vconst.cameraman_pic_ready_topic, payload)
@@ -506,22 +474,23 @@ class cameraman(vmqtt.mqtt_node):
                 self.iso = self.camera.iso
             if self.camera.shutter_speed != self.shutter_speed:
                 self.camera.shutter_speed = self.shutter_speed
-            if burst_loop_publish == 'stream':
+            if self.loop_publish == 'stream':
                 # prepare for next image. This is needed even when not published
                 burst_dest.truncate()
                 burst_dest.seek(0)   # ?? needed for io.Bytes?? Required for PiRGBArray for subsequent images
-            if burst_loop_mode == 'idle':
+            if self.loop_mode == 'idle':
                 #print("END IDLE")
                 # need conditional to determin conversion paramter for different formats
                 if self.do_auto_iso:
-                    self.AutoIso(img)
-                # idle takes one image per "burst". Mainly to control file names.
-                break
-            if burst_loop_mode == 'single':
+                    self.AutoIso(this_image.im)
+                if burst_image_ct > self.idle_image_max:
+                    # idle takes a limited number of images per "burst" to cycle throrugh a limited number of file names.
+                    break
+            if self.loop_mode == 'single':
                 # enter paused mode if we have taken our single picture
                 self.loop_mode = 'pause'
                 break
-            if burst_loop_mode != self.loop_mode:
+            if self.loop_mode != self.loop_mode:
                 break
 
 if __name__ == '__main__':

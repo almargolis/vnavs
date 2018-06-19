@@ -45,6 +45,9 @@ navigator_mode_topic = 'navigator/mode'
 navigator_plot_topic = 'navigator/plot'
 navigator_waypoint_topic = 'navigator/waypoint'
 
+stage_init = 'init'
+stage_finis = 'finis'
+
 dname_field_name = '_dname_'
 dtype_field_name = '_dtype_'
 

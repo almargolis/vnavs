@@ -251,9 +251,13 @@ class MissionStep(object):
         self.parm_mission = parm_mission
 
     def PublishNavigation(self, timer=6):
+        mission_specs = self.navigator.GetPersistenData('mission_specs')
+        speed_method = getattr(mission_specs, 'speed_method', 'automatic')
+
         payload = {}
         payload[helmsman.HELMSMAN_HEADING] = self.nav.steering
-        payload[helmsman.HELMSMAN_SPEED] = self.nav.speed
+        if speed_method != 'manual':
+            payload[helmsman.HELMSMAN_SPEED] = self.nav.speed
         payload[helmsman.HELMSMAN_P_ERROR] = self.nav.p_error
         payload[helmsman.HELMSMAN_I_ACCUMULATOR] = self.nav.i_accumulator
         payload[helmsman.HELMSMAN_DERIVATIVE] = self.nav.derivative
@@ -281,21 +285,8 @@ class StepData(MissionStep):
         self.dtype = self.parm_pos[1]
 
     def DoStageStepRun(self, loop_ct):
-        self.navigator.LoadPersistentData()
-        self.parm_kword[vconst.dtype_field_name] = self.dtype
-        self.navigator.persistent_data[self.dname] = self.parm_kword
-        self.navigator.SavePersistentData()
-        return True
-
-class StepEnd(MissionStep):
-    def __init__(self, stage):
-        super().__init__(stage)
-
-    def DoStageStepInit(self):
-        pass
-
-    def DoStageStepRun(self, loop_ct):
-        self.mission.EndMission()
+        self.parm_kword[vconst.dtype_field_name] = self.dtype		# save the data type with the data
+        self.navigator.PutPersistentData(self.dname, self.parm_kword)
         return True
 
 class StepFollowLine(MissionStep):
@@ -315,17 +306,12 @@ class StepFollowLine(MissionStep):
             self.pid.i_gain = float(self.parm_kword['Ki'])
         if 'Kd' in self.parm_kword:
             self.pid.d_gain = float(self.parm_kword['Kd'])
+        rect = OpticChiasm.RectFromPayload(self.parm_kword) 
+        self.pid.target_value = rect.center_x
         self.next_time = 0
+        self.pid.Reset()
 
     def DoStageStepRun(self, loop_ct):
-        try:
-            crop1_start_x = int(self.mission.mission_specs['l1x'])
-            crop1_width = int(self.mission.mission_specs['l1w'])
-            self.pid.target_value = crop1_start_x + int(crop1_width / 2)
-            print("StepFollowLine()", self.pid.target_value, crop1_start_x, crop1_width)
-        except:
-            pass
-        self.pid.Reset()
         if time.time() > self.next_time:
             self.nav.steering = self.pid.GetOutputInt(self.navigator.line_x)
             self.nav.speed = self.speed
@@ -576,8 +562,15 @@ class MissionStepDef(object):
             defs[self.name] = self
 
 
+MISSION_STATE_NONE = 0
+MISSION_STATE_LOADED = 10
+MISSION_STATE_STARTED = 20		# vconst_stage_init has started
+MISSION_STATE_INITED = 30		# vconst.stage_init stage has completed
+MISSION_STATE_FINISED = 40		# vconst.stage_finis has been completed
+MISSION_STATE_ENDED = 50		# EndMission() termination process completed
+
 class Mission(object):
-    __slots__ = ('active_stage', 'confirmation_ids', 'mission_id', 'mission_loaded', 'mission_name', 'mission_script',
+    __slots__ = ('active_stage', 'confirmation_ids', 'mission_id', 'mission_state', 'mission_name', 'mission_script',
 						'named_steps', 'navigator',
 						'stage_step_ix', 'stage_step_loop_ct', 'stages_dict', 'stages_list')
 
@@ -593,7 +586,7 @@ class Mission(object):
         self.stages_list = []
         self.stage_step_ix = 0
         self.stage_step_loop_ct = 0
-        self.mission_loaded = False
+        self.mission_state = MISSION_STATE_NONE
         if self.mission_script is not None:
             self.LoadMission(self.mission_script)
 
@@ -695,11 +688,12 @@ class Mission(object):
                 else:
                     print("LoadMission() Unknown step type", step_type)
                     err_ct += 1
-        self.mission_loaded = True
+        self.mission_state = MISSION_STATE_LOADED
         print("Mission Loaded", self.stages_list)
 
     def DoMission(self):
-        if not self.mission_loaded:
+        if (self.mission_state < MISSION_STATE_LOADED) or (self.mission_state >= MISSION_STATE_FINISED):
+            # Missions cannot run before they are loaded and are over after vconst.stage_finis has completed.
             return
         # At this time, we trust mission control to send rational stage requests.
         # We probably need a production/testing mode flag.
@@ -710,33 +704,22 @@ class Mission(object):
             if self.navigator.mission_sync_event_payload is not None:
                 if 'mission_stage' in self.navigator.mission_sync_event_payload:
                     stage_name = self.navigator.mission_sync_event_payload['mission_stage']
-                    if stage_name in self.stages_list:
-                        # This is a valid request to start a new stage.
-                        if stage_name == 'init':
-                            # This is the start of a mission
-                            self.mission_id = "{}_{}".format(self.mission_name, vmqtt.NowStr())
-                            init_payload = self.navigator.PrepareResponse(self.navigator.mission_sync_event_payload)
-                            init_payload['mission_id'] = self.mission_id
-                            init_payload['mission_name'] = self.mission_name
-                            init_payload['mission_stage'] = stage_name
-                            self.navigator.Publish(vconst.mission_init_topic, init_payload)
-                        stage_payload = self.navigator.PrepareResponse(self.navigator.mission_sync_event_payload)
-                        stage_payload['mission_id'] = self.mission_id
-                        stage_payload['mission_name'] = self.mission_name
-                        stage_payload['mission_stage'] = stage_name
-                        self.navigator.Publish(vconst.mission_stage_started_topic, stage_payload)
-                        self.active_stage = self.stages_dict[stage_name]
-                        self.stage_step_ix = 0
-                        self.stage_step_loop_ct = 0
+                    self.StartStage(stage_name, self.navigator.mission_sync_event_payload)
                 self.navigator.mission_sync_event_payload = None
         if self.active_stage is None:
             return					# waiting for external event (from mission control)
         if self.stage_step_ix >= len(self.active_stage.steps):
+            # we just finised the current stage
             payload = {}
             payload['mission_id'] = self.mission_id
             payload['mission_name'] = self.mission_name
             payload['mission_stage'] = self.active_stage.name
             self.navigator.Publish(vconst.mission_stage_completed_topic, payload)
+            if self.active_stage.name == vconst.stage_init:
+                self.mission_state = MISSION_STATE_INITED
+            elif self.active_stage.name == vconst.stage_finis:
+                self.mission_state = MISSION_STATE_FINISED
+                self.EndMission(None)
             self.active_stage = None
             return
         self.stage_step_loop_ct += 1
@@ -754,11 +737,61 @@ class Mission(object):
             self.stage_step_ix += 1
             self.stage_step_loop_ct = 0
 
-    def StartWrapup(self):
-        # This should insert some steps to (optionally?) halt the vehicle
-        # and wait for physical operations to wind down. For now its a
-        # hard stop.
-        self.EndMission()
+    def StartStage(self, stage_name, initiator_payload):
+        if not (stage_name in self.stages_list):
+            return False
+        # initiator_payload could be none if navigator decided to start a stage
+        # without an external event. Maybe from an abend or timeout. That is not
+        # implemented at this point.
+        if stage_name == vconst.stage_init:
+            # This is the start of a mission
+            self.mission_id = "{}_{}".format(self.mission_name, vmqtt.NowStr())
+            if initiator_payload is None:
+                stage_payload = {}
+            else:
+                init_payload = self.navigator.PrepareResponse(initiator_payload)
+            init_payload['mission_id'] = self.mission_id
+            init_payload['mission_name'] = self.mission_name
+            init_payload['mission_stage'] = stage_name
+            self.navigator.Publish(vconst.mission_init_topic, init_payload)
+            self.state = MISSION_STATE_STARTED
+        # Start this stage
+        if initiator_payload is None:
+            stage_payload = {}
+        else:
+            stage_payload = self.navigator.PrepareResponse(initiator_payload)
+        stage_payload['mission_id'] = self.mission_id
+        stage_payload['mission_name'] = self.mission_name
+        stage_payload['mission_stage'] = stage_name
+        self.navigator.Publish(vconst.mission_stage_started_topic, stage_payload)
+        self.active_stage = self.stages_dict[stage_name]
+        self.stage_step_ix = 0
+        self.stage_step_loop_ct = 0
+        return True
+
+    def EndMission(self, initiator_payload):
+        # We can get here naturally because vconst.stage_finish has ended routinely
+        # or because of an exceptioon event.
+        if self.mission_state >= MISSION_STATE_STARTED:
+            if self.mission_state < MISSION_STATE_FINISED:
+                if vconst.stage_finis in self.stages_list:
+                    # it's  conceivable to get in a loop where vconst.stage_finis
+                    # never completes because we keep restarting it.
+                    # Maybe check if vconst.stage_finis is running and do
+                    # something a bit different.
+                    self.StartStage(vconst.stage_finis, initiator_payload)
+                    # The mission has not ended, but we are working on it.
+                    return False
+        # We get here if the mission was never started or vconst.stage_finis
+        # has either completed or doesn't exist. We can get here multiple times
+        # if the operator clicks repeatedly. That isn't harmful, but nodes
+        # need to be able to handle multiple vconst.mission_end_topic messages.
+        payload = {}
+        payload['mission_id'] = self.mission_id
+        payload['mission_name'] = self.mission_name
+        self.navigator.Publish(vconst.mission_end_topic, payload)
+        self.mission_state = MISSION_STATE_ENDED
+        return True
 
     def Waypoints(self):
         waypoints = []
@@ -767,21 +800,11 @@ class Mission(object):
                 waypoints.append(s.waypoint)
         return waypoints
 
-    def EndMission(self):
-        # This is a hard stop, closing all operations and data collection.
-        self.mission_loaded = False
-        # Putting the camera in idle mode may be redundant but doesn't do any harm.
-        # Making sure we are in idle mode helps avoid crashes due to mission_loaded out of
-        # storage.
-        # The mission end topic stops logging of data. This should only happen
-        # once per mission from here, but redundant messages should not be harmful.
+    def CancelMission(self, initiator_payload):
+        # This is a hard stop, closing all dangeous operations.
+        # This starts vconst.stage_finis, to clean up the mission.
         self.navigator.EStop()
-        payload = {}
-        payload['loop_mode'] = 'idle'
-        self.navigator.Publish(vconst.cameraman_orders_topic, payload)
-        payload = {}
-        # The following could be a problem because end also subscribe -- endless loop???
-        #self.navigator.Publish(vconst.mission_end_topic, payload)
+        self.EndMission(initiator_payload)
 
     def SaveWaypoints(self, MissionName=None):
         return
@@ -836,7 +859,6 @@ class NavStep(object):
 class navigator(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[
-						# vmqtt.Subscription('navigator/mode', handler=self.DoNavigatorMode),
 						vmqtt.Subscription(vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady),
 						vmqtt.Subscription(vconst.engineer_1_gps_topic, handler=self.DoEngineer1Gps),
 						vmqtt.Subscription(vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu),
@@ -854,12 +876,10 @@ class navigator(vmqtt.mqtt_node):
         self.imageFn = None
         self.imageRequested = None
         self.line_x = None
-        self.pausedMode = None
         self.mission = None
         self.mission_load_payload = None
         self.mission_sync_event_payload = None
         self.mission_cancel_payload = None
-        self.new_mode_payload = None
         self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
@@ -896,6 +916,30 @@ class navigator(vmqtt.mqtt_node):
         else:
             self.persistent_data = json.loads(d)
 
+    def GetPersistenData(self, key):
+        self.LoadPersistenData()
+        if keyword in self.persistent_data:
+            return self.TransformPersistenData(self.persistent_data[key])
+        else:
+            return None
+
+    def PutPersistenData(self, key, value):
+        # value should be a dict-like, JSON serializable object
+        self.LoadPersistentData()
+        self.persistent_data[key] = value
+        self.SavePersistentData()
+
+    def TransformPersistenData(self, payload):
+        if not (vconst.dtype_field_name in payload):
+            return payload
+        dtype = payload[vconst.dtype_field_name]
+        if dtype == 'object':
+            transform = object()
+            for key, value in payload.items():
+                setattr(transform, key, value)
+            return transform
+        return payload
+
     def OnDataSave(self, payload):
         print("OnDataSave()", payload)
         if vconst.dname_field_name in payload:
@@ -904,9 +948,7 @@ class navigator(vmqtt.mqtt_node):
         else:
             key = payload['key']
             value = payload['value']
-        self.LoadPersistentData()
-        self.persistent_data[key] = value
-        self.SavePersistentData()
+        self.PutPersistenData(key, value)
 
     def OnDataGet(self, payload):
         print("OnDataGet()", payload)
@@ -918,59 +960,11 @@ class navigator(vmqtt.mqtt_node):
         data_payload['value'] = value
         self.Publish('data/value', data_payload)
 
-    def rmsg_navigator_mode(self, payload):
-        print("MODE_MSG", payload)
-        new_mode = payload['mode']
-        if new_mode not in "GMPR":
-            return 'invalid mode'
-        self.new_mode_payload = payload
-
     def rmsg_navigator_service(self, payload):
         request = payload['request']
         if request not in self.serviceNames:
             return 'unknown service'
         self.serviceRequests.append(payload)
-
-    def ChangeMode(self):
-        payload = self.new_mode_payload
-        self.new_mode_payload = None
-        if payload is None:
-            return
-        mode = payload['mode']
-        print("MODE", mode)
-        if mode == 'R':
-            if self.pausedMode is not None:
-                self.mode = self.pausedMode
-                self.pausedMode = None
-        elif mode == 'P':
-            if self.mode in 'GC':
-                self.pausedMode = self.mode
-                self.mode = mode
-        elif mode in 'MG':
-            if (mode == "G") and (self.mode != "G"):
-                # Start a mission
-                print("START MISSION")
-                mission_name = payload['missionName']
-                self.Init(MissionName=mission_name)
-                self.mission.StartMission()
-                """
-                THIS NEEDS to be activated for GPS
-                self.nav.steering = 'A0'
-                self.nav.speed = FORWARD_SLOW
-                if self.mission.waypoints[self.mission.stage_step_ix][0] == "W":
-                    self.nav.untrustedGpsUpdates = INITIAL_GPS_WAIT		# allow gps to settle
-                    self.PublishNavigation()
-                """
-            print("MISSION", self.mission.missionName, len(self.mission.mission_steps))
-            if (mode == "M") and (self.mode == "G"):
-                # end of mission
-                print("END MISSION")
-                self.nav.Init()
-                self.PublishNavigation()
-                self.mission.SaveNavigation()
-                self.mission.EndMission()
-            self.mode = mode
-            self.pausedMode = None
 
     def ProcessServiceRequest(self):
         if len(self.serviceRequests) < 1:
@@ -1036,7 +1030,7 @@ class navigator(vmqtt.mqtt_node):
             if self.mission_load_payload is not None:
                 mission_payload = self.mission_load_payload
                 self.mission_load_payload = None
-                self.new_mission_cancel_payload = None
+                self.mission_cancel_payload = None
                 name = mission_payload[MISSION_NAME]
                 script = mission_payload[MISSION_SCRIPT].split('\n')
                 self.mission = Mission(self, name=name, script=script)
@@ -1044,13 +1038,13 @@ class navigator(vmqtt.mqtt_node):
         if self.mission is not None:
             if self.mission_load_payload is not None:
                 # A new mission has been received, cancel the existing mission
-                self.mission.StartWrapup()
-            elif self.new_mission_cancel_payload is not None:
+                self.mission.CancelMission(self.mission_load_payload)
+            elif self.mission_cancel_payload is not None:
                 # The current mission is being cancelled
-                self.new_mission_cancel_payload = None
-                self.mission.StartWrapup()
+                self.mission.CancelMission(self.mission_cancel_payload)
+                self.mission_cancel_payload = None
             self.mission.DoMission()			# do mission work
-            if not self.mission.mission_loaded:
+            if self.mission.mission_state >= MISSION_STATE_FINISED:
                 self.mission = None
             return
 

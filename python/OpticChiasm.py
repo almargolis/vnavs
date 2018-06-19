@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import io
 import os, cv2, numpy as np
 import math
 import time
@@ -9,6 +10,8 @@ import time
 from operator import itemgetter
 import sys
 import re
+
+import vnavs_data as vdata
 
 # OpenCv uses a range of 0 to HSV_MAX_HUE instead of 0 to 360.
 # old, non-working values were yellow=30, orange=12, blue=120, red=178
@@ -20,12 +23,15 @@ HSV_ORANGE = int(60.0 * HSV_RATIO)
 HSV_BLUE = int(240.0 * HSV_RATIO)
 HSV_RED = int(350.0 * HSV_RATIO)
 
+# These are OpenCv compatible codes.
+# Picamera uses lower case and also supports other formats.
 IM_BGR = 'BGR'
 IM_GRAY = 'GRAY'
 IM_HSL = 'HSL'
 IM_HSV = 'HSV'
 IM_RGB = 'RGB'
-IM_COLORCODES = [IM_BGR, IM_GRAY, IM_HSL, IM_HSV, IM_RGB]
+IM_YUV = 'YUV'
+IM_COLORCODES = [IM_BGR, IM_GRAY, IM_HSL, IM_HSV, IM_RGB, IM_YUV]
 
 DRAW_BGR_RED = (0, 0, 255)
 DRAW_BGR_MAGENTA = (255, 0, 255)
@@ -54,10 +60,6 @@ RACE_THRESHOLD = 150
 #   [0,0] is the upper, left corner of the image
 #   The image is stored as an array of horizontal lines, so the index is [y, x]
 #
-def ReadImage(path):
-    im = cv2.imread(path)
-    return Image(im=im, colorcode=IM_BGR)
-
 def ReprOpenCv(im):
     imx = Image(im=im, colorcode=IM_BGR)
     return imx.__repr__()
@@ -69,16 +71,18 @@ class Image(object):
         OpenCv and numpy operations that I find non-intuitive.
     """
     __slots__ = (
-	'colorcode', 'colordepth', 'crop_source', 'crop_x', 'crop_y', 'height', '_im', 'shape', 'width'
+	'colorcode', 'colordepth', 'crop_source', 'crop_x', 'crop_y', 'file_path', 'height', '_im', 'shape', 'width'
     )
 
     def __init__(self, im=None, colorcode=None, opencv_fn=None):
+        self.file_path = opencv_fn
         if opencv_fn is not None:
             im = cv2.imread(opencv_fn)
             colorcode = IM_BGR
-        crop_source = None				# Image() from which this is cropped
-        crop_x = None					# left x starting position of this crop in source image
-        crop_y = None					# upper y` starting position of this crop in source image
+        colorcode = colorcode.upper()			# change picamera format to OpenCv
+        self.crop_source = None				# Image() from which this is cropped
+        self.crop_x = None				# left x starting position of this crop in source image
+        self.crop_y = None				# upper y` starting position of this crop in source image
         self.ReplaceImage(im, colorcode)
 
     def __repr__(self):
@@ -105,6 +109,14 @@ class Image(object):
     @property
     def im(self):			# im is a property to discourage skipping ReplaceImage()
         return self._im
+
+    def ImAsBGR(self):
+        if self._im is None:
+            return None
+        if self.colorcode == IM_BGR:
+            return self._im
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_BGR))
+        return cv2.cvtColor(self._im, transform)
 
     def ImAsRGB(self):
         if self._im is None:
@@ -158,8 +170,13 @@ class Image(object):
                 self.colordepth = 1
         self.shape = (self.height, self.width, self.colordepth)
 
-    def Write(self, fn):
-        cv2.imwrite(fn, self._im)
+    def Write(self, fn=None):
+        if fn is None:
+            fn = self.file_path
+        cv2.imwrite(fn, self.ImAsBGR())
+        # except IOError as e:
+        # IOError: [Errno 28] Out of disk space
+        #                    if e.errno == 28:
 
     def AverageHue(self, rect=None):
         if rect is None:
@@ -273,89 +290,17 @@ class Image(object):
         print("FindColorBlobs()", rect_list)
         return rect_list, next_hsv_spec
 
-#
-# FilterParm.GetValue() must be exception-safe.
-# The application runs in multiple threads (tkinter, vnavs_mqtt and main().
-# Step execution may be called while the user is editing, so a partially edited
-# value may be picked up.
-#
-# This is probably a bug, not a feature. Execution should be orderly and only
-# in the main() thread. But maintining this rule keeps the system as user friendly
-# as possible in the event of errors and doesn't really have a downside except
-# perhaps a flash of odd results if the step is executed while the user is editing.
-#
-class FilterParm(object):
-    __slots__ = ('caption', 'default', 'name', 'max_value', 'min_value', 'use_slider')
-    def __init__(self, name, default, click_point=False,
-				min_value=None, max_value=None, use_slider=False):
-        self.name = name
-        self.default = default
-        self.click_point = click_point
-        self.min_value = min_value
-        self.max_value = max_value
-        self.use_slider = use_slider
-        if self.click_point:
-            self.caption = self.name + ' (PP)'
-        else:
-            self.caption = self.name
-
-class FilterParmFloat(FilterParm):
-    def GetValue(self, raw_value):
-        if isinstance(raw_value, str):
-            raw_value = raw_value.strip()
-        return str(float(raw_value))
-
-class FilterParmInt(FilterParm):
-    def GetValue(self, raw_value):
-        if isinstance(raw_value, str):
-            raw_value = raw_value.strip()
-        try:
-            i = int(raw_value)
-        except:
-            i = 0
-        return str(i)
-
-class FilterParmStr(FilterParm):
-    def GetValue(self, raw_value):
-        if raw_value is None:
-            raw_value = ''
-        v = raw_value.strip()
-        if '"' in v:
-            v = ''
-        if "'" in v:
-            v = ''
-        return v
-
-class FilterParmPoint(FilterParm):
-    # This is a numpy / mathematical point
-
-    def GetValue(self, raw_value):
-        v = raw_value.split(',')
-        x = int(v[0].strip())
-        y = int(v[1].strip())
-        return "({},{})".format(x, y)
-
-class FilterParmPointSym(FilterParm):
-    def __init__(self, name, default, click_point=True):
-        super().__init__(name, default, click_point=click_point)
-
-    def GetValue(self, raw_value):
-        # The defaults of 'b' and 'e' works well for ranges like CropYX.
-        # Not so much for points like CropPP.
-        v = raw_value.split(',')
-        x = ''
-        y = ''
-        if len(v) >= 1:
-            x = v[0].strip()
-        if len(v) >= 2:
-            y = v[1].strip()
-
-        if x == '':
-            x = 'b'
-        if y == '':
-            y = 'e'
-        return "('{}','{}')".format(x, y)
-
+def ImageFromPicamera(picam_image, format, file_path=None):
+    # format is picamera style format
+    img = Image()
+    img.file_path = file_path
+    if format == 'bgr':
+        img.ReplaceImage(picam_image.array, IM_BGR)
+    elif format == 'rgb':
+        img.ReplaceImage(picam_image.array, IM_RGB)
+    elif format == 'yuv':
+        img.ReplaceImage(picam_image.array, IM_YUV)
+    return img
 # Filter functions should modify only:
 #	xstep.im
 # GetParm() must filter parameters to avoid code injection attacks
@@ -379,7 +324,7 @@ class ImageFilter(object):
     def __init__(self, name, code, parms, Flags=None):
         self.name = name
         self.code = code
-        self.parms = parms		# a list of FilterParm() and descendent objects
+        self.parms = parms		# a list of vdata.DataAttrib() and descendent objects
         self.flags = Flags		# a list of string flag names
         self.annotate_code = None
         self.filters[name] = self
@@ -399,10 +344,10 @@ ImageFilter(FILTER_NAME_IMAGE,
 ImageFilter(FILTER_NAME_COLORMASK_MULTI,
 			'{x_output_im} = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={huerange}, threshold={threshold}),\n' \
 				+ '	colorcode=oc.IM_GRAY)',
-                        [FilterParmInt('huerange', '25', min_value=0, max_value=127, use_slider=True),
-				FilterParmInt('threshold', '50', min_value=0, max_value=127, use_slider=True),
-				FilterParmInt('wthreshold', '50', min_value=0, max_value=127, use_slider=True),
-                                FilterParmStr('colors', 'oc.HSV_WHITE, oc.HSV_RED')],
+                        [vdata.DataAttribInt('huerange', '25', min_value=0, max_value=127, use_slider=True),
+				vdata.DataAttribInt('threshold', '50', min_value=0, max_value=127, use_slider=True),
+				vdata.DataAttribInt('wthreshold', '50', min_value=0, max_value=127, use_slider=True),
+                                vdata.DataAttribStr('colors', 'oc.HSV_WHITE, oc.HSV_RED')],
                         Flags=[])
 
 ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
@@ -412,13 +357,13 @@ ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
 				+ ' value={value}, valuerange={valueRange})\n' \
 			'{x_output_im} = oc.Image(oc.ColorMaskOneHue(im_in.ImAsAny("{colorcode}"), {x_output_hsvspec}),' \
 				+ '	colorcode=oc.IM_GRAY)',
-                        [FilterParmInt('hue', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
-                        	FilterParmInt('hueRange', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
-                        	FilterParmInt('saturation', '205', min_value=0, max_value=255, use_slider=True),
-                        	FilterParmInt('saturationRange', '50', min_value=0, max_value=255, use_slider=True),
-                        	FilterParmInt('value', '205', min_value=0, max_value=255, use_slider=True),
-				FilterParmInt('valueRange', '50', min_value=0, max_value=255, use_slider=True),
-				FilterParmStr('colorcode', IM_HSV)
+                        [vdata.DataAttribInt('hue', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
+                        	vdata.DataAttribInt('hueRange', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
+                        	vdata.DataAttribInt('saturation', '205', min_value=0, max_value=255, use_slider=True),
+                        	vdata.DataAttribInt('saturationRange', '50', min_value=0, max_value=255, use_slider=True),
+                        	vdata.DataAttribInt('value', '205', min_value=0, max_value=255, use_slider=True),
+				vdata.DataAttribInt('valueRange', '50', min_value=0, max_value=255, use_slider=True),
+				vdata.DataAttribStr('colorcode', IM_HSV)
 			],
                         Flags=[FLAG_SLIDERS])
 
@@ -426,7 +371,7 @@ filter = ImageFilter(FILTER_NAME_CROPPP,
 			'{x_output_rect} = im_in.RectFromSymbolicPP({p1}, {p2})\n'
 				+ '{x_output_im} = im_in.Crop({x_output_rect})\n'
 				+ 'print(im_in.shape, {x_output_rect})\n',
-			[FilterParmPointSym('p1', 'm-50,m+50'), FilterParmPointSym('p2', '-100,e')],
+			[vdata.DataAttribPointSym('p1', 'm-50,m+50'), vdata.DataAttribPointSym('p2', '-100,e')],
 			Flags=[])
 filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
@@ -435,7 +380,7 @@ filter = ImageFilter('CropYX',
 			'{x_output_rect} = im_in.RectFromSymbolicYX({y_range}, {x_range})\n'
 				+ '{x_output_im} = im_in.Crop({x_output_rect})\n'
 				+ 'print(im_in.shape, {x_output_rect})\n',
-			[FilterParmPointSym('y_range', '-100,'), FilterParmPointSym('x_range', 'm-50,m+50')],
+			[vdata.DataAttribPointSym('y_range', '-100,'), vdata.DataAttribPointSym('x_range', 'm-50,m+50')],
 			Flags=[])
 filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
@@ -447,34 +392,34 @@ ImageFilter('Gray',
 
 ImageFilter('Blur',
 			'{x_output_im} = oc.Image(im=cv2.blur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
-			[FilterParmPoint('ksize', '3,3')],
+			[vdata.DataAttribPoint('ksize', '3,3')],
 			Flags=[])
 
 ImageFilter('BlurBilateralFilter',
 			'{x_output_im} = oc.Image(im=cv2.bilateralFilter(im_in.im, {diameter}, {sigmaColor}, {sigmaSpace}), colorcode=im_in.colorcode)',
-			[FilterParmInt('diameter', '5'), FilterParmInt('sigmaColor', '17'), FilterParmInt('sigmaSpace', '17')],
+			[vdata.DataAttribInt('diameter', '5'), vdata.DataAttribInt('sigmaColor', '17'), vdata.DataAttribInt('sigmaSpace', '17')],
 			Flags=[])
                         # diameter > 5 is very slow, use 5 for real time processing or 9 for off-line heavy filtering
 			# the two sigma values are often the same value. <10 doesn't do much, >150 is cartoonish
 
 ImageFilter('BlurGaussian',
 			'{x_output_im} = oc.Image(im=cv2.GaussianBlur(im_in.im, {ksize}, {sigmaX}), colorcode=im_in.colorcode)',
-			[FilterParmPoint('ksize', '3,3'), FilterParmFloat('sigmaX', '0.0')],
+			[vdata.DataAttribPoint('ksize', '3,3'), vdata.DataAttribFloat('sigmaX', '0.0')],
 			Flags=[])
 
 ImageFilter('BlurMedian',
 			'{x_output_im} = oc.Image(im=cv2.medianBlur(im_in.im, {ksize}), colorcode=im_in.colorcode)',
-			[FilterParmInt('ksize', '3')],
+			[vdata.DataAttribInt('ksize', '3')],
 			Flags=[])
 
 ImageFilter('Canny',
 			'{x_output_im} = oc.Image(im=cv2.Canny(im_in.ImAsGray(), {threshold1}, {threshold2}), colorcode=oc.IM_GRAY)',
-			[FilterParmFloat('threshold1', '100'), FilterParmFloat('threshold2', '300')],
+			[vdata.DataAttribFloat('threshold1', '100'), vdata.DataAttribFloat('threshold2', '300')],
 			Flags=[])
 
 ImageFilter('CannyAuto',
 			'{x_output_im} = oc.Image(im=oc.AutoCanny(im_in.ImAsGray(), {sigma}), colorcode=oc.IM_GRAY)',
-			[FilterParmFloat('sigma', '0.33')],
+			[vdata.DataAttribFloat('sigma', '0.33')],
 			Flags=[])
 
 filter = ImageFilter('ChaseLine',
@@ -490,7 +435,7 @@ filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 
 ImageFilter('ColorBalance',
 			'{x_output_im} = oc.simplest_cb(im, {pct})',
-			[FilterParmInt('pct', '20')],
+			[vdata.DataAttribInt('pct', '20')],
 			Flags=[])
 #
 # Morphing Filters
@@ -506,40 +451,40 @@ ImageFilter('MorphClose',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
 				+ '{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_CLOSE, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
-			[FilterParmInt('kernel_dim', '5'),
-				FilterParmInt('iterations', '1')],
+			[vdata.DataAttribInt('kernel_dim', '5'),
+				vdata.DataAttribInt('iterations', '1')],
 			Flags=[])
 
 ImageFilter('MorphDilate',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
 				+ '{x_output_im} = oc.Image(im=cv2.dilate(im_in.im, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
-			[FilterParmInt('kernel_dim', '5'),
-				FilterParmInt('iterations', '1')],
+			[vdata.DataAttribInt('kernel_dim', '5'),
+				vdata.DataAttribInt('iterations', '1')],
 			Flags=[])
 
 ImageFilter('MorphErode',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
 				+ '{x_output_im} = oc.Image(im=cv2.erode(im_in.im, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
-			[FilterParmInt('kernel_dim', '5'),
-				FilterParmInt('iterations', '1')],
+			[vdata.DataAttribInt('kernel_dim', '5'),
+				vdata.DataAttribInt('iterations', '1')],
 			Flags=[])
 
 ImageFilter('MorphGradient',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
 				+ '{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_GRADIENT, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
-			[FilterParmInt('kernel_dim', '5'),
-				FilterParmInt('iterations', '1')],
+			[vdata.DataAttribInt('kernel_dim', '5'),
+				vdata.DataAttribInt('iterations', '1')],
 			Flags=[])
 
 ImageFilter('MorphOpen',
 			'kernel = np.ones(({kernel_dim}, {kernel_dim}), np.uint8)\n'
 				+ '{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_OPEN, kernel, iterations={iterations}),\n'
 				+ '			colorcode=im_in.colorcode)\n',
-			[FilterParmInt('kernel_dim', '5'),
-				FilterParmInt('iterations', '1')],
+			[vdata.DataAttribInt('kernel_dim', '5'),
+				vdata.DataAttribInt('iterations', '1')],
 			Flags=[])
 
 #
@@ -548,7 +493,7 @@ ImageFilter('MorphOpen',
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
 filter = ImageFilter('ContoursFind',
 			'cont2, {x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
-			[FilterParmInt('MaxLevel', '-1')],
+			[vdata.DataAttribInt('MaxLevel', '-1')],
 			Flags=[])
 filter.annotate_code = '{x_output_annotated} = im_base.CopyAsGray().CopyAsBGR()\n' \
 				+ 'oc.CrayolaContours({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy}, MaxLevel={MaxLevel})\n' \
@@ -575,7 +520,7 @@ ImageFilter('HistogramCB',
 
 filter = ImageFilter(FILTER_NAME_ANALYZER,
 			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n',
-			[FilterParmPointSym('p1', 'm-3,m-3'), FilterParmPointSym('p2', 'p+3,p+3')],
+			[vdata.DataAttribPointSym('p1', 'm-3,m-3'), vdata.DataAttribPointSym('p2', 'p+3,p+3')],
 			Flags=[])
 filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n' \
@@ -583,7 +528,7 @@ filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 
 filter = ImageFilter('HoughLinesP',
 			'{x_output_lines} = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
-			[FilterParmInt('MinLineLength', '30'), FilterParmInt('MaxLineGap', 10)],
+			[vdata.DataAttribInt('MinLineLength', '30'), vdata.DataAttribInt('MaxLineGap', 10)],
 			Flags=[''])
 filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ 'print({x_output_lines})\n' \
@@ -725,7 +670,7 @@ def ListOfOpenCvRectFromListofDicts(in_list):
     return res
 
 def OpenCvRectFromDict(d):
-    print("OpenCvRectFromDict()", d)
+    #print("OpenCvRectFromDict()", d)
     return OpenCvRect(((d['center_x'], d['center_y']),
                         (d['width'], d['height']),
                         d['angle']))
@@ -1027,7 +972,7 @@ class HsvSpec(object):
         for this in self.__slots__:
             p[this] = getattr(self, this)
         return p
-    
+
     def copy(self):
         return HsvSpec(hue=self.hue, huerange=self.huerange,
                             saturation=self.saturation, saturationrange=self.saturationrange,

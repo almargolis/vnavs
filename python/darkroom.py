@@ -279,7 +279,7 @@ class ProcessStep(object):
             f.write('cam = cameraman.macbook_camera()\n')
             f.write('im_in = cam.capture_image()\n')
         else:
-            f.write('im_in = oc.ReadImage("{}")\n'.format(source_path))
+            f.write('im_in = oc.Image("opencv_fn={}")\n'.format(source_path))
         f.write('im_base = im_in.copy()\n')
         f.write('\n')
 
