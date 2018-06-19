@@ -697,7 +697,7 @@ class mqtt_node(object):
             send_time = float(payload['_sendTime'])
             send_diff = time.time() - send_time
             if send_diff > 5:
-                print("Node stale message {} - {} = {}".format(time.time(), send_time, send_diff))
+                print("Node stale message {} - {} = {} {}".format(time.time(), send_time, send_diff, message.topic))
                 #raise Exception("node message stale")
         #
         if '_isConfirmation' in payload:
