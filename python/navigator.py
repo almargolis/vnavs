@@ -251,7 +251,7 @@ class MissionStep(object):
         self.parm_mission = parm_mission
 
     def PublishNavigation(self, timer=6):
-        mission_specs = self.navigator.GetPersistenData('mission_specs')
+        mission_specs = self.navigator.GetPersistentData('mission_specs')
         speed_method = getattr(mission_specs, 'speed_method', 'automatic')
 
         payload = {}
@@ -725,7 +725,7 @@ class Mission(object):
         self.stage_step_loop_ct += 1
         step = self.active_stage.steps[self.stage_step_ix]
         if self.stage_step_loop_ct == 1:
-            print("DoLoop()", self.active_stage.name, self.stage_step_ix, step.__class__.__name__)
+            print("DoMission()", self.active_stage.name, self.stage_step_ix, step.__class__.__name__, self.mission_state)
             self.navigator.LoadPersistentData()
             for this in step.parm_mission:
                 d = self.navigator.persistent_data[this]
@@ -916,20 +916,20 @@ class navigator(vmqtt.mqtt_node):
         else:
             self.persistent_data = json.loads(d)
 
-    def GetPersistenData(self, key):
-        self.LoadPersistenData()
-        if keyword in self.persistent_data:
-            return self.TransformPersistenData(self.persistent_data[key])
+    def GetPersistentData(self, key):
+        self.LoadPersistentData()
+        if key in self.persistent_data:
+            return self.TransformPersistentData(self.persistent_data[key])
         else:
             return None
 
-    def PutPersistenData(self, key, value):
+    def PutPersistentData(self, key, value):
         # value should be a dict-like, JSON serializable object
         self.LoadPersistentData()
         self.persistent_data[key] = value
         self.SavePersistentData()
 
-    def TransformPersistenData(self, payload):
+    def TransformPersistentData(self, payload):
         if not (vconst.dtype_field_name in payload):
             return payload
         dtype = payload[vconst.dtype_field_name]
@@ -948,7 +948,7 @@ class navigator(vmqtt.mqtt_node):
         else:
             key = payload['key']
             value = payload['value']
-        self.PutPersistenData(key, value)
+        self.PutPersistentData(key, value)
 
     def OnDataGet(self, payload):
         print("OnDataGet()", payload)
