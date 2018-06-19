@@ -196,7 +196,7 @@ class QueueOne(object):
         self.message = message
 
 class SocketWrapper(object):
-    __slots__ = ('buffer_len', 'config', 'isServer', 'is_aocket_blocking', 'isZeroOneProtocol',
+    __slots__ = ('buffer_len', 'config', 'debug', 'isServer', 'is_aocket_blocking', 'isZeroOneProtocol',
 				'message_in_ct', 'message_out_ct',
 				'os_socket',
 				'sent_ct', 'socket_host', 'socket_port', 'verbose')
@@ -206,6 +206,7 @@ class SocketWrapper(object):
         self.buffer_len = BufferLen
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
+        self.debug = 'c'
         self.socket_host = Host
         self.socket_port = Port
         self.sent_ct = 0
@@ -350,7 +351,7 @@ class SocketWrapper(object):
                 connection, client_address = s.accept()
                 connection.setblocking(0)
                 self.inputSockets.append(connection)
-                if self.verbose:
+                if self.verbose or ('c' in self.debug):
                     print('new connection from', client_address, 'total connections', len(self.inputSockets))
             else:
                 try:
@@ -654,13 +655,13 @@ SUBSCRIPTION_MODE_ALL = 'a'
 SUBSCRIPTION_MODE_LATEST = 'l'
 
 class Subscription(object):
-    __slots__ = ('message', 'mode', 'socket', 'topic')
+    __slots__ = ('message', 'mode', 's', 'topic')
 
     def __init__(self, topic, mode, s):
         self.topic = topic
         self.mode = mode
         self.messsage = None
-        self.socket = s				# socket - this is the id of the subsriber
+        self.s = s				# socket - this is the id of the subsriber
 
 class FastMqttServer(SocketWrapperServer):
     __slots__ = ('archive_dir', 'archiver', 'mission_id', 'topics_last_message', 'subscriptions')
@@ -678,7 +679,7 @@ class FastMqttServer(SocketWrapperServer):
         self.archive_dir = os.path.expanduser(self.archive_dir)               # this expands tilde in path
 
     def CloseClientConnection(self, s):
-        super().CloseClientConnection(self, s)
+        super().CloseClientConnection(s)
 
     def ProcessMessage(self, s, message):
         if message[0] == '':
@@ -693,7 +694,7 @@ class FastMqttServer(SocketWrapperServer):
             if self.verbose:
                 print("PUBLISH", topic, self.subscriptions)
             if topic in self.subscriptions:
-                for this in self.subscriptions[topic]:
+                for this in self.subscriptions[topic].values():
                     if this.s in self.inputSockets:
                         # we get here for subscription by still-connected sockets
                         if this.mode == SUBSCRIPTION_MODE_LATEST:
