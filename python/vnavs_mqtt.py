@@ -65,10 +65,10 @@ class FileClient(vcomms.SocketWrapperClient):
             #    socket.error: [Errno 37] Operation already in progress
             # So some patience is needed. Somewhere there is some latency or
             # inconsistency of block / no block. Or one of hte OSes trying to be polite.
-            time.sleep(1)
-            print("FC TRY CONNECT", self.socket_host, self.socket_port)
+            #time.sleep(1)
+            print("FileClient.GetFile - Attempt Connect", self.socket_host, self.socket_port)
             self.Connect()
-        #print("FC CONNECTED")
+        print("FileClient.GetFile - CONNECTED", self.socket_host, self.socket_port)
         self.file_name = filename
         if path is None:
             self.file_path = filename
@@ -155,13 +155,13 @@ class FastMqttClient(vcomms.SocketWrapperClient):
         mid = 0					# not implemented -- message id
         return (mqtt.MQTT_ERR_SUCCESS, mid)
 
-    def subscribe(self, topic, qos, timeout=1.0):
+    def subscribe(self, topic, qos, timeout=1.0, mode=vcomms.SUBSCRIPTION_MODE_ALL):
         packet_sent = False
         start_time = time.time()
         while not packet_sent:
             try:
                 print("SUBSCRIBE", topic)
-                self.QueueMessageZ(['subscribe', topic])
+                self.QueueMessageZ(['subscribe', topic, mode])
                 packet_sent = True
             except socket.error as e:
                 # socket.error: [Errno 11] Resource temporarily unavailable
@@ -187,7 +187,7 @@ class FastMqttClient(vcomms.SocketWrapperClient):
 class PahoClient(mqtt.Client):
     # This should be a very thin wrapper.
     # FastMqttClient() should have as close to identical API as Paho client.
-    # This object reconiles any unavoidable differences so mqtt_node works
+    # This object reconciles any unavoidable differences so mqtt_node works
     # with either server.
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -203,6 +203,9 @@ class PahoClient(mqtt.Client):
         super().disconnect()
         self.connected = False
         self.connect_in_progress = False
+
+    def subscribe(self, topic, qos, timeout=1.0, mode=vcomms.SUBSCRIPTION_MODE_ALL):
+        super().subscribe(topic, qos)
 
 class FastMqttMessage(object):
     def __init__(self, topic, payload, qos=0, mid=0):
@@ -678,7 +681,11 @@ class mqtt_node(object):
         print("on_connect() rc: " + str(rc))
         for this_subscription in self.subscriptions.values():
             if not this_subscription.request_only:
-                self.mqttc.subscribe(this_subscription.topic, 0)
+                if this_subscription.queue is None:
+                    mode = vcomms.SUBSCRIPTION_MODE_LATEST
+                else:
+                    mode = vcomms.SUBSCRIPTION_MODE_ALL
+                self.mqttc.subscribe(this_subscription.topic, 0, mode=mode)
 
     def on_message(self, client, userdata, message):
         if self.verbose:
@@ -697,7 +704,7 @@ class mqtt_node(object):
             send_time = float(payload['_sendTime'])
             send_diff = time.time() - send_time
             if send_diff > 5:
-                print("Node stale message {} - {} = {}".format(time.time(), send_time, send_diff))
+                print("Node stale message {} - {} = {} {}".format(time.time(), send_time, send_diff, message.topic))
                 #raise Exception("node message stale")
         #
         if '_isConfirmation' in payload:

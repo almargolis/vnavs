@@ -5,7 +5,6 @@ from builtins import (bytes, str, open, super, range,
 import io
 import os, cv2, numpy as np
 import math
-import picamera
 import time
 #from scipy import weave
 from operator import itemgetter
