@@ -65,10 +65,10 @@ class FileClient(vcomms.SocketWrapperClient):
             #    socket.error: [Errno 37] Operation already in progress
             # So some patience is needed. Somewhere there is some latency or
             # inconsistency of block / no block. Or one of hte OSes trying to be polite.
-            time.sleep(1)
-            print("FC TRY CONNECT", self.socket_host, self.socket_port)
+            #time.sleep(1)
+            print("FileClient.GetFile - Attempt Connect", self.socket_host, self.socket_port)
             self.Connect()
-        #print("FC CONNECTED")
+        print("FileClient.GetFile - CONNECTED", self.socket_host, self.socket_port)
         self.file_name = filename
         if path is None:
             self.file_path = filename
@@ -681,7 +681,7 @@ class mqtt_node(object):
         print("on_connect() rc: " + str(rc))
         for this_subscription in self.subscriptions.values():
             if not this_subscription.request_only:
-                if this.latest_only:
+                if this_subscription.queue is None:
                     mode = vcomms.SUBSCRIPTION_MODE_LATEST
                 else:
                     mode = vcomms.SUBSCRIPTION_MODE_ALL
