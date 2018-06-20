@@ -177,9 +177,26 @@ class socket_xfer(object):
 # getting some benefit from multiple cores via threading inside the OS. It is possible for a server
 # to utilize seperate threaads or even separate processes per client socket or group of client sockets
 # but that is not supported by this object.
+#
+# QueueOne is an alternate queue with a max lenght of one. 
+#
+class QueueOne(object):
+    __slots__ = ('message', )
+
+    def __init__(self):
+        self.message = None
+
+    def get_nowait(self):
+        if self.message is None:
+            raise Queue.Empty
+        result, self.message = self.message, None
+        return result
+
+    def put(self, message):
+        self.message = message
 
 class SocketWrapper(object):
-    __slots__ = ('buffer_len', 'config', 'isServer', 'is_aocket_blocking', 'isZeroOneProtocol',
+    __slots__ = ('buffer_len', 'config', 'debug', 'isServer', 'is_aocket_blocking', 'isZeroOneProtocol',
 				'message_in_ct', 'message_out_ct',
 				'os_socket',
 				'sent_ct', 'socket_host', 'socket_port', 'verbose')
@@ -189,6 +206,7 @@ class SocketWrapper(object):
         self.buffer_len = BufferLen
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(config_file_path))
+        self.debug = 'c'
         self.socket_host = Host
         self.socket_port = Port
         self.sent_ct = 0
@@ -212,6 +230,12 @@ class SocketWrapper(object):
         # which might slow other applications. This problem was never exhibited on
         # the RPI side of the communications (RPI <-> RPI) only (RPI <-> OSX).
         #
+        # On Raspbian, when killing FastMqttServer
+        # with kill -HUP, it cound not bes started for a while due to
+        # socket.error: [Errno 98] Address already in use
+        # Trying tcpSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # per: https://stackoverflow.com/questions/19071512/socket-error-errno-48-address-already-in-use
+        #
         self.isServer = IsServer
         self.isZeroOneProtocol = IsZeroOneProtocol
         self.message_in_ct = 0
@@ -224,6 +248,7 @@ class SocketWrapper(object):
     def InitSocket(self):
         self.os_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.os_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.os_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if self.is_socket_blocking:
             self.os_socket.setblocking(1)
         else:
@@ -283,23 +308,23 @@ class SocketWrapper(object):
             #print("RCV", parts)
             self.ProcessMessage(s, parts)
 
-    def QueueMessage(self, message, s=None):
+    def QueueMessage(self, message, s=None, QueueClass=Queue.Queue):
         if s is None:				# This should only be true if self.isServer is False
             s = self.os_socket
         if not s in self.outputQueues:
-            self.outputQueues[s] = Queue.Queue()
+            self.outputQueues[s] = QueueClass()
         self.outputQueues[s].put(message)
         self.message_out_ct += 1
         if s not in self.outputSockets:
             self.outputSockets.append(s)
 
-    def QueueMessageZ(self, parts, s=None):
+    def QueueMessageZ(self, parts, s=None, QueueClass=Queue.Queue):
         msg_parts = []
         for this in parts:
             msg_parts.append(this)
             msg_parts.append('\x00')
         msg_parts.append('\x01')
-        self.QueueMessage(''.join(msg_parts), s=s)
+        self.QueueMessage(''.join(msg_parts), s=s, QueueClass=QueueClass)
 
     def Select(self, timeout=1.0):
         # If this is a server and the client connection fails, we want to clean up that connection and
@@ -326,7 +351,7 @@ class SocketWrapper(object):
                 connection, client_address = s.accept()
                 connection.setblocking(0)
                 self.inputSockets.append(connection)
-                if self.verbose:
+                if self.verbose or ('c' in self.debug):
                     print('new connection from', client_address, 'total connections', len(self.inputSockets))
             else:
                 try:
@@ -589,7 +614,7 @@ class MessageArchiver(object):
         self.archive_file = None
 
     def Open(self, MissionName):
-        fp = MissionName + 'nav'
+        fp = MissionName + '.nav'
         self.archive_file = open(fp, 'w')
         self.archive_buffer = []
         self.archive_size = 0
@@ -629,13 +654,26 @@ class MessageArchiver(object):
 # There is only one queue per client, so be careful about subscribing to high
 # volume topics for time sensitive processes.
 #
+
+SUBSCRIPTION_MODE_ALL = 'a'
+SUBSCRIPTION_MODE_LATEST = 'l'
+
+class Subscription(object):
+    __slots__ = ('message', 'mode', 's', 'topic')
+
+    def __init__(self, topic, mode, s):
+        self.topic = topic
+        self.mode = mode
+        self.messsage = None
+        self.s = s				# socket - this is the id of the subsriber
+
 class FastMqttServer(SocketWrapperServer):
-    __slots__ = ('archive_dir', 'archiver', 'mission_id', 'mqttPayloads', 'subscriptions')
+    __slots__ = ('archive_dir', 'archiver', 'mission_id', 'topics_last_message', 'subscriptions')
 
     def __init__(self, Verbose=False):
         ini_section = "MqttFastServer"
         super().__init__(IniSection=ini_section , Port=FAST_MQTT_PORT, Verbose=Verbose)
-        self.mqttPayloads = {}
+        self.topics_last_message = {}
         self.subscriptions = {}
         self.message_in_ct = 0
         self.message_out_ct = 0
@@ -643,6 +681,9 @@ class FastMqttServer(SocketWrapperServer):
         self.archiver = MessageArchiver()
         self.archive_dir = self.config.get(ini_section, "ArchiveDir")
         self.archive_dir = os.path.expanduser(self.archive_dir)               # this expands tilde in path
+
+    def CloseClientConnection(self, s):
+        super().CloseClientConnection(s)
 
     def ProcessMessage(self, s, message):
         if message[0] == '':
@@ -653,22 +694,18 @@ class FastMqttServer(SocketWrapperServer):
             server_time = time.time()
             topic = message[1]
             payload = message[2]
-            self.mqttPayloads[topic] = (self.message_in_ct, payload)
+            self.topics_last_message[topic] = (self.message_in_ct, payload)	# This saves the last message of each topic
             if self.verbose:
                 print("PUBLISH", topic, self.subscriptions)
             if topic in self.subscriptions:
-                newSubscriptionList = []
-                for sendSocket in self.subscriptions[topic]:
-                    if sendSocket in self.inputSockets:
+                for this in self.subscriptions[topic].values():
+                    if this.s in self.inputSockets:
                         # we get here for subscription by still-connected sockets
-                        newSubscriptionList.append(sendSocket)
-                        self.QueueMessageZ(['message', topic, repr(self.message_in_ct), payload], s=sendSocket)
-                        print("PUBLISH", topic, "Queued")
-                    else:
-                        print("PUBLISH", topic, "Socket unknown")
-                self.subscriptions[topic] = newSubscriptionList		# scrubbed of closed connections
-            else:
-                print("PUBLISH", topic, "No Subscribers")
+                        if this.mode == SUBSCRIPTION_MODE_LATEST:
+                            queue_class = QueueOne
+                        else:
+                            queue_class = Queue.Queue
+                        self.QueueMessageZ(['message', topic, repr(self.message_in_ct), payload], s=this.s, QueueClass=queue_class)
             if topic == vconst.mission_init_topic:
                 payload_dict = json.loads(payload)
                 print("ProcessMessage()", payload_dict)
@@ -686,8 +723,8 @@ class FastMqttServer(SocketWrapperServer):
             self.archiver.Archive(self.message_in_ct, server_time, payload)
         elif action == 'read':
             topic = message[1]
-            if topic in self.mqttPayloads:
-                (mid, payload) = self.mqttPayloads[topic]
+            if topic in self.topics_last_message:
+                (mid, payload) = self.topics_last_message[topic]
             else:
                 mid = 0
                 payload = '{}'
@@ -695,11 +732,11 @@ class FastMqttServer(SocketWrapperServer):
             print("READ", topic)
         elif action == 'subscribe':
             topic = message[1]
-            if topic in self.subscriptions:
-                if s not in self.subscriptions[topic]:
-                    self.subscriptions[topic].append(s)
-            else:
-                self.subscriptions[topic] = [s]
+            mode = message[2]
+            subscription = Subscription(topic, mode, s)
+            if not (topic in self.subscriptions):
+                self.subscriptions[topic] = {}
+            self.subscriptions[topic][s] = subscription			# keep latest subscription if duplicate
             print("SUBSCRIPTIONS", topic, len(self.subscriptions[topic]))
 
 if __name__ == "__main__":
