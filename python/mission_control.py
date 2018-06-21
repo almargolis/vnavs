@@ -50,16 +50,18 @@ class MissionControl(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         #Verbose = True
         super().__init__(Subscriptions=[
-                            vmqtt.Subscription(vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady),
-                            vmqtt.Subscription(vconst.engineer_1_gps_topic, handler=self.DoEngineer1Gps),
-                            vmqtt.Subscription(vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu),
-                            vmqtt.Subscription(vconst.helmsman_orders_topic, handler=self.DoHelmsmanOrders),
-                            vmqtt.Subscription(vconst.mission_mark_topic, handler=self.DoMissionMark),
+                            vmqtt.Subscription(vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady, LatestOnly=True),
+                            vmqtt.Subscription(vconst.engineer_1_gps_topic, handler=self.DoEngineer1Gps, LatestOnly=True),
+                            vmqtt.Subscription(vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu, LatestOnly=True),
+                            vmqtt.Subscription(vconst.helmsman_orders_topic, handler=self.DoHelmsmanOrders, LatestOnly=True),
+                            vmqtt.Subscription(vconst.mission_mark_topic, handler=self.DoMissionMark, LatestOnly=True),
+                            vmqtt.Subscription(vconst.mission_loaded_topic, 
+							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_stage_started_topic, 
-							handler=self.DoMissionStatus, handler_needs_topic=True),
+							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_stage_completed_topic, 
-							handler=self.DoMissionStatus, handler_needs_topic=True),
-                            vmqtt.Subscription(vconst.navigator_plot_topic, handler=self.DoNavigatorPlot)
+							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
+                            vmqtt.Subscription(vconst.navigator_plot_topic, handler=self.DoNavigatorPlot, LatestOnly=True)
 						],
 						SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
@@ -87,7 +89,10 @@ class MissionControl(vmqtt.mqtt_node):
         self.image.img_source_dir = '/volumes/pi/projects/vnavs/temp'
         self.image.img_fname_suffix = ''
         self.image.do_save_snaps = False
+        self.pic_transfer_in_progress = False
         self.pic_fn = None
+        self.pic_path = None
+        self.pic_payload = None
 
         mission_tab = self.notebook.AddTab('Mission')
 
@@ -237,6 +242,7 @@ class MissionControl(vmqtt.mqtt_node):
         self.mission = navigator.Mission(name=mission_name, script=mission_script.split('\n'))
         if len(self.mission.stages_list) > 0:
             self.mission_stage_entry.ReplaceChoices(self.mission.stages_list)
+            self.mission_stage_entry.ReplaceValue(self.mission.stages_list[0])
         else:
             self.mission_stage_entry.ReplaceChoices(['None'])
         payload = {}
@@ -264,24 +270,13 @@ class MissionControl(vmqtt.mqtt_node):
         payload['speed'] = 0
         self.Publish(vconst.helmsman_orders_topic, payload)
 
-    def ProcessImage(self, payload):
-        if self.pic_fn is None:
-            print("NO PIC AVAILABLE")
-            return
-        path = os.path.join(self.downloadDir, self.pic_fn)
-        #print("ProcessImage()", path)
-        if not self.file_client.GetFile(self.pic_fn, path=path):
-            print("Unable to fetch PIC", self.pic_fn)
-            return
-        im = OpticChiasm.Image(opencv_fn=path)
-        if 'center_line' in payload:
-            line_at = payload['center_line']
+    def ProcessImage(self):
+        im = OpticChiasm.Image(opencv_fn=self.pic_path)
+        if 'center_line' in self.pic_payload:
+            line_at = self.pic_payload['center_line']
             list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
             #print("ProcessImage() center_line ", list_of_OpenCvRect)
             im.DrawLinePoints(list_of_OpenCvRect)
-            #parts = line_at.split(',')
-            #line_x = int(parts[0])
-            #line_y = int(parts[1])
         if self.line_rect is not None:
             cv2.line(im._im, self.line_rect.p1, self.line_rect.p2, OpticChiasm.DRAW_BGR_BLACK, 5)
             ctr = self.line_rect.center
@@ -289,19 +284,21 @@ class MissionControl(vmqtt.mqtt_node):
             cv2.line(im._im, ctr, fwd, OpticChiasm.DRAW_BGR_WHITE, 5)
         self.f1_img1.UpdateImage(source_im=im.im)
         self.f1_fname.ReplaceValue(self.pic_fn)
-        self.f1_fps.ReplaceValue('{} fps'.format(payload['capture_fps']))
-        self.pic_fn = None
+        self.f1_fps.ReplaceValue('{} fps'.format(self.pic_payload['capture_fps']))
 
     def DoMissionMark(self, payload):
         print("mission/mark", payload)
         self.line_rect = OpticChiasm.RectFromPayload(payload)
+        print("DoMissionMark()", self.line_rect, payload)
 
     def DoCameramanPicReady(self, payload):
-            if 'annotated' in payload:
-                self.pic_fn = payload['annotated']
-            else:
-                self.pic_fn = payload['filename']
-            self.ProcessImage(payload)
+        if self.pic_transfer_in_progress:
+            return					# ignore until we finish current image
+        self.pic_payload = payload
+        self.pic_transfer_in_progress = True
+        self.pic_fn = payload['filename']
+        self.pic_path = os.path.join(self.downloadDir, self.pic_fn)
+        self.file_client.StartTransfer(self.pic_fn, path=self.pic_path)
 
     def DoEngineer1Gps(self, payload):
         self.gps_speed.ReplaceValue(payload[engineer_1.GPS_SPEED])
@@ -320,6 +317,10 @@ class MissionControl(vmqtt.mqtt_node):
 
     def DoMissionStatus(self, topic, payload):
         print("DoMissionStatus()", payload)
+        if not 'mission_id' in payload:
+            payload['mission_id'] = 'XXX'	# normal for mission/loaded, else an error
+        if not 'mission_stage' in payload:
+            payload['mission_stage'] = 'XXX'	# normal for mission/loaded, else an error
         status = "{mission_id} {mission_stage} {_topic}".format(**payload)
         self.mission_status.ReplaceValue(status)
 
@@ -354,6 +355,11 @@ class MissionControl(vmqtt.mqtt_node):
             self.helmsman_derivative.ReplaceValue(derivative)
 
     def DoLoop(self):
+        if self.pic_transfer_in_progress:
+            # Checking the transfer reports completion and does some transfering if not complete
+            if self.file_client.CheckTransfer():
+                self.ProcessImage()
+                self.pic_transfer_in_progress = False
         self.HandleAllSynchronousPayloads()
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
