@@ -13,6 +13,7 @@ data_get_topic = 'data/get'
 
 mission_async_event_topic = 'mission/async_event'
 mission_load_topic = 'mission/load'
+mission_loaded_topic = 'mission/loaded'
 mission_cancel_topic = 'mission/cancel'
 mission_init_topic = 'mission/init'
 mission_end_topic = 'mission/end'

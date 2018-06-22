@@ -222,6 +222,7 @@ class Image(object):
         line_hsvspec = hsvspec.copy()
         line_rect = rect.copy()
         chase_ct = 0
+        min_blob_area = (sliceheight * 0.5) * 3			# 1/2 slice height by 3 pixels
         print("ChaseLine()", self, line_hsvspec, line_rect)
         def QualifyLineSegment():
             global next_hsv_spec
@@ -230,7 +231,8 @@ class Image(object):
             # size? color? location?
             print("ChaseLine() Qualify", line_hsvspec, line_rect)
             blobs, next_hsv_spec = self.FindColorBlobs(hsvspec=line_hsvspec, rect=line_rect,
-                                kernel_dim=kernel_dim, iterations=iterations)
+                                kernel_dim=kernel_dim, iterations=iterations,
+				MinimumBlobArea=min_blob_area, MaximumCtOfRectsWanted=1)
             if blobs is None:
                 return None, None
             return blobs[0], next_hsv_spec
@@ -254,19 +256,28 @@ class Image(object):
             return True
 
         line_points = []
+        missing_slices = 0
         while True:
             chase_ct += 1
             print("ChaseLine() Loop", chase_ct, line_hsvspec, line_rect)
             this_segment, this_hsvspec = QualifyLineSegment()
-            if this_segment is not None:
+            if this_segment is None:
+                missing_slices += 1
+            else:
+                missing_slices = 0
                 line_points.append(this_segment)
             if this_hsvspec is not None:
                 line_hsvspec = this_hsvspec
-            if not AdvanceLineSearch(this_segment):
+            if (missing_slices > 2) or (not AdvanceLineSearch(this_segment)):
+                # Missing_slices filters for reasonably continuous lines.
+                # Added because when line was lost this was finding random blobs to chase
+                # far from line. If following dashed line, we might want a more cyclic check.
+                # False positives are worse than false negatives.
                 return line_points
 
     def FindColorBlobs(self, hsvspec, rect=None,
-                            kernel_dim=3, iterations=1):
+                            kernel_dim=3, iterations=1,
+				MinimumBlobArea=1, MaximumCtOfRectsWanted=3):
         print("FindColorBlobs()", self, rect, hsvspec)
         if rect is None:
             im_cropped = self
@@ -278,7 +289,7 @@ class Image(object):
         kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
         im_dilated = cv2.dilate(im_masked, kernel, iterations=iterations)
         cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        rect_list = ContoursExtract(contours, hierarchy)
+        rect_list = ContoursExtract(contours, hierarchy, MinimumArea=MinimumBlobArea, MaximumCtOfRectsWanted=MaximumCtOfRectsWanted)
         next_hsv_spec = None
         if rect_list is not None:
             # used im_masked because im_dilated includes out of range hsv values
@@ -669,6 +680,15 @@ def ListOfOpenCvRectFromListofDicts(in_list):
         res.append(OpenCvRectFromDict(this))
     return res
 
+def SlopeOfListOfOpenCvRect(list_of_rects):
+    [vx,vy,x,y] =  cv2.fitLine(points, cv2.DIST_L1, 0, 0.01, 0.01)
+    print("slope", float(vy / vx))
+    left_y = int((-x*vy/vx) + y)
+    right_y = int(((width-x)*vy/vx)+y)
+
+    if (left_y >= 0) and (left_y <= height) and (right_y >= 0) and (right_y <= height):
+        vert_line = ((width-1,right_y), (0,left_y))
+
 def OpenCvRectFromDict(d):
     #print("OpenCvRectFromDict()", d)
     return OpenCvRect(((d['center_x'], d['center_y']),
@@ -714,6 +734,10 @@ class OpenCvRect(object):
         return top
 
     @property
+    def center(self):
+        return (self.center_x, self.center_y)
+
+    @property
     def p1(self):
         # return upper/right corner point of right rectangle
         half_width = self.width / 2
@@ -735,7 +759,7 @@ def OpenCvRectFromOpenCvImage(im):
     dims = (width, height)
     return OpenCvRect((center, dims, 0.0))
 
-def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumLines=3):
+def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3):
     # returns a list of the largest contours as minimum sized rectangles
     if hierarchy is None:
         return None
@@ -755,7 +779,7 @@ def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumLines=3):
         h_ix = h[0]
     areas.sort(reverse=True)				# sort from largest to smallest)
     rect_list = []
-    for this in areas[:MaximumLines]:
+    for this in areas[:MaximumCtOfRectsWanted]:
         h_ix = this[1]
         cnt = contours[h_ix]
         rect = OpenCvRect(cv2.minAreaRect(cnt))		# ((x, y), (w, h), angle)
@@ -765,7 +789,7 @@ def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumLines=3):
 
 
 
-def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=3):
+def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3):
     # This only looks at top level of hierarchy.
     # This analyzes contours and draws them on thee image -- modifying the image.
     # This is my original attempt for learning about / exploring.
@@ -785,7 +809,7 @@ def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=
             areas.append((area, h_ix))
         h_ix = h[0]
     areas.sort(reverse=True)			# sort from largest to smallest)
-    for this in areas[:MaximumLines]:
+    for this in areas[:MaximumCtOfRectsWanted]:
         h_ix = this[1]
         cnt = contours[h_ix]
         rect = cv2.minAreaRect(cnt)
