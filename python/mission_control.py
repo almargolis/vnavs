@@ -71,7 +71,14 @@ class MissionControl(vmqtt.mqtt_node):
         self.downloadDir = os.path.expanduser(self.downloadDir)               # this expands tilde in path
 
         self.scriptsDir = self.config.get("MissionControl", "Scripts")
-        self.file_client = vmqtt.FileClient(Verbose=False)
+        # The default BuifferLen is 4096 which I settled on at some time in the past while working on FastMqtt.
+        # That involved some testing, but not rigorously. I just figured out it was taking 2 seconds to 
+        # transfer a 130K image from the bot to mission control. I then changed the buffer on the client end
+        # to 150K and transfer time was reduced to acceptably quickly. Image seems real time.
+        # The file server is still 4096, so the problem was all in IOS or Mission Control (TK??).
+        # If its ever an issue, maybe something between 4096 and 150K would work as well. I just tried
+        # this one value and moved on since there doesn't seem to be any downside. 
+        self.file_client = vmqtt.FileClient(BufferLen=150000, Verbose=False)
 
         self.tk = easytk.EasyTk(debug=True)
         self.tk.tkw.title("VNAVS Mission Control")
@@ -93,6 +100,7 @@ class MissionControl(vmqtt.mqtt_node):
         self.pic_fn = None
         self.pic_path = None
         self.pic_payload = None
+        self.speed = 0
 
         mission_tab = self.notebook.AddTab('Mission')
 
@@ -105,7 +113,9 @@ class MissionControl(vmqtt.mqtt_node):
 
         buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         buttonframe.AddButton('Cancel', command=self.OnCancelMission, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Snap', command=self.SnapPic, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('+', command=self.OnSpeedPlus, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('-', command=self.OnSpeedMinus, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Stop', command=self.OnSpeedStop, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
@@ -220,16 +230,6 @@ class MissionControl(vmqtt.mqtt_node):
         payload['missionName'] = self.mission_name.get()
         self.Publish(vconst.navigator_service_topic, payload)
 
-    def SnapPic(self):
-        payload = {}
-        payload['loop_mode'] = 'run'
-        payload['loop_format'] = 'bgr'
-        payload['loop_publish'] = 'stream'
-        payload['capture_mode'] = 'run'
-        payload['capture_format'] = 'jpeg'
-        payload['capture_publish'] = 'file'
-        self.Publish(vconst.cameraman_orders_topic, payload)
-
     def OnMissionLoad(self):
         # This loads mission here and sends it to navigator.
         # This is an error checking step. It does not execute mission.
@@ -251,6 +251,26 @@ class MissionControl(vmqtt.mqtt_node):
         self.Publish(vconst.mission_load_topic, payload)
         print("STARTNAV", payload)
 
+    def OnSpeedStop(self):
+        self.speed = 0
+        payload = {}
+        payload[helmsman.HELMSMAN_SPEED] = self.speed
+        self.Publish(vconst.helmsman_orders_topic, payload)
+
+    def OnSpeedPlus(self):
+        self.speed += 1
+        payload = {}
+        payload[helmsman.HELMSMAN_SPEED] = self.speed
+        self.Publish(vconst.helmsman_orders_topic, payload)
+
+    def OnSpeedMinus(self):
+        self.speed -= 1
+        if self.speed < 0:
+            self.speed = 0
+        payload = {}
+        payload[helmsman.HELMSMAN_SPEED] = self.speed
+        self.Publish(vconst.helmsman_orders_topic, payload)
+
     def OnStageExecute(self):
         this_stage = self.mission_stage_entry.Value()
         payload = {}
@@ -267,7 +287,7 @@ class MissionControl(vmqtt.mqtt_node):
         self.Publish(vconst.mission_cancel_topic, payload)
         #
         payload = {}
-        payload['speed'] = 0
+        payload[helmsman.HELMSMAN_SPEED] = 0
         self.Publish(vconst.helmsman_orders_topic, payload)
 
     def ProcessImage(self):
