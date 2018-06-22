@@ -42,18 +42,24 @@ stop_process = False
 def NowStr():
      return datetime.datetime.now().strftime('%Y%m%d%H%M%S')
 
+FILE_TRANSFER_IDLE = 0
+FILE_TRANSFER_STARTED = 1
+FILE_TRANSFER_COMPLETE = 2
+
 class FileClient(vcomms.SocketWrapperClient):
-    def __init__(self, Verbose=False):
-        super().__init__(BufferLen=vcomms.TCPIP_XFR_BUFLEN, IniSection="FileClient", IsZeroOneProtocol=False, Verbose=Verbose)
+    def __init__(self, BufferLen=vcomms.TCPIP_XFR_BUFLEN,  Verbose=False):
+        super().__init__(BufferLen=BufferLen, IniSection="FileClient", IsZeroOneProtocol=False, Verbose=Verbose)
         self.Init()
 
     def Init(self):
         self.file_name = None
         self.file_out = None
         self.buffer = ""
-        self.file_received = False
+        self.transfer_state = FILE_TRANSFER_IDLE
+        self.start_time = 0
+        self.timeout = False
 
-    def GetFile(self, filename, path=None, timeout=30.0):
+    def StartTransfer(self, filename, path=None):
         self.Init()
         retry_ct = 0
         while (not self.connected) and (retry_ct < 5):
@@ -64,26 +70,39 @@ class FileClient(vcomms.SocketWrapperClient):
             # If you try to reconnect immediately, you get a fail
             #    socket.error: [Errno 37] Operation already in progress
             # So some patience is needed. Somewhere there is some latency or
-            # inconsistency of block / no block. Or one of hte OSes trying to be polite.
-            #time.sleep(1)
-            print("FileClient.GetFile - Attempt Connect", self.socket_host, self.socket_port)
+            # inconsistency of block / no block. Or one of the OSes trying to be polite.
+            time.sleep(1)
+            #print("FileClient.StartTransfer() - Attempt Connect", self.socket_host, self.socket_port)
             self.Connect()
-        print("FileClient.GetFile - CONNECTED", self.socket_host, self.socket_port)
+        #print("FileClient.StartTransfer() - CONNECTED", self.socket_host, self.socket_port)
         self.file_name = filename
         if path is None:
             self.file_path = filename
         else:
             self.file_path = path
         self.file_out = open(self.file_path, "wb")
+        self.transfer_state = FILE_TRANSFER_STARTED
+        self.timeout = False
         self.buffer = bytearray()
         self.buf_sum = 0
         self.QueueMessageZ([filename])
-        start_time = time.time()
-        while (not self.file_received) and ((time.time() - start_time) < timeout):
+        self.start_time = time.time()
+        self.Select(timeout=0.1)
+
+    def CheckTransfer(self, timeout=30.0):
+        if self.transfer_state == FILE_TRANSFER_STARTED:
             self.Select(timeout=0.1)
-        self.file_out.close()
-        #print("DONE", time.time() - start_time)
-        return self.file_received
+        """
+        if (self.transfer_state == FILE_TRANSFER_STARTED) and ((time.time() - self.start_time) < timeout):
+            self.file_out.close()
+            self.transfer_state = FILE_TRANSFER_COMPLETE
+            print("FileClient.CheckTransfer() Timeout", self.file_name)
+            self.timeout = True					# stays true until next transfer started
+        """
+        if self.transfer_state == FILE_TRANSFER_COMPLETE:
+            self.transfer_state = FILE_TRANSFER_IDLE
+            return True
+        return False
 
     def RecvData(self, s, data):
         self.buffer += data
@@ -97,14 +116,17 @@ class FileClient(vcomms.SocketWrapperClient):
                 # need to do something specific here to restart / recover transfer
                 # or neatly notify as not complete.
                 # got an "invalid literal" exception. maybe due to noisy network.
-                raise
+                #raise
+                # maybe we don't have enough data to figure out
+                print("EX", p, len(data))
+                return
             #print("FILE LEN", file_len)
             buf_len = p + file_len + 1
             if len(self.buffer) == buf_len:
                 self.file_out.write(self.buffer[p+1:])
                 self.file_out.close()
-                self.file_received = True
-                #print("File Received")
+                self.transfer_state = FILE_TRANSFER_COMPLETE
+                print("FileClient.RecvData() Transfer Complete", time.time() - self.start_time)
 
 class FastMqttClient(vcomms.SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.

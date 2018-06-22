@@ -597,7 +597,7 @@ class FileServer(SocketWrapperServer):
         while ix < len(c):
             rec = c[ix:ix+self.buffer_len]
             if ix == 0:
-                rec = repr(len(c)) + '\x00' + rec
+                rec = repr(len(c)) + '\x00' + rec		# add file size to first block
             self.QueueMessage(rec, s=s)
             ix += self.buffer_len
 
