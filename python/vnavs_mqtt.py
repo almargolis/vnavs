@@ -72,7 +72,7 @@ class FileClient(vcomms.SocketWrapperClient):
             # So some patience is needed. Somewhere there is some latency or
             # inconsistency of block / no block. Or one of the OSes trying to be polite.
             time.sleep(1)
-            #print("FileClient.StartTransfer() - Attempt Connect", self.socket_host, self.socket_port)
+            print("FileClient.StartTransfer() - Attempt Connect", self.socket_host, self.socket_port)
             self.Connect()
         #print("FileClient.StartTransfer() - CONNECTED", self.socket_host, self.socket_port)
         self.file_name = filename
@@ -522,6 +522,7 @@ class mqtt_node(object):
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
                     self.ConnectToMqttServer()
+                    print("Loop() Juat attemoted to connect")
                 if self.mqttc.connected:
                     if self.mqttc.thread is not None:
                         if not self.mqttc.thread.is_alive():

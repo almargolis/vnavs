@@ -63,7 +63,7 @@ class MissionControl(vmqtt.mqtt_node):
 							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
                             vmqtt.Subscription(vconst.navigator_plot_topic, handler=self.DoNavigatorPlot, LatestOnly=True)
 						],
-						SingleThreaded=True, SelectTimeoutSecs=0.1,
+						BlockIfNotConnected=False, SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
 						Verbose=Verbose)
 
@@ -375,6 +375,7 @@ class MissionControl(vmqtt.mqtt_node):
             self.helmsman_derivative.ReplaceValue(derivative)
 
     def DoLoop(self):
+        #print("DoLoop()")
         if self.pic_transfer_in_progress:
             # Checking the transfer reports completion and does some transfering if not complete
             if self.file_client.CheckTransfer():
