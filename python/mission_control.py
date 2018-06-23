@@ -26,7 +26,7 @@ except ImportError:
 
 try:
     import easytk
-    from easytk import SAME_ROW, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+    from easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
 except ImportError:
     easytk = None
 
@@ -55,6 +55,7 @@ class MissionControl(vmqtt.mqtt_node):
                             vmqtt.Subscription(vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu, LatestOnly=True),
                             vmqtt.Subscription(vconst.helmsman_orders_topic, handler=self.DoHelmsmanOrders, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_mark_topic, handler=self.DoMissionMark, LatestOnly=True),
+                            vmqtt.Subscription(vconst.mission_init_topic, handler=self.DoMissionInit, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_loaded_topic, 
 							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_stage_started_topic, 
@@ -63,7 +64,7 @@ class MissionControl(vmqtt.mqtt_node):
 							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
                             vmqtt.Subscription(vconst.navigator_plot_topic, handler=self.DoNavigatorPlot, LatestOnly=True)
 						],
-						SingleThreaded=True, SelectTimeoutSecs=0.1,
+						BlockIfNotConnected=False, SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
 						Verbose=Verbose)
 
@@ -116,10 +117,11 @@ class MissionControl(vmqtt.mqtt_node):
         buttonframe.AddButton('+', command=self.OnSpeedPlus, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('-', command=self.OnSpeedMinus, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Stop', command=self.OnSpeedStop, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('Get', command=self.OnMissionGetLog, row=SAME_ROW, col=NEXT_COL)
+        #buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
+        #buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
+        #buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
+        #buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         mission_image_frame = mission_frame.AddFrame()
         mission_info_frame = mission_frame.AddFrame(row=SAME_ROW, col=NEXT_COL)
@@ -151,6 +153,12 @@ class MissionControl(vmqtt.mqtt_node):
         self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
 
         self.mission = None
+        self.mission_id = None
+        self.mission_log_fn = None
+        self.mission_log_path = None
+        self.mission_log_transfer_wanted = False
+        self.mission_log_transfer_in_progress = False
+        self.mission_log_lines = None
         self.line_rect = None
 
     def OpenScriptFile(self):
@@ -230,6 +238,14 @@ class MissionControl(vmqtt.mqtt_node):
         payload['missionName'] = self.mission_name.get()
         self.Publish(vconst.navigator_service_topic, payload)
 
+    def OnMissionGetLog(self):
+        if self.mission_log_transfer_in_progress:
+            return					# only one can be in progress at a time
+        #self.mission_log_fn = self.mission_id + '.nav'
+        self.mission_log_fn = "table_20180623071012.nav"
+        self.mission_log_path = os.path.join(self.downloadDir, self.mission_log_fn)
+        self.mission_log_transfer_wanted = True
+
     def OnMissionLoad(self):
         # This loads mission here and sends it to navigator.
         # This is an error checking step. It does not execute mission.
@@ -306,19 +322,37 @@ class MissionControl(vmqtt.mqtt_node):
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.f1_fps.ReplaceValue('{} fps'.format(self.pic_payload['capture_fps']))
 
+    def DoMissionInit(self, payload):
+        print("mission/init", payload)
+        self.mission_id = payload['mission_id']
+        print("DoMissionInit()", self.mission_id, payload)
+
     def DoMissionMark(self, payload):
         print("mission/mark", payload)
         self.line_rect = OpticChiasm.RectFromPayload(payload)
         print("DoMissionMark()", self.line_rect, payload)
 
     def DoCameramanPicReady(self, payload):
+        # Its a bit hokey that a log file transfer can't start until teh next image is published,
+        # but it should work fine. We only want one tranfer at a time.
+        # Most of this code probably should be at top of DoLoop()
         if self.pic_transfer_in_progress:
             return					# ignore until we finish current image
-        self.pic_payload = payload
+        if self.mission_log_transfer_wanted:
+            self.mission_log_transfer_wanted = False
+            self.mission_log_transfer_in_progress = True
+            transfer_fn = self.mission_log_fn
+            transfer_path = self.mission_log_path
+            transfer_dir = 'l'
+        else:
+            self.pic_payload = payload
+            self.pic_fn = payload['filename']
+            self.pic_path = os.path.join(self.downloadDir, self.pic_fn)
+            transfer_fn = self.pic_fn
+            transfer_path = self.pic_path
+            transfer_dir = 'i'
         self.pic_transfer_in_progress = True
-        self.pic_fn = payload['filename']
-        self.pic_path = os.path.join(self.downloadDir, self.pic_fn)
-        self.file_client.StartTransfer(self.pic_fn, path=self.pic_path)
+        self.file_client.StartTransfer(transfer_dir, transfer_fn, path=transfer_path)
 
     def DoEngineer1Gps(self, payload):
         self.gps_speed.ReplaceValue(payload[engineer_1.GPS_SPEED])
@@ -375,10 +409,19 @@ class MissionControl(vmqtt.mqtt_node):
             self.helmsman_derivative.ReplaceValue(derivative)
 
     def DoLoop(self):
+        #print("DoLoop()")
         if self.pic_transfer_in_progress:
             # Checking the transfer reports completion and does some transfering if not complete
             if self.file_client.CheckTransfer():
-                self.ProcessImage()
+                if self.mission_log_transfer_in_progress:
+                    self.mission_log_transfer_in_progress = False
+                    f = open(self.mission_log_path, 'r')
+                    d = f.read()
+                    f.close()
+                    self.mission_log_lines = d.split('\0x01')
+                    self.mission_status.ReplaceValue("{} {} LOADED".format(self.mission_log_fn, len(d), len(self.mission_log_lines)))
+                else:
+                    self.ProcessImage()
                 self.pic_transfer_in_progress = False
         self.HandleAllSynchronousPayloads()
         self.tk.Update()

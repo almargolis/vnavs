@@ -59,7 +59,15 @@ class FileClient(vcomms.SocketWrapperClient):
         self.start_time = 0
         self.timeout = False
 
-    def StartTransfer(self, filename, path=None):
+    def GetFile(self, dir_code, filename, path=None):
+        self.StartTransfer(dir_code=dir_code, filename=filename, path=path)
+        while True:
+            if self.CheckTransfer():
+                return True
+            if self.timeout:
+                return False
+
+    def StartTransfer(self, dir_code, filename, path=None):
         self.Init()
         retry_ct = 0
         while (not self.connected) and (retry_ct < 5):
@@ -72,7 +80,7 @@ class FileClient(vcomms.SocketWrapperClient):
             # So some patience is needed. Somewhere there is some latency or
             # inconsistency of block / no block. Or one of the OSes trying to be polite.
             time.sleep(1)
-            #print("FileClient.StartTransfer() - Attempt Connect", self.socket_host, self.socket_port)
+            print("FileClient.StartTransfer() - Attempt Connect", self.socket_host, self.socket_port)
             self.Connect()
         #print("FileClient.StartTransfer() - CONNECTED", self.socket_host, self.socket_port)
         self.file_name = filename
@@ -85,7 +93,7 @@ class FileClient(vcomms.SocketWrapperClient):
         self.timeout = False
         self.buffer = bytearray()
         self.buf_sum = 0
-        self.QueueMessageZ([filename])
+        self.QueueMessageZ([dir_code, filename])
         self.start_time = time.time()
         self.Select(timeout=0.1)
 
@@ -126,7 +134,7 @@ class FileClient(vcomms.SocketWrapperClient):
                 self.file_out.write(self.buffer[p+1:])
                 self.file_out.close()
                 self.transfer_state = FILE_TRANSFER_COMPLETE
-                print("FileClient.RecvData() Transfer Complete", time.time() - self.start_time)
+                print("FileClient.RecvData() Transfer Complete", time.time() - self.start_time, self.file_name, file_len)
 
 class FastMqttClient(vcomms.SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.
@@ -522,6 +530,7 @@ class mqtt_node(object):
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
                     self.ConnectToMqttServer()
+                    print("Loop() Juat attemoted to connect")
                 if self.mqttc.connected:
                     if self.mqttc.thread is not None:
                         if not self.mqttc.thread.is_alive():
