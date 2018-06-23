@@ -627,7 +627,8 @@ class Mission(object):
             line = this.strip()
             hash = line.find('#')
             if hash >= 0:
-                line = line[:hash].strip
+                line = line[:hash].strip()
+                print("LoadMission()", line, line.__class__.__name__)
             if line == '':
                 continue
             print(line)

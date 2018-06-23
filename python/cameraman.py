@@ -428,9 +428,15 @@ class cameraman(vmqtt.mqtt_node):
             if self.mark_payload is not None:
                 # self.mark_rect was unconditionally created when the message was received.
                 # The rectangle might be used for muiltiple things.
-                # if the payload has a save parameter, get an hsv spec for the marked area.
-                if 'save' in self.mark_payload:
+                # If an HsvSpec is in the payload, use that. Otherwise create an HsvSpec from
+                # the image at the rectangle.
+                # If the payload has a save parameter, save it in mission persistant data.
+                hsv_spec = OpticChiasm.HsvSpecFromPayload(self.mark_payload)
+                if hsv_spec is None:
                     self.mark_hsv_spec = OpticChiasm.NextHsvSpec(this_image.ImAsHSV(), rect=self.mark_rect)
+                else:
+                    self.mark_hsv_spec = hsv_spec
+                if 'save' in self.mark_payload:
                     hsv_payload = self.PrepareResponse(self.mark_payload, ConfResponse=True)
                     hsv_payload.update(self.mark_hsv_spec.AsPayload())
                     print("MARK HSV", hsv_payload)
