@@ -36,7 +36,8 @@ class joystick(vmqtt.mqtt_node):
             ## this only works under linux
         if not self.ConfigureJoystick('/dev/input/event2'):
             if not self.ConfigureJoystick('/dev/input/event3'):
-                raise Error("No Joystick found!")
+                if not self.ConfigureJoystick('/dev/input/event4'):
+                    raise Error("No Joystick found!")
         self.helmsmanChanged = False
         self.last_publish = 0.0
 
@@ -54,9 +55,12 @@ class joystick(vmqtt.mqtt_node):
         self.directionAxisCode = 2
         self.gamepadMap[self.speedAxisCode] = self.SaveSpeed
         self.gamepadMap[self.directionAxisCode] = self.SaveDirection
-        self.speedAxis = self.gamepadAxis[self.speedAxisCode]
-        self.speedValue = self.gamepadAxis[self.speedAxisCode].value
-        self.directionAxis = self.gamepadAxis[self.directionAxisCode]
+        try:
+            self.speedAxis = self.gamepadAxis[self.speedAxisCode]
+            self.speedValue = self.gamepadAxis[self.speedAxisCode].value
+            self.directionAxis = self.gamepadAxis[self.directionAxisCode]
+        except KeyError:
+            return False
         self.directionValue = self.gamepadAxis[self.directionAxisCode].value
         return True
 
