@@ -47,8 +47,8 @@ FILE_TRANSFER_STARTED = 1
 FILE_TRANSFER_COMPLETE = 2
 
 class FileClient(vcomms.SocketWrapperClient):
-    def __init__(self, Verbose=False):
-        super().__init__(BufferLen=vcomms.TCPIP_XFR_BUFLEN, IniSection="FileClient", IsZeroOneProtocol=False, Verbose=Verbose)
+    def __init__(self, BufferLen=vcomms.TCPIP_XFR_BUFLEN,  Verbose=False):
+        super().__init__(BufferLen=BufferLen, IniSection="FileClient", IsZeroOneProtocol=False, Verbose=Verbose)
         self.Init()
 
     def Init(self):

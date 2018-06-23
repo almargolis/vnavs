@@ -380,11 +380,11 @@ class cameraman(vmqtt.mqtt_node):
         #
         # Capture some pictures. This might be a single image or a long run of them.
         #
-        if self.verbose:
-            print("READY", self.loop_mode, self.loop_format, self.loop_publish, burst_dest)
         last_time = 0
         burst_image_ct = 0
         burst_timestamp = vmqtt.NowStr()
+        if self.verbose:
+            print("Cameraman.ImageBurst() Begin Burst", self.loop_mode, self.loop_format, self.loop_publish, burst_dest, self.image_ct)
         for picam_return in self.camera.capture_continuous(burst_dest, format=self.loop_format, use_video_port=True):
             burst_image_ct += 1
             self.image_ct += 1
@@ -483,14 +483,12 @@ class cameraman(vmqtt.mqtt_node):
                 # need conditional to determin conversion paramter for different formats
                 if self.do_auto_iso:
                     self.AutoIso(this_image.im)
-                if burst_image_ct > self.idle_image_max:
+                if burst_image_ct >= self.idle_image_max:
                     # idle takes a limited number of images per "burst" to cycle throrugh a limited number of file names.
                     break
             if self.loop_mode == 'single':
                 # enter paused mode if we have taken our single picture
                 self.loop_mode = 'pause'
-                break
-            if self.loop_mode != self.loop_mode:
                 break
 
 if __name__ == '__main__':
