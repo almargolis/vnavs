@@ -86,7 +86,7 @@ def PiShutdown():
 
 class process(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[],
+        super().__init__(Subscriptions=[vmqtt.Subscription(vconst.process_log_list_topic, async=True, handler=self.DoProcessLogList, LatestOnly=False)],
 					SingleThreaded=False, BlockIfNotConnected=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.system =  platform.system()
         if self.system == 'Linux':
@@ -94,8 +94,22 @@ class process(vmqtt.mqtt_node):
         else:
             self.system_process = None
         self.process_specs = self.config.items("ProcessMonitor")
+        self.archive_dir = self.config.get(vcomms.FMQTT_INI_SECTION, vcomms.FMQTT_ARCHIVE_DIR)
+        self.archive_dir = os.path.expanduser(self.archive_dir)               # this expands tilde in path
+
         self.startTime = time.time()
         self.loop_sleep = 60
+
+    def DoProcessLogList(self, payload):
+        ext_len = len(vcomms.FMQTT_LOG_EXTENSION)
+        flist = os.listdir(self.archive_dir)
+        log_list = []
+        for this in flist:
+            if this[-ext_len:] == vcomms.FMQTT_LOG_EXTENSION:
+                log_list.append(this)
+        result_payload = self.PrepareResponse(payload, ConfResponse=True)
+        result_payload['log_list'] = log_list
+        self.Publis(vconst.process_result_topic, result_payload)
 
     def DoLoop(self):
         screens = GetScreenList()

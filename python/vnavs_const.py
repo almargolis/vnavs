@@ -45,6 +45,10 @@ navigator_mode_topic = 'navigator/mode'
 navigator_plot_topic = 'navigator/plot'
 navigator_waypoint_topic = 'navigator/waypoint'
 
+process_log_list_topic = 'process/log_list'
+process_clear_missions_topic = 'process/clear_missions'
+process_result_topic = 'process/result'
+
 stage_init = 'init'
 stage_finis = 'finis'
 
