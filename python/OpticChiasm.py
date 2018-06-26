@@ -187,7 +187,7 @@ class Image(object):
         return average_color
 
     def Crop(self, rect, Isolate=False):
-        print("Crop()", rect)
+        #print("Crop()", rect)
         if rect is None:
             return self.copy()
         new_image = Image(im=self._im[rect.y_min:rect.y_max+1, rect.x_min:rect.x_max+1].copy(), colorcode=self.colorcode)
@@ -222,16 +222,21 @@ class Image(object):
         line_hsvspec = hsvspec.copy()
         line_rect = rect.copy()
         chase_ct = 0
+        min_blob_area = 10
+        min_blob_area = 1
+        min_blob_area = (sliceheight * 0.5) * 3			# 1/2 slice height by 3 pixels
+        max_missing = 2
         print("ChaseLine()", self, line_hsvspec, line_rect)
         def QualifyLineSegment():
             global next_hsv_spec
             # This advances the search through the image. Adjusting line_hsvspec and line_rect.
             # check if the blob is reasonably a line segment
             # size? color? location?
-            print("ChaseLine() Qualify", line_hsvspec, line_rect)
+            #print("ChaseLine() Qualify", line_hsvspec, line_rect)
             blobs, next_hsv_spec = self.FindColorBlobs(hsvspec=line_hsvspec, rect=line_rect,
-                                kernel_dim=kernel_dim, iterations=iterations)
-            if blobs is None:
+                                kernel_dim=kernel_dim, iterations=iterations,
+				MinimumBlobArea=min_blob_area, MaximumCtOfRectsWanted=1)
+            if (blobs is None) or (len(blobs) < 1):
                 return None, None
             return blobs[0], next_hsv_spec
 
@@ -254,34 +259,43 @@ class Image(object):
             return True
 
         line_points = []
+        missing_slices = 0
         while True:
             chase_ct += 1
-            print("ChaseLine() Loop", chase_ct, line_hsvspec, line_rect)
+            print("ChaseLine() Loop", chase_ct, missing_slices, line_points, line_hsvspec, line_rect)
             this_segment, this_hsvspec = QualifyLineSegment()
-            if this_segment is not None:
+            if this_segment is None:
+                missing_slices += 1
+            else:
+                missing_slices = 0
                 line_points.append(this_segment)
             if this_hsvspec is not None:
                 line_hsvspec = this_hsvspec
-            if not AdvanceLineSearch(this_segment):
+            if (missing_slices > max_missing) or (not AdvanceLineSearch(this_segment)):
+                # Missing_slices filters for reasonably continuous lines.
+                # Added because when line was lost this was finding random blobs to chase
+                # far from line. If following dashed line, we might want a more cyclic check.
+                # False positives are worse than false negatives.
                 return line_points
 
     def FindColorBlobs(self, hsvspec, rect=None,
-                            kernel_dim=3, iterations=1):
-        print("FindColorBlobs()", self, rect, hsvspec)
+                            kernel_dim=3, iterations=1,
+				MinimumBlobArea=1, MaximumCtOfRectsWanted=3):
+        #print("FindColorBlobs()", self, rect, hsvspec)
         if rect is None:
             im_cropped = self
         else:
             im_cropped = self.Crop(rect)
         im_hsv = im_cropped.ImAsHSV()
         im_masked = ColorMaskOneHue(im_hsv, hsvspec)
-        print("FindColorBlobs() Cropped " + ReprOpenCv(im_masked))
+        #print("FindColorBlobs() Cropped " + ReprOpenCv(im_masked))
         kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
         im_dilated = cv2.dilate(im_masked, kernel, iterations=iterations)
         cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        rect_list = ContoursExtract(contours, hierarchy)
+        rect_list = ContoursExtract(contours, hierarchy, MinimumArea=MinimumBlobArea, MaximumCtOfRectsWanted=MaximumCtOfRectsWanted)
         next_hsv_spec = None
-        if rect_list is not None:
-            # used im_masked because im_dilated includes out of range hsv values
+        if (rect_list is not None) and (len(rect_list) > 0):
+            # use im_masked because im_dilated includes out of range hsv values
             next_hsv_spec = NextHsvSpec(im_hsv, mask=im_masked, rect=rect_list[0])
             if rect is not None:
                 for this in rect_list:              # adjust to original image coordinates
@@ -669,6 +683,15 @@ def ListOfOpenCvRectFromListofDicts(in_list):
         res.append(OpenCvRectFromDict(this))
     return res
 
+def SlopeOfListOfOpenCvRect(list_of_rects):
+    [vx,vy,x,y] =  cv2.fitLine(points, cv2.DIST_L1, 0, 0.01, 0.01)
+    print("slope", float(vy / vx))
+    left_y = int((-x*vy/vx) + y)
+    right_y = int(((width-x)*vy/vx)+y)
+
+    if (left_y >= 0) and (left_y <= height) and (right_y >= 0) and (right_y <= height):
+        vert_line = ((width-1,right_y), (0,left_y))
+
 def OpenCvRectFromDict(d):
     #print("OpenCvRectFromDict()", d)
     return OpenCvRect(((d['center_x'], d['center_y']),
@@ -714,6 +737,10 @@ class OpenCvRect(object):
         return top
 
     @property
+    def center(self):
+        return (self.center_x, self.center_y)
+
+    @property
     def p1(self):
         # return upper/right corner point of right rectangle
         half_width = self.width / 2
@@ -735,11 +762,10 @@ def OpenCvRectFromOpenCvImage(im):
     dims = (width, height)
     return OpenCvRect((center, dims, 0.0))
 
-def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumLines=3):
+def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3):
     # returns a list of the largest contours as minimum sized rectangles
     if hierarchy is None:
         return None
-    print("VECTOR vvvvvvv")
     # Scan contours, discarding small ones
     h_ix = 0
     discarded_contour_count = 0
@@ -749,23 +775,25 @@ def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumLines=3):
         cnt = contours[h_ix]
         area = cv2.contourArea(cnt)
         if area >= MinimumArea:
+            print("KEEP", area, MinimumArea)
             areas.append((area, h_ix))
         else:
+            print("DISC", area, MinimumArea)
             discarded_contour_count = 0
         h_ix = h[0]
     areas.sort(reverse=True)				# sort from largest to smallest)
     rect_list = []
-    for this in areas[:MaximumLines]:
+    for this in areas[:MaximumCtOfRectsWanted+1]:
         h_ix = this[1]
         cnt = contours[h_ix]
         rect = OpenCvRect(cv2.minAreaRect(cnt))		# ((x, y), (w, h), angle)
         rect_list.append(rect)
-    print("^^^^^^^^^")
+    print("ContoursExtract()", rect_list)
     return rect_list
 
 
 
-def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=3):
+def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3):
     # This only looks at top level of hierarchy.
     # This analyzes contours and draws them on thee image -- modifying the image.
     # This is my original attempt for learning about / exploring.
@@ -785,7 +813,7 @@ def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumLines=
             areas.append((area, h_ix))
         h_ix = h[0]
     areas.sort(reverse=True)			# sort from largest to smallest)
-    for this in areas[:MaximumLines]:
+    for this in areas[:MaximumCtOfRectsWanted]:
         h_ix = this[1]
         cnt = contours[h_ix]
         rect = cv2.minAreaRect(cnt)
@@ -979,12 +1007,29 @@ class HsvSpec(object):
                             value=self.value, valuerange=self.valuerange)
 
 def HsvSpecFromPayload(payload):
+    if not ('hue' in payload):
+        return None
     hue = int(payload['hue'])
-    huerange = int(payload['huerange'])
-    saturation = int(payload['saturation'])
-    saturationrange = int(payload['saturationrange'])
-    value = int(payload['value'])
-    valuerange = int(payload['valuerange'])
+    if 'huerange' in payload:
+        huerange = int(payload['huerange'])
+    else:
+        huerange = 25
+    if 'saturation' in payload:
+        saturation = int(payload['saturation'])
+    else:
+        saturation = 205
+    if 'saturationrange' in payload:
+        saturationrange = int(payload['saturationrange'])
+    else:
+        saturationrange = 50
+    if 'value' in payload:
+        value = int(payload['value'])
+    else:
+        value = 205
+    if 'valuerange' in payload:
+        valuerange = int(payload['valuerange'])
+    else:
+        valuerange = 50
     return HsvSpec(hue=hue, huerange=huerange,
                             saturation=saturation, saturationrange=saturationrange,
                             value=value, valuerange=valuerange)
@@ -1003,7 +1048,7 @@ def NextHsvSpec(hsvImage, mask=None, rect=None, minrange=20):
         if rng < minrange:
             rng = minrange
         return avg, rng
-    print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(mask), rect)
+    #print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(mask), rect)
     value_ct = 0
     values = []
     values.append([0, 255, 0])		# sum, min value, max value)
@@ -1026,13 +1071,13 @@ def NextHsvSpec(hsvImage, mask=None, rect=None, minrange=20):
                 if this_byte > values[ix][2]:
                     values[ix][2] = this_byte
     if value_ct < 3:
-        print("NextHsvSpec()", value_ct, None, values)
+        #print("NextHsvSpec()", value_ct, None, values)
         return None
     hsv_spec = HsvSpec(0)
     hsv_spec.hue, hsv_spec.huerange = CalcRange(values[0])
     hsv_spec.saturation, hsv_spec.saturationrange = CalcRange(values[1])
     hsv_spec.value, hsv_spec.valuerange = CalcRange(values[2])
-    print("NextHsvSpec()", value_ct, hsv_spec, values)
+    #print("NextHsvSpec()", value_ct, hsv_spec, values)
     return hsv_spec
 
 def ColorMaskOneHue(hsvImage, hsvspec):
@@ -1071,7 +1116,7 @@ def ColorMaskOneHue(hsvImage, hsvspec):
     if value_max > 255:
         value_max = 255
 
-    print("ColorMaskOneHue()", hue_min, hue_max, saturation_min, saturation_max, value_min, value_max)
+    #print("ColorMaskOneHue()", hue_min, hue_max, saturation_min, saturation_max, value_min, value_max)
     hueMask = cv2.inRange(hsvImage,
                     np.array([hue_min, saturation_min, value_min], np.uint8),
                     np.array([hue_max, saturation_max, value_max], np.uint8))
@@ -1086,7 +1131,7 @@ def ColorMaskOneHue(hsvImage, hsvspec):
 def ColorMask(hsvImage, colors=[0], huerange=25, saturation=205, saturationrange=50, value=205, valuerange=50):
     # adapted from http://stackoverflow.com/questions/35866411/opencv-how-to-detect-lines-of-a-specific-colour
     # input is an HSV image. Output is a monochrome image
-    print("ColorMask()", colors, huerange)
+    #print("ColorMask()", colors, huerange)
 
     result = None
     for this_hue in colors:

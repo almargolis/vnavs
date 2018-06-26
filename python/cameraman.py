@@ -380,11 +380,11 @@ class cameraman(vmqtt.mqtt_node):
         #
         # Capture some pictures. This might be a single image or a long run of them.
         #
-        if self.verbose:
-            print("READY", self.loop_mode, self.loop_format, self.loop_publish, burst_dest)
         last_time = 0
         burst_image_ct = 0
         burst_timestamp = vmqtt.NowStr()
+        if self.verbose:
+            print("Cameraman.ImageBurst() Begin Burst", self.loop_mode, self.loop_format, self.loop_publish, burst_dest, self.image_ct)
         for picam_return in self.camera.capture_continuous(burst_dest, format=self.loop_format, use_video_port=True):
             burst_image_ct += 1
             self.image_ct += 1
@@ -428,9 +428,15 @@ class cameraman(vmqtt.mqtt_node):
             if self.mark_payload is not None:
                 # self.mark_rect was unconditionally created when the message was received.
                 # The rectangle might be used for muiltiple things.
-                # if the payload has a save parameter, get an hsv spec for the marked area.
-                if 'save' in self.mark_payload:
+                # If an HsvSpec is in the payload, use that. Otherwise create an HsvSpec from
+                # the image at the rectangle.
+                # If the payload has a save parameter, save it in mission persistant data.
+                hsv_spec = OpticChiasm.HsvSpecFromPayload(self.mark_payload)
+                if hsv_spec is None:
                     self.mark_hsv_spec = OpticChiasm.NextHsvSpec(this_image.ImAsHSV(), rect=self.mark_rect)
+                else:
+                    self.mark_hsv_spec = hsv_spec
+                if 'save' in self.mark_payload:
                     hsv_payload = self.PrepareResponse(self.mark_payload, ConfResponse=True)
                     hsv_payload.update(self.mark_hsv_spec.AsPayload())
                     print("MARK HSV", hsv_payload)
@@ -483,14 +489,12 @@ class cameraman(vmqtt.mqtt_node):
                 # need conditional to determin conversion paramter for different formats
                 if self.do_auto_iso:
                     self.AutoIso(this_image.im)
-                if burst_image_ct > self.idle_image_max:
+                if burst_image_ct >= self.idle_image_max:
                     # idle takes a limited number of images per "burst" to cycle throrugh a limited number of file names.
                     break
             if self.loop_mode == 'single':
                 # enter paused mode if we have taken our single picture
                 self.loop_mode = 'pause'
-                break
-            if self.loop_mode != self.loop_mode:
                 break
 
 if __name__ == '__main__':
