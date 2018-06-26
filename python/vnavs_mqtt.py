@@ -144,6 +144,8 @@ class FastMqttClient(vcomms.SocketWrapperClient):
         self.on_connect = None
 
     def connect(self, **kwargs):
+        # Hmmm ... maybe dangerous. Clients have both connect() and Connect()
+        # doing slightly different things.
         super().Connect(**kwargs)
         if self.on_connect is not None:
             client = None			# not implemented
@@ -482,7 +484,11 @@ class mqtt_node(object):
         if self.mqttc.connected:
             return
         while True:
-            self.mqttc.connect(host=self.socket_host, port=self.socket_port)
+            if self.block_if_not_connected:
+                timeout = None
+            else:
+                timeout = 0.01
+            self.mqttc.connect(host=self.socket_host, port=self.socket_port, timeout=timeout)
             if self.mqttc.connected:
                 print("mqtt_node() connected")
                 break
