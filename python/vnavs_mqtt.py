@@ -134,7 +134,7 @@ class FileClient(vcomms.SocketWrapperClient):
                 self.file_out.write(self.buffer[p+1:])
                 self.file_out.close()
                 self.transfer_state = FILE_TRANSFER_COMPLETE
-                print("FileClient.RecvData() Transfer Complete", time.time() - self.start_time, self.file_name, file_len)
+                #print("FileClient.RecvData() Transfer Complete", time.time() - self.start_time, self.file_name, file_len)
 
 class FastMqttClient(vcomms.SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.
@@ -144,6 +144,8 @@ class FastMqttClient(vcomms.SocketWrapperClient):
         self.on_connect = None
 
     def connect(self, **kwargs):
+        # Hmmm ... maybe dangerous. Clients have both connect() and Connect()
+        # doing slightly different things.
         super().Connect(**kwargs)
         if self.on_connect is not None:
             client = None			# not implemented
@@ -482,7 +484,11 @@ class mqtt_node(object):
         if self.mqttc.connected:
             return
         while True:
-            self.mqttc.connect(host=self.socket_host, port=self.socket_port)
+            if self.block_if_not_connected:
+                timeout = None
+            else:
+                timeout = 0.01
+            self.mqttc.connect(host=self.socket_host, port=self.socket_port, timeout=timeout)
             if self.mqttc.connected:
                 print("mqtt_node() connected")
                 break
@@ -637,6 +643,9 @@ class mqtt_node(object):
 
     def Publish(self, topic, payload, ConfRequest=None):
         # payload is a dict to be converted to JSON)
+        # ConfRequest is an ID asking the recipient to clearly identify
+        # the response to this request. This requires cooperative
+        # requestors and respondors.
         if not self.mqttc.connected:
             print("Publish() Not connected, not sent")
             # for now, silently ignore publish errors. Need to do better

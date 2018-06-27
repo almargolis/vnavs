@@ -246,6 +246,12 @@ class SocketWrapper(object):
         self.InitSelectData()
 
     def InitSocket(self):
+        # Blocking and the timeout on socket functions do the same thing. Maybe they are the same thing.
+        # Blocking on (setblocking(0)) is equivalent to s.settimeout(0.0).
+        # Blocking off (setblocking(1)) is equivalent to s.settimeout(None).
+        # os_socket.gettimeout() returns the socket timeout. Maybe implicitly the blocking mode?
+        # This is not at all the same as the timeout on select but they obviously interact in some way.
+        #
         self.os_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.os_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.os_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -477,9 +483,10 @@ class SocketWrapperClient(SocketWrapper):
         if port is not None:
             self.socket_port = port
         try:
+            print("ConnectAsync()", self.socket_host, self.socket_port)
             self.os_socket.connect((self.socket_host, self.socket_port))
             self.connected = True
-            print("ConnectAsync() DirectConnect")
+            print("ConnectAsync() Successful")
             return True
         except socket.error as e:
             self.PrintError("ConnectAsync()", e)
@@ -494,6 +501,9 @@ class SocketWrapperClient(SocketWrapper):
                 # Error 56 signifies success, its not an error.
                 # Otherwise, we could check for completion with poll or select
                 # or maybe poll2 or select2. I saw comment about these but haven't tested.
+                #
+                # If the server is unreachable (no route / on wrong network), OSX reports
+                # 36 and then 37.
                 #
                 # If server is down, OSX reports 36 then 61, then 22. Error 22 then
                 # repeats and the socket never connects, even when the server becomes available.
