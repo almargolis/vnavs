@@ -26,7 +26,7 @@ except ImportError:
 
 try:
     import easytk
-    from easytk import SAME_ROW, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+    from easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
 except ImportError:
     easytk = None
 
@@ -35,7 +35,11 @@ import helmsman
 import navigator
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
+import vnavs_comms as vcomms
 import paho.mqtt.client as mqtt
+
+if sys.version_info[0] < 3:
+    FileExistsError = OSError
 
 BOT_1_MAP_TRANSPOSE = [
 
@@ -46,6 +50,16 @@ BOT_1_MAP_TRANSPOSE = [
 
 # BOT_1_H = pts_dst = numpy.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
+DISPLAY_MODE_LIVE = 'Live'			# working with live information from bot
+DISPLAY_MODE_DOWNLOAD = 'Download'		# in process of downloading mission, play as it comes
+DISPLAY_MODE_STEP = 'Step'			# manually step through mission
+DISPLAY_MODE_REPLAY = 'Replay'			# replay mission, as real-time as possible
+DISPLAY_MODES = [DISPLAY_MODE_LIVE, DISPLAY_MODE_DOWNLOAD, DISPLAY_MODE_STEP, DISPLAY_MODE_REPLAY]
+
+TRANSFER_TYPE_NONE = 'N'			# No transfer in progress
+TRANSFER_TYPE_IMAGE = 'i'			# Transfering image, display when done
+TRANSFER_TYPE_LOG = 'l'				# Transfering mission log, start image download when done
+
 class MissionControl(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         #Verbose = True
@@ -55,15 +69,17 @@ class MissionControl(vmqtt.mqtt_node):
                             vmqtt.Subscription(vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu, LatestOnly=True),
                             vmqtt.Subscription(vconst.helmsman_orders_topic, handler=self.DoHelmsmanOrders, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_mark_topic, handler=self.DoMissionMark, LatestOnly=True),
+                            vmqtt.Subscription(vconst.mission_init_topic, handler=self.DoMissionInit, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_loaded_topic, 
 							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_stage_started_topic, 
 							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
                             vmqtt.Subscription(vconst.mission_stage_completed_topic, 
 							handler=self.DoMissionStatus, handler_needs_topic=True, LatestOnly=True),
-                            vmqtt.Subscription(vconst.navigator_plot_topic, handler=self.DoNavigatorPlot, LatestOnly=True)
+                            vmqtt.Subscription(vconst.navigator_plot_topic, handler=self.DoNavigatorPlot, LatestOnly=True),
+                            vmqtt.Subscription(vconst.process_result_topic, handler=self.DoProcessResult, LatestOnly=True)
 						],
-						SingleThreaded=True, SelectTimeoutSecs=0.1,
+						BlockIfNotConnected=False, SingleThreaded=True, SelectTimeoutSecs=0.1,
 						BrokerType='F',
 						Verbose=Verbose)
 
@@ -96,13 +112,18 @@ class MissionControl(vmqtt.mqtt_node):
         self.image.img_source_dir = '/volumes/pi/projects/vnavs/temp'
         self.image.img_fname_suffix = ''
         self.image.do_save_snaps = False
-        self.pic_transfer_in_progress = False
-        self.pic_fn = None
-        self.pic_path = None
-        self.pic_payload = None
         self.speed = 0
 
         mission_tab = self.notebook.AddTab('Mission')
+
+        nother_frame =_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
+        self.mission_stage_entry = nother_frame.AddDropdown(caption='Mode', s_items=DISPLAY_MODES, Selection=DISPLAY_MODE_LIVE,
+									row=SAME_ROW, col=NEXT_COL)
+        self.mission_id_entry = nother_frame.AddEntryField('Mission ID', width=15, value='')
+        self.local_mission_entry = nother_frame.AddDropdown(caption='Local Missions', row=SAME_ROW, col=NEXT_COL)
+        nother_frame.AddButton('Replay', command=self.OnReplayLocal, row=SAME_ROW, col=NEXT_COL)
+        self.bot_mission_entry = nother_frame.AddDropdown(caption='Bot Missions', row=SAME_ROW, col=NEXT_COL)
+        nother_frame.AddButton('Download', command=self.OnReplayDownload, row=SAME_ROW, col=NEXT_COL)
 
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         self.mission_name_entry = mission_frame.AddEntryField('Mission', width=15, value='table')
@@ -116,10 +137,10 @@ class MissionControl(vmqtt.mqtt_node):
         buttonframe.AddButton('+', command=self.OnSpeedPlus, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('-', command=self.OnSpeedMinus, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Stop', command=self.OnSpeedStop, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
+        #buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
+        #buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
+        #buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
+        #buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         mission_image_frame = mission_frame.AddFrame()
         mission_info_frame = mission_frame.AddFrame(row=SAME_ROW, col=NEXT_COL)
@@ -150,8 +171,26 @@ class MissionControl(vmqtt.mqtt_node):
         self.alert_tab = self.notebook.AddTab('Alerts')
         self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
 
-        self.mission = None
+        self.pic_fn = None
+        self.pic_path = None
+        self.pic_payload = None
+        self.pic_next_payload = None
         self.line_rect = None
+
+        self.display_mode = DISPLAY_MODE_LIVE
+        self.transfer_type = TRANSFER_TYPE_NONE
+        self.mission = None
+        self.mission_id = None
+
+        self.replay_mission_id = None
+        self.replay_log_fn = None
+        self.replay_log_path = None
+        self.replay_mission_dir = None
+        self.replay_log_fn = None
+        self.replay_log_transfer_wanted = False
+        self.replay_log_lines = None
+        self.replay_log_payloads = None
+        self.UpdateLocalMissionList()
 
     def OpenScriptFile(self):
         fn = self.message_tab.DoFileNameDialog(Dir=self.scriptsDir)
@@ -251,6 +290,19 @@ class MissionControl(vmqtt.mqtt_node):
         self.Publish(vconst.mission_load_topic, payload)
         print("STARTNAV", payload)
 
+    def OnReplayLocal(self):
+        self.replay_mission_id = self.local_mission_entry.Value()
+        self.ConfigureReplay(Mkdir=False)
+        self.OpenReplayLog()
+        self.display_mode = DISPLAY_MODE_REPLAY
+
+    def OnReplayDownload(self):
+        self.replay_log_transfer_wanted = True
+        log_file_name = self.bot_mission_entry.Value()
+        dot = log_file_name.rfind('.')
+        self.replay_mission_id = log_file_name[:dot]
+        print("OnReplayDownload()", self.replay_mission_id)
+
     def OnSpeedStop(self):
         self.speed = 0
         payload = {}
@@ -282,6 +334,8 @@ class MissionControl(vmqtt.mqtt_node):
             self.mission_stage_entry.ReplaceValue(self.mission.stages_list[next_stage_ix])
 
     def OnCancelMission(self):
+        print("OnCancelMission()")
+        self.Publish(vconst.process_log_list_topic, {})
         payload = {}
         payload['mission_name'] = self.mission_name_entry.Value()
         self.Publish(vconst.mission_cancel_topic, payload)
@@ -289,6 +343,105 @@ class MissionControl(vmqtt.mqtt_node):
         payload = {}
         payload[helmsman.HELMSMAN_SPEED] = 0
         self.Publish(vconst.helmsman_orders_topic, payload)
+
+
+    #
+    # Message Handlers
+    #
+
+    def DoCameramanPicReady(self, payload, Replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        self.pic_next_payload = payload			# always remember latest available image
+
+    def DoEngineer1Gps(self, payload, Replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        self.gps_speed.ReplaceValue(payload[engineer_1.GPS_SPEED])
+        latitude = None
+        longitude = None
+        if engineer_1.GPS_LATITUDE in payload:
+            latitude = payload[engineer_1.GPS_LATITUDE]
+        if engineer_1.GPS_LONGITUDE in payload:
+            longitude = payload[engineer_1.GPS_LONGITUDE]
+        if (latitude is not None) and (longitude is not None):
+            position = "{},{}".format(latitude, longitude)
+            self.gps_position.ReplaceValue(position)
+
+    def DoEngineer1Imu(self, payload, Replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        self.imu_heading.ReplaceValue(payload[engineer_1.IMU_YAW])
+
+    def DoMissionInit(self, payload, Replay=False):
+        print("mission/init", Replay, payload)
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        self.mission_id = payload['mission_id']
+        self.mission_id_entry.ReplaceValue(self.mission_id)
+        print("DoMissionInit()", self.mission_id, payload)
+
+    def DoMissionMark(self, payload, Replay=False):
+        print("mission/mark", Replay, payload)
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        self.line_rect = OpticChiasm.RectFromPayload(payload)
+        print("DoMissionMark()", self.line_rect, payload)
+
+    def DoMissionStatus(self, topic, payload, Replay=False):
+        print("DoMissionStatus()", Replay, payload)
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        if not 'mission_id' in payload:
+            payload['mission_id'] = 'XXX'	# normal for mission/loaded, else an error
+        if not 'mission_stage' in payload:
+            payload['mission_stage'] = 'XXX'	# normal for mission/loaded, else an error
+        status = "{mission_id} {mission_stage} {_topic}".format(**payload)
+        self.mission_status.ReplaceValue(status)
+
+    def DoNavigatorPlot(self, payload, Replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        self.waypoint_heading.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_HEADING])
+        self.waypoint_distance.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_DISTANCE])
+        latitude = None
+        longitude = None
+        if navigator.NAVIGATOR_WAYPOINT_LATITUDE in payload:
+            latitude = payload[navigator.NAVIGATOR_WAYPOINT_LATITUDE]
+        if navigator.NAVIGATOR_WAYPOINT_LONGITUDE in payload:
+            longitude = payload[navigator.NAVIGATOR_WAYPOINT_LONGITUDE]
+        if (latitude is not None) and (longitude is not None):
+            position = "{},{}".format(latitude, longitude)
+            self.waypoint_position.ReplaceValue(position)
+
+    def DoProcessResult(self, payload, Replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        log_list = payload['log_list']
+        self.bot_mission_entry.ReplaceChoices(log_list)
+
+    def DoHelmsmanOrders(self, payload, Replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+            return
+        if helmsman.HELMSMAN_SPEED in payload:
+            speed = payload[helmsman.HELMSMAN_SPEED]
+            self.helmsman_speed.ReplaceValue(speed)
+        if helmsman.HELMSMAN_HEADING in payload:
+            steer = payload[helmsman.HELMSMAN_HEADING]
+            self.helmsman_steer.ReplaceValue(steer)
+        if helmsman.HELMSMAN_P_ERROR in payload:
+            p_error = payload[helmsman.HELMSMAN_P_ERROR]
+            self.helmsman_p_error.ReplaceValue(p_error)
+        if helmsman.HELMSMAN_I_ACCUMULATOR in payload:
+            i_accumulator = payload[helmsman.HELMSMAN_I_ACCUMULATOR]
+            self.helmsman_i_accumulator.ReplaceValue(i_accumulator)
+        if helmsman.HELMSMAN_DERIVATIVE in payload:
+            derivative = payload[helmsman.HELMSMAN_DERIVATIVE]
+            self.helmsman_derivative.ReplaceValue(derivative)
+
+    #
+    # DoLoop() and closely related
+    #
 
     def ProcessImage(self):
         im = OpticChiasm.Image(opencv_fn=self.pic_path)
@@ -306,81 +459,100 @@ class MissionControl(vmqtt.mqtt_node):
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.f1_fps.ReplaceValue('{} fps'.format(self.pic_payload['capture_fps']))
 
-    def DoMissionMark(self, payload):
-        print("mission/mark", payload)
-        self.line_rect = OpticChiasm.RectFromPayload(payload)
-        print("DoMissionMark()", self.line_rect, payload)
-
-    def DoCameramanPicReady(self, payload):
-        if self.pic_transfer_in_progress:
-            return					# ignore until we finish current image
-        self.pic_payload = payload
-        self.pic_transfer_in_progress = True
+    def ConfigureImageLocation(self, payload, image_dir, TransferNeeded=True):
+        if TransferNeeded:
+            self.transfer_type = TRANSFER_TYPE_IMAGE
         self.pic_fn = payload['filename']
-        self.pic_path = os.path.join(self.downloadDir, self.pic_fn)
-        self.file_client.StartTransfer(self.pic_fn, path=self.pic_path)
+        self.pic_path = os.path.join(image_dir, self.pic_fn)
+        self.pic_payload = payload
+        print("ConfigureImageLocation()", self.pic_fn, self.pic_path, TransferNeeded)
 
-    def DoEngineer1Gps(self, payload):
-        self.gps_speed.ReplaceValue(payload[engineer_1.GPS_SPEED])
-        latitude = None
-        longitude = None
-        if engineer_1.GPS_LATITUDE in payload:
-            latitude = payload[engineer_1.GPS_LATITUDE]
-        if engineer_1.GPS_LONGITUDE in payload:
-            longitude = payload[engineer_1.GPS_LONGITUDE]
-        if (latitude is not None) and (longitude is not None):
-            position = "{},{}".format(latitude, longitude)
-            self.gps_position.ReplaceValue(position)
+    def UpdateLocalMissionList(self):
+        mission_id_list = []
+        dlist = os.listdir(self.downloadDir)
+        for this in dlist:
+            # look for download subdirectories with corresponding log file
+            dpath = os.path.join(self.downloadDir, this)
+            if os.path.isdir(dpath):
+                log_path = os.path.join(dpath, this+vcomms.FMQTT_LOG_EXTENSION)
+                if os.path.isfile(log_path):
+                    mission_id_list.append(this)
+        self.local_mission_entry.ReplaceChoices(mission_id_list)
 
-    def DoEngineer1Imu(self, payload):
-        self.imu_heading.ReplaceValue(payload[engineer_1.IMU_YAW])
+    def ConfigureReplay(self, Mkdir=True):
+        self.replay_log_fn = self.replay_mission_id + '.nav'
+        self.replay_mission_dir = os.path.join(self.downloadDir, self.replay_mission_id)
+        if Mkdir:
+            try:
+                os.mkdir(self.replay_mission_dir)
+            except FileExistsError:
+                pass
+        self.replay_log_path = os.path.join(self.replay_mission_dir, self.replay_log_fn)
 
-    def DoMissionStatus(self, topic, payload):
-        print("DoMissionStatus()", payload)
-        if not 'mission_id' in payload:
-            payload['mission_id'] = 'XXX'	# normal for mission/loaded, else an error
-        if not 'mission_stage' in payload:
-            payload['mission_stage'] = 'XXX'	# normal for mission/loaded, else an error
-        status = "{mission_id} {mission_stage} {_topic}".format(**payload)
-        self.mission_status.ReplaceValue(status)
-
-    def DoNavigatorPlot(self, payload):
-        self.waypoint_heading.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_HEADING])
-        self.waypoint_distance.ReplaceValue(payload[navigator.NAVIGATOR_WAYPOINT_DISTANCE])
-        latitude = None
-        longitude = None
-        if navigator.NAVIGATOR_WAYPOINT_LATITUDE in payload:
-            latitude = payload[navigator.NAVIGATOR_WAYPOINT_LATITUDE]
-        if navigator.NAVIGATOR_WAYPOINT_LONGITUDE in payload:
-            longitude = payload[navigator.NAVIGATOR_WAYPOINT_LONGITUDE]
-        if (latitude is not None) and (longitude is not None):
-            position = "{},{}".format(latitude, longitude)
-            self.waypoint_position.ReplaceValue(position)
-
-    def DoHelmsmanOrders(self, payload):
-        if helmsman.HELMSMAN_SPEED in payload:
-            speed = payload[helmsman.HELMSMAN_SPEED]
-            self.helmsman_speed.ReplaceValue(speed)
-        if helmsman.HELMSMAN_HEADING in payload:
-            steer = payload[helmsman.HELMSMAN_HEADING]
-            self.helmsman_steer.ReplaceValue(steer)
-        if helmsman.HELMSMAN_P_ERROR in payload:
-            p_error = payload[helmsman.HELMSMAN_P_ERROR]
-            self.helmsman_p_error.ReplaceValue(p_error)
-        if helmsman.HELMSMAN_I_ACCUMULATOR in payload:
-            i_accumulator = payload[helmsman.HELMSMAN_I_ACCUMULATOR]
-            self.helmsman_i_accumulator.ReplaceValue(i_accumulator)
-        if helmsman.HELMSMAN_DERIVATIVE in payload:
-            derivative = payload[helmsman.HELMSMAN_DERIVATIVE]
-            self.helmsman_derivative.ReplaceValue(derivative)
-
+    def OpenReplayLog(self):
+        f = open(self.replay_log_path, 'r')
+        d = f.read()
+        f.close()
+        self.replay_log_lines = d.split(chr(1))
+        self.replay_log_payloads = []
+        for this in self.replay_log_lines:
+            if this != '':
+                parts = this.split(chr(0))
+                payload = json.loads(parts[2])
+                self.replay_log_payloads.append(payload)
+        self.replay_log_ix = 0
+        self.mission_status.ReplaceValue("{} {} {} LOADED".format(self.replay_log_fn, len(d), len(self.replay_log_lines)))
+        
     def DoLoop(self):
-        if self.pic_transfer_in_progress:
+        #print("DoLoop()")
+        if self.transfer_type != TRANSFER_TYPE_NONE:
             # Checking the transfer reports completion and does some transfering if not complete
             if self.file_client.CheckTransfer():
-                self.ProcessImage()
-                self.pic_transfer_in_progress = False
+                # Transfer is complete
+                #print("DoLoop() Transfer Complete", self.transfer_type)
+                if self.transfer_type == TRANSFER_TYPE_LOG:
+                    self.OpenReplayLog()
+                    self.display_mode = DISPLAY_MODE_DOWNLOAD
+                else:				# TRANSFER_TYPE_IMAGE
+                    self.ProcessImage()
+                self.transfer_type = TRANSFER_TYPE_NONE
         self.HandleAllSynchronousPayloads()
+        if self.transfer_type == TRANSFER_TYPE_NONE:
+            # No transfer in progress, see if one is ready to start
+            if self.replay_log_transfer_wanted:
+                self.transfer_type = TRANSFER_TYPE_LOG
+                self.replay_log_transfer_wanted = False
+                self.ConfigureReplay()
+                transfer_fn = self.replay_log_fn
+                transfer_path = self.replay_log_path
+            elif self.display_mode in [DISPLAY_MODE_DOWNLOAD, DISPLAY_MODE_REPLAY]:
+                while self.replay_log_ix < len(self.replay_log_payloads):
+                    payload = self.replay_log_payloads[self.replay_log_ix]
+                    topic = payload['_topic']
+                    self.replay_log_ix += 1
+                    if topic == vconst.cameraman_pic_ready_topic:
+                        if self.display_mode ==DISPLAY_MODE_DOWNLOAD:
+                            self.ConfigureImageLocation(payload, self.replay_mission_dir)
+                        else:
+                            self.ConfigureImageLocation(payload, self.replay_mission_dir, TransferNeeded=False)
+                            self.ProcessImage()
+                        break
+                    elif topic in self.subscriptions:
+                        sub = self.subscriptions[topic]
+                        if sub.handler_needs_topic:
+                            sub.handler_method(topic, payload, Replay=True)
+                        else:
+                            sub.handler_method(payload, Replay=True)
+                        break 
+            elif self.pic_next_payload is not None:
+                self.ConfigureImageLocation(self.pic_next_payload, self.downloadDir)
+                self.pic_next_payload = None
+            if self.transfer_type != TRANSFER_TYPE_NONE:
+                if self.transfer_type == TRANSFER_TYPE_IMAGE:
+                    transfer_fn = self.pic_fn
+                    transfer_path = self.pic_path
+                self.file_client.StartTransfer(self.transfer_type, transfer_fn, path=transfer_path)
+                print("DoLoop() Start Transfer", self.transfer_type, transfer_fn)
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

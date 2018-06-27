@@ -246,6 +246,12 @@ class SocketWrapper(object):
         self.InitSelectData()
 
     def InitSocket(self):
+        # Blocking and the timeout on socket functions do the same thing. Maybe they are the same thing.
+        # Blocking on (setblocking(0)) is equivalent to s.settimeout(0.0).
+        # Blocking off (setblocking(1)) is equivalent to s.settimeout(None).
+        # os_socket.gettimeout() returns the socket timeout. Maybe implicitly the blocking mode?
+        # This is not at all the same as the timeout on select but they obviously interact in some way.
+        #
         self.os_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.os_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.os_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -477,9 +483,10 @@ class SocketWrapperClient(SocketWrapper):
         if port is not None:
             self.socket_port = port
         try:
+            print("ConnectAsync()", self.socket_host, self.socket_port)
             self.os_socket.connect((self.socket_host, self.socket_port))
             self.connected = True
-            print("ConnectAsync() DirectConnect")
+            print("ConnectAsync() Successful")
             return True
         except socket.error as e:
             self.PrintError("ConnectAsync()", e)
@@ -494,6 +501,9 @@ class SocketWrapperClient(SocketWrapper):
                 # Error 56 signifies success, its not an error.
                 # Otherwise, we could check for completion with poll or select
                 # or maybe poll2 or select2. I saw comment about these but haven't tested.
+                #
+                # If the server is unreachable (no route / on wrong network), OSX reports
+                # 36 and then 37.
                 #
                 # If server is down, OSX reports 36 then 61, then 22. Error 22 then
                 # repeats and the socket never connects, even when the server becomes available.
@@ -571,16 +581,26 @@ class SocketWrapperClient(SocketWrapper):
         return False
 
 class FileServer(SocketWrapperServer):
-    __slots__ = ('imageDir')
+    __slots__ = ('file_dirs')
 
     def __init__(self, Verbose=True):
         super().__init__(BufferLen=TCPIP_XFR_BUFLEN, IniSection="FileServer", Verbose=Verbose)
-        self.imageDir = self.config.get("Cameraman", "ImageDir")
+        self.file_dirs = {}
+        specs = self.config.items("FileServer")
+        print("FileServer", specs)
+        for key, value in specs:
+            # the ini modules translates keys to lower case, so dir codes must be lower case
+            if key[0] == 'x':
+                code = key[1:]
+                path = os.path.expanduser(value)
+                self.file_dirs[code] = path 
 
     def ProcessMessage(self, s, message):
-        fn = message[0]
-        fp = os.path.join(self.imageDir, fn)
-        print("FS", fn, fp, message)
+        dir_code = message[0]
+        source_dir = self.file_dirs[dir_code]
+        fn = message[1]
+        fp = os.path.join(source_dir, fn)
+        print("FS", dir_code, fn, fp, message)
         try:
             f = open(fp, 'rb')
             c = f.read()
@@ -610,7 +630,7 @@ class MessageArchiver(object):
         self.archive_file = None
 
     def Open(self, MissionName):
-        fp = MissionName + '.nav'
+        fp = MissionName + FMQTT_LOG_EXTENSION
         self.archive_file = open(fp, 'w')
         self.archive_buffer = []
         self.archive_size = 0
@@ -654,6 +674,10 @@ class MessageArchiver(object):
 SUBSCRIPTION_MODE_ALL = 'a'
 SUBSCRIPTION_MODE_LATEST = 'l'
 
+FMQTT_INI_SECTION = "MqttFastServer"
+FMQTT_ARCHIVE_DIR = "ArchiveDir"
+FMQTT_LOG_EXTENSION = '.nav'
+
 class Subscription(object):
     __slots__ = ('message', 'mode', 's', 'topic')
 
@@ -667,15 +691,14 @@ class FastMqttServer(SocketWrapperServer):
     __slots__ = ('archive_dir', 'archiver', 'mission_id', 'topics_last_message', 'subscriptions')
 
     def __init__(self, Verbose=False):
-        ini_section = "MqttFastServer"
-        super().__init__(IniSection=ini_section , Port=FAST_MQTT_PORT, Verbose=Verbose)
+        super().__init__(IniSection=FMQTT_INI_SECTION , Port=FAST_MQTT_PORT, Verbose=Verbose)
         self.topics_last_message = {}
         self.subscriptions = {}
         self.message_in_ct = 0
         self.message_out_ct = 0
         self.mission_id = None
         self.archiver = MessageArchiver()
-        self.archive_dir = self.config.get(ini_section, "ArchiveDir")
+        self.archive_dir = self.config.get(FMQTT_INI_SECTION, FMQTT_ARCHIVE_DIR)
         self.archive_dir = os.path.expanduser(self.archive_dir)               # this expands tilde in path
 
     def CloseClientConnection(self, s):

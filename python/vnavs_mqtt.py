@@ -59,7 +59,15 @@ class FileClient(vcomms.SocketWrapperClient):
         self.start_time = 0
         self.timeout = False
 
-    def StartTransfer(self, filename, path=None):
+    def GetFile(self, dir_code, filename, path=None):
+        self.StartTransfer(dir_code=dir_code, filename=filename, path=path)
+        while True:
+            if self.CheckTransfer():
+                return True
+            if self.timeout:
+                return False
+
+    def StartTransfer(self, dir_code, filename, path=None):
         self.Init()
         retry_ct = 0
         while (not self.connected) and (retry_ct < 5):
@@ -72,7 +80,7 @@ class FileClient(vcomms.SocketWrapperClient):
             # So some patience is needed. Somewhere there is some latency or
             # inconsistency of block / no block. Or one of the OSes trying to be polite.
             time.sleep(1)
-            #print("FileClient.StartTransfer() - Attempt Connect", self.socket_host, self.socket_port)
+            print("FileClient.StartTransfer() - Attempt Connect", self.socket_host, self.socket_port)
             self.Connect()
         #print("FileClient.StartTransfer() - CONNECTED", self.socket_host, self.socket_port)
         self.file_name = filename
@@ -85,7 +93,7 @@ class FileClient(vcomms.SocketWrapperClient):
         self.timeout = False
         self.buffer = bytearray()
         self.buf_sum = 0
-        self.QueueMessageZ([filename])
+        self.QueueMessageZ([dir_code, filename])
         self.start_time = time.time()
         self.Select(timeout=0.1)
 
@@ -126,7 +134,7 @@ class FileClient(vcomms.SocketWrapperClient):
                 self.file_out.write(self.buffer[p+1:])
                 self.file_out.close()
                 self.transfer_state = FILE_TRANSFER_COMPLETE
-                print("FileClient.RecvData() Transfer Complete", time.time() - self.start_time)
+                #print("FileClient.RecvData() Transfer Complete", time.time() - self.start_time, self.file_name, file_len)
 
 class FastMqttClient(vcomms.SocketWrapperClient):
     # Many of these function names are lower case to be consistent with paho.mqtt.client.
@@ -136,6 +144,8 @@ class FastMqttClient(vcomms.SocketWrapperClient):
         self.on_connect = None
 
     def connect(self, **kwargs):
+        # Hmmm ... maybe dangerous. Clients have both connect() and Connect()
+        # doing slightly different things.
         super().Connect(**kwargs)
         if self.on_connect is not None:
             client = None			# not implemented
@@ -474,7 +484,11 @@ class mqtt_node(object):
         if self.mqttc.connected:
             return
         while True:
-            self.mqttc.connect(host=self.socket_host, port=self.socket_port)
+            if self.block_if_not_connected:
+                timeout = None
+            else:
+                timeout = 0.01
+            self.mqttc.connect(host=self.socket_host, port=self.socket_port, timeout=timeout)
             if self.mqttc.connected:
                 print("mqtt_node() connected")
                 break
@@ -522,6 +536,7 @@ class mqtt_node(object):
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
                     self.ConnectToMqttServer()
+                    print("Loop() Juat attemoted to connect")
                 if self.mqttc.connected:
                     if self.mqttc.thread is not None:
                         if not self.mqttc.thread.is_alive():
@@ -628,6 +643,9 @@ class mqtt_node(object):
 
     def Publish(self, topic, payload, ConfRequest=None):
         # payload is a dict to be converted to JSON)
+        # ConfRequest is an ID asking the recipient to clearly identify
+        # the response to this request. This requires cooperative
+        # requestors and respondors.
         if not self.mqttc.connected:
             print("Publish() Not connected, not sent")
             # for now, silently ignore publish errors. Need to do better
