@@ -1,12 +1,14 @@
 from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
-
+import os
 import platform
 import subprocess
 import sys
 import time
 
+import vnavs_const as vconst
+import vnavs_comms as vcomms
 import vnavs_mqtt as vmqtt
 
 SYSTEMCTL = '/bin/systemctl'
@@ -101,6 +103,13 @@ class process(vmqtt.mqtt_node):
         self.loop_sleep = 60
 
     def DoProcessLogList(self, payload):
+        print("DoProcessLogList()")
+        fn = os.path.join(self.archive_dir, 'foo.txt')
+        fd = os.open(fn, os.O_RDWR|os.O_CREAT )
+        info = os.fstatvfs(fd)
+        free_space = info.f_bfree
+        os.close(fd)
+        # os.remove()
         ext_len = len(vcomms.FMQTT_LOG_EXTENSION)
         flist = os.listdir(self.archive_dir)
         log_list = []
@@ -109,7 +118,8 @@ class process(vmqtt.mqtt_node):
                 log_list.append(this)
         result_payload = self.PrepareResponse(payload, ConfResponse=True)
         result_payload['log_list'] = log_list
-        self.Publis(vconst.process_result_topic, result_payload)
+        result_payload['free_space'] = free_space
+        self.Publish(vconst.process_result_topic, result_payload)
 
     def DoLoop(self):
         screens = GetScreenList()
