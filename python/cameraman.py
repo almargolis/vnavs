@@ -363,8 +363,11 @@ class cameraman(vmqtt.mqtt_node):
         if self.loop_mode == 'pause':
             return
 
+        last_time = 0
+        burst_image_ct = 0
+        burst_timestamp = vmqtt.NowStr()
         if self.mission_logging:
-            image_file_name_format = self.mission_id + "{timestamp}_{counter}." + self.loop_format
+            image_file_name_format = self.mission_id + "_" + burst_timestamp + "_{counter}." + self.loop_format
         else:
             image_file_name_format = "Idle_{counter}." + self.loop_format
         if self.loop_publish == 'file':
@@ -380,9 +383,6 @@ class cameraman(vmqtt.mqtt_node):
         #
         # Capture some pictures. This might be a single image or a long run of them.
         #
-        last_time = 0
-        burst_image_ct = 0
-        burst_timestamp = vmqtt.NowStr()
         if self.verbose:
             print("Cameraman.ImageBurst() Begin Burst", self.loop_mode, self.loop_format, self.loop_publish, burst_dest, self.image_ct)
         for picam_return in self.camera.capture_continuous(burst_dest, format=self.loop_format, use_video_port=True):

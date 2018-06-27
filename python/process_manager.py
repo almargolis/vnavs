@@ -1,12 +1,14 @@
 from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
-
+import os
 import platform
 import subprocess
 import sys
 import time
 
+import vnavs_const as vconst
+import vnavs_comms as vcomms
 import vnavs_mqtt as vmqtt
 
 SYSTEMCTL = '/bin/systemctl'
@@ -86,7 +88,7 @@ def PiShutdown():
 
 class process(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[],
+        super().__init__(Subscriptions=[vmqtt.Subscription(vconst.process_log_list_topic, async=True, handler=self.DoProcessLogList, LatestOnly=False)],
 					SingleThreaded=False, BlockIfNotConnected=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.system =  platform.system()
         if self.system == 'Linux':
@@ -94,8 +96,30 @@ class process(vmqtt.mqtt_node):
         else:
             self.system_process = None
         self.process_specs = self.config.items("ProcessMonitor")
+        self.archive_dir = self.config.get(vcomms.FMQTT_INI_SECTION, vcomms.FMQTT_ARCHIVE_DIR)
+        self.archive_dir = os.path.expanduser(self.archive_dir)               # this expands tilde in path
+
         self.startTime = time.time()
         self.loop_sleep = 60
+
+    def DoProcessLogList(self, payload):
+        print("DoProcessLogList()")
+        fn = os.path.join(self.archive_dir, 'foo.txt')
+        fd = os.open(fn, os.O_RDWR|os.O_CREAT )
+        info = os.fstatvfs(fd)
+        free_space = info.f_bfree
+        os.close(fd)
+        # os.remove()
+        ext_len = len(vcomms.FMQTT_LOG_EXTENSION)
+        flist = os.listdir(self.archive_dir)
+        log_list = []
+        for this in flist:
+            if this[-ext_len:] == vcomms.FMQTT_LOG_EXTENSION:
+                log_list.append(this)
+        result_payload = self.PrepareResponse(payload, ConfResponse=True)
+        result_payload['log_list'] = log_list
+        result_payload['free_space'] = free_space
+        self.Publish(vconst.process_result_topic, result_payload)
 
     def DoLoop(self):
         screens = GetScreenList()

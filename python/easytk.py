@@ -426,7 +426,7 @@ class TkWidgetDef(object):
         #     TypeError: __init__() takes at least 4 arguments (3 given)
         #
         if self.debug_this:
-            print("AddDropDown", row, col, caption)
+            print("AddDropdown", row, col, caption)
         row, col = self.Position(row=row, col=col)
         if caption is None:
             refname = "QWE"
