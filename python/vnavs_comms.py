@@ -502,6 +502,9 @@ class SocketWrapperClient(SocketWrapper):
                 # Otherwise, we could check for completion with poll or select
                 # or maybe poll2 or select2. I saw comment about these but haven't tested.
                 #
+                # Under Raspbian Stretch, got 114 when connected to wrong WLAN so there
+                # was no such ip address or port.
+                #
                 # If the server is unreachable (no route / on wrong network), OSX reports
                 # 36 and then 37.
                 #
@@ -515,11 +518,12 @@ class SocketWrapperClient(SocketWrapper):
                 # socket.error: [Errno 22] Invalid argument
                 # socket.error: [Errno 36] Operation now in progress
                 # socket.error: [Errno 37] Operation already in progress
+                # socket.error: [Errno 114] Operation already in progress (new, Raspbian Stretch)
                 # socket error: [Errno 56] Socket is already connected
                 # socket.error: [Errno 61] Connection refused
                 # socket.error: [Errno 111] Connection refused
                 # socket.error: [Errno 115] Operation now in progress
-                if e.errno == 56:
+                if e.errno in [56]:
                     self.connected = True
                     self.connect_in_progress = False
                     return True

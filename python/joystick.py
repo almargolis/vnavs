@@ -37,7 +37,15 @@ class joystick(vmqtt.mqtt_node):
         if self.system == 'Linux':
             pass
             ## this only works under linux
-        self.gamepad = evdev.InputDevice('/dev/input/event3')
+        if not self.ConfigureJoystick('/dev/input/event2'):
+            if not self.ConfigureJoystick('/dev/input/event3'):
+                if not self.ConfigureJoystick('/dev/input/event4'):
+                    raise Error("No Joystick found!")
+        self.helmsmanChanged = False
+        self.last_publish = 0.0
+
+    def ConfigureJoystick(self, port):
+        self.gamepad = evdev.InputDevice(port)
         PrintCapability(self.gamepad)
         self.gamepadAxis = {}
         capabilities = self.gamepad.capabilities(absinfo=True)
@@ -51,12 +59,14 @@ class joystick(vmqtt.mqtt_node):
         self.gamepadMap[self.speedAxisCode] = self.SaveSpeed
         self.gamepadMap[self.directionAxisCode] = self.SaveDirection
         self.mission_logging = False
-        self.speedAxis = self.gamepadAxis[self.speedAxisCode]
-        self.speedValue = self.gamepadAxis[self.speedAxisCode].value
-        self.directionAxis = self.gamepadAxis[self.directionAxisCode]
+        try:
+            self.speedAxis = self.gamepadAxis[self.speedAxisCode]
+            self.speedValue = self.gamepadAxis[self.speedAxisCode].value
+            self.directionAxis = self.gamepadAxis[self.directionAxisCode]
+        except KeyError:
+            return False
         self.directionValue = self.gamepadAxis[self.directionAxisCode].value
-        self.helmsmanChanged = False
-        self.last_publish = 0.0
+        return True
 
     def OnMissionLogStart(self, payload):
         self.mission_logging = True
