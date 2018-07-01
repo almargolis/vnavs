@@ -339,10 +339,13 @@ class helmsman(vmqtt.mqtt_node):
         self.orders_q = queue.Queue(10)
         super().__init__(Subscriptions=[
 						vmqtt.Subscription(vconst.helmsman_orders_topic, async=True, handler=self.OnHelmsmanOrders),
-						vmqtt.Subscription(vconst.helmsman_controls_topic, async=True, handler=self.OnHelmsmanControls)
+						vmqtt.Subscription(vconst.helmsman_controls_topic, async=True, handler=self.OnHelmsmanControls),
+						vmqtt.Subscription(vconst.mission_log_start_topic, async=True, handler=self.OnMissionLogStart),
+                                                vmqtt.Subscription(vconst.mission_log_stop_topic, async=True, handler=self.OnMissionLogStop)
 				], SingleThreaded=False, BrokerType='F', Verbose=False)
         self.v = vehicle()
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
+        self.mission_logging = False
         self.deadman_time = 0		# E-Stop if time.time() exceeds this
         self.state = STATE_DEADMAN
 
@@ -378,6 +381,12 @@ class helmsman(vmqtt.mqtt_node):
         except queue.Full:
             pass			# should log this and do something
         return				# the rest is abandoned code
+
+    def OnMissionLogStart(self, payload):
+        self.mission_logging = True
+
+    def OnMissionLogStop(self, payload):
+        self.mission_logging = False
 
     def InterpretOrders(self, payload):
         if HELMSMAN_SPEED in payload:

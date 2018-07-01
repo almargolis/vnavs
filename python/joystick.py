@@ -26,8 +26,10 @@ def PrintCapability(gamepad):
 
 class joystick(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[],
-					Readers=[],
+        super().__init__(Subscriptions=[
+                                                vmqtt.Subscription(vconst.mission_log_start_topic, async=True, handler=self.OnMissionLogStart),
+                                                vmqtt.Subscription(vconst.mission_log_stop_topic, async=True, handler=self.OnMissionLogStop)
+					],
 					SingleThreaded=True, BlockIfNotConnected=False,
 					SelectTimeoutSecs=0.01,
 					BrokerType='F', Streamer=False, Verbose=Verbose)
@@ -48,12 +50,19 @@ class joystick(vmqtt.mqtt_node):
         self.directionAxisCode = 2
         self.gamepadMap[self.speedAxisCode] = self.SaveSpeed
         self.gamepadMap[self.directionAxisCode] = self.SaveDirection
+        self.mission_logging = False
         self.speedAxis = self.gamepadAxis[self.speedAxisCode]
         self.speedValue = self.gamepadAxis[self.speedAxisCode].value
         self.directionAxis = self.gamepadAxis[self.directionAxisCode]
         self.directionValue = self.gamepadAxis[self.directionAxisCode].value
         self.helmsmanChanged = False
         self.last_publish = 0.0
+
+    def OnMissionLogStart(self, payload):
+        self.mission_logging = True
+
+    def OnMissionLogStop(self, payload):
+        self.mission_logging = False
 
     def SaveSpeed(self, event):
         if self.speedValue == event.value:
@@ -74,9 +83,10 @@ class joystick(vmqtt.mqtt_node):
         payload['speed'] = self.speedValue
         payload['speed_scale_min'] = self.speedAxis.min
         payload['speed_scale_max'] = self.speedAxis.max
-        payload['heading'] = self.directionValue
-        payload['heading_scale_min'] = self.directionAxis.min
-        payload['heading_scale_max'] = self.directionAxis.max
+        if not self.mission_logging:
+            payload['heading'] = self.directionValue
+            payload['heading_scale_min'] = self.directionAxis.min
+            payload['heading_scale_max'] = self.directionAxis.max
         self.Publish(vconst.helmsman_orders_topic, payload)
         self.helmsmanChanged = False
         print(payload)
