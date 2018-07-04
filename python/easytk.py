@@ -79,6 +79,17 @@ class Notebook(Tkinter.Frame):
         frame.grid(column=0, row=1)
         for label_col in range(ix, len(self.tab_labels_text)):
             self.tab_labels_widget[label_col].grid(column=label_col, row=0)
+	# The new tab is not visible, unless its the first tab.
+        # This is the behavior of ttk.Notebook.
+        # We cannot run select() immediately because the client (darkroom)
+        # won't get it. Waiting for 100 is too short. after_idle() didn't solve.
+        # ttk.Notebook does something with the same effect and darkroom depends on
+        # that. In general, it seems to make sense to assure that the client
+        # applications gets the initial select event.
+        if self.selected_tab is None:
+            self.after(500, self.select, text)
+        else:
+            frame.lower()
 
     def enable_traversal(self):
         pass
@@ -107,6 +118,11 @@ class Notebook(Tkinter.Frame):
         #     attribute _w.
         #   self.tab_labels_text is the tab caption. It is used as the tabid
         #     for select() and OnTabSelected events.
+        #   self.tab_frames is the tab content frame. It is used in darkroom
+        #     to select the tab for a process step.
+        #
+        # The above were in use by darkroom and mission_control using
+        # ttk.Notebook. This works identically.
         #
         try:
             return self.tab_frames.index(tabid)
@@ -518,19 +534,26 @@ class TkWidgetDef(object):
 #
 # Scrollable Table
 #
-    def AddCell(self, text=""):
-        self.AddLabel(text=text, row=SAME_ROW, col=NEXT_COL)
+    def AddCell(self, text="", row=0, col=0):
+        cell = Tkinter.Label(self.table, text=text)
+        cell.grid(column=col, row=row)
 
     def AddTable(self, OnClick=None, width=400, height=200, XSCROLL=True,
 				row=NEXT_ROW, col=SAME_COL, colspan=1, rowspan=1):
+        # width and height are the size of the visible portion of the canvas
         row, col = self._Position(row=row, col=col)
         refname = 'T'
-        frame = TkWidgetDef(refname, Tkinter.Frame(self.tkw), IsContainer=True)
-        frame.canvas = frame._AddScrolledWidget(Tkinter.Canvas, {'width': width, 'height': height},
+        frame = self._AddScrolledWidget(Tkinter.Canvas, {'width': width, 'height': height},
 						row=0, col=0, rowspan=1, XSCROLL=XSCROLL)
-        #frame.AddCell(text="A")
-        #frame.AddCell(text="B")
-        #frame.AddCell(text="C")
+        # frame.tkw is a canvas with scroll bars
+        # frame.scroll_container is a container for the canvas plus its scroll bars
+        frame.table = Tkinter.Frame(frame.tkw)
+        frame.tkw.create_window(0, 0, window=frame.table, anchor='nw')
+        for r in range(50):
+            for c in range(5):
+                frame.AddCell(text="{}{}".format(chr(ord('A')+c), r), row=r, col=c)
+        frame.tkw.update()			# this calculates reqwidth / reqheight (among otehr things)
+        frame.tkw.configure(scrollregion=(0, 0, frame.table.winfo_reqwidth(), frame.table.winfo_reqheight()))	# size of logical drawing area
         if colspan == COL_SPAN_ALL:
             colspan = self.right_col - col + 1
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
@@ -564,6 +587,7 @@ class TkWidgetDef(object):
         # Add a tab to notebook
         refname = caption.lower().replace(' ', '_')
         frame = TkWidgetDef(refname, Tkinter.Frame(self.tkw), IsContainer=True)
+        frame.tkw.grid(sticky=Tkinter.NSEW)
         if Where is None:
             self.tkw.add(frame.tkw, text=caption)
         else:

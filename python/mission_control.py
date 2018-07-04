@@ -172,7 +172,7 @@ class MissionControl(vmqtt.mqtt_node):
 
         self.alert_tab = self.notebook.AddTab('Alerts')
         #self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
-        self.alert_text = self.alert_tab.AddTable('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
+        self.alert_text = self.alert_tab.AddTable('Script', width=400, height=200, row=NEXT_ROW, col=NEXT_COL)
 
         self.pic_fn = None
         self.pic_path = None
