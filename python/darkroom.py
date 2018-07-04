@@ -647,6 +647,7 @@ class Darkroom(vmqtt.mqtt_node):
         # filter. Again not expected, but not a serious usability issue.
         #
         tabid = self.notebook.tkw.select()
+        print("Darkroom.OnTabSelected()", tabid, self.notebook_add_id)
         if tabid == self.notebook_add_id:
             # The plus tab was clicked, add a new tab just before that.
             # We want the new tab to be selected but TK ignores select() here,
@@ -655,7 +656,7 @@ class Darkroom(vmqtt.mqtt_node):
             self.new_step = ProcessStep(Where=tabid)
 
 
-    def DoCammeramanPicReady(self, payload):
+    def DoCameramanPicReady(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
         #print("rmsg_cameraman_pic_ready()", payload)
