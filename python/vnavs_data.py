@@ -118,8 +118,14 @@ class DataAttribPoint(DataAttrib):
 
     def GetValue(self, raw_value):
         v = raw_value.split(',')
-        x = int(v[0].strip())
-        y = int(v[1].strip())
+        if len(v) != 2:
+            return None
+        try:
+            x = int(v[0].strip())
+            y = int(v[1].strip())
+        except ValueError:
+            # not a valid integer string
+            return None
         return "({},{})".format(x, y)
 
 class DataAttribPointSym(DataAttrib):

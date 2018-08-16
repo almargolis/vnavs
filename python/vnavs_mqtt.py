@@ -345,10 +345,10 @@ def Publish(topic, payload, ResponseTopic=None):
     return node.WaitForPayload(conf)
 
 class Subscription(object):
-    __slots__ = ('async', 'handler_method', 'last_payload', 'request_only', 'topic')
+    __slots__ = ('async_delivery', 'handler_method', 'handler_needs_topic', 'last_payload', 'queue', 'request_only', 'topic')
 
-    def __init__(self, topic, handler=None, handler_needs_topic=False, request_only=False, async=False, LatestOnly=True):
-        self.async = async                  # process asyncronously
+    def __init__(self, topic, handler=None, handler_needs_topic=False, request_only=False, async_delivery=False, LatestOnly=True):
+        self.async_delivery = async_delivery                  # process asyncronously
         self.topic = topic
         self.request_only = request_only
         self.handler_method = handler
@@ -631,7 +631,7 @@ class mqtt_node(object):
         for this in self.subscriptions.values():
             if this.handler_method is None:
                 continue
-            if this.async:
+            if this.async_delivery:
                 # messages was handled as soon as it arrived
                 continue
             payload = self.GetLatestPayload(this.topic)
@@ -756,7 +756,7 @@ class mqtt_node(object):
                 c = self.confirmation_pending[conf_id]
                 c.confirmed_time = time.time
                 c.payload = payload
-        if subscription.async:
+        if subscription.async_delivery:
             # Handle immediately. Most commonly in multi-thread mode, so handler_method
             # needs to be thread safe and typically small/fast.
             if subscription.handler_needs_topic:

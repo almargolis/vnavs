@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function
+from past.builtins import basestring    # pip install future
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
@@ -130,17 +131,17 @@ class CameramanOrdersDict(vdata.Dict):
         super().__init__()
         self.AddAttrib(vdata.DataAttribStr('loop_mode', 'idle',
                         values=['idle', 'pause', 'run', 'single']))
-	self.AddAttrib(vdata.DataAttribStr('loop_format', 'jpeg',
+        self.AddAttrib(vdata.DataAttribStr('loop_format', 'jpeg',
                         values=['bgr', 'jpeg', 'yuv']))
-	self.AddAttrib(vdata.DataAttribStr('loop_publish', 'file',
+        self.AddAttrib(vdata.DataAttribStr('loop_publish', 'file',
                         values=['file', 'stream']))
-	self.AddAttrib(vdata.DataAttribStr('capture_format', 'jpeg',
+        self.AddAttrib(vdata.DataAttribStr('capture_format', 'jpeg',
                         values=['bgr', 'jpeg']))
-	self.AddAttrib(vdata.DataAttribStr('capture_publish', 'file',
+        self.AddAttrib(vdata.DataAttribStr('capture_publish', 'file',
                         values=['file', 'stream']))
-	self.AddAttrib(vdata.DataAttribInt('iso', 100,
+        self.AddAttrib(vdata.DataAttribInt('iso', 100,
                         min_value=0, max_value=800))
-	self.AddAttrib(vdata.DataAttribInt('shutter_speed', 0))
+        self.AddAttrib(vdata.DataAttribInt('shutter_speed', 0))
 
 class cameraman(vmqtt.mqtt_node):
     __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
@@ -155,12 +156,12 @@ class cameraman(vmqtt.mqtt_node):
 
     def __init__(self, Verbose=True):
         super().__init__(Subscriptions=[
-						vmqtt.Subscription(vconst.cameraman_mark_topic, async=True, handler=self.OnCameramanMark),
-						vmqtt.Subscription(vconst.cameraman_orders_topic, async=True, handler=self.OnCameramanOrders),
-						vmqtt.Subscription(vconst.cameraman_process_topic, async=True, handler=self.OnCameramanProcess),
-						vmqtt.Subscription(vconst.mission_init_topic, async=True, handler=self.OnMissionInit),
-						vmqtt.Subscription(vconst.mission_log_start_topic, async=True, handler=self.OnMissionLogStart),
-						vmqtt.Subscription(vconst.mission_log_stop_topic, async=True, handler=self.OnMissionLogStop)
+						vmqtt.Subscription(vconst.cameraman_mark_topic, async_delivery=True, handler=self.OnCameramanMark),
+						vmqtt.Subscription(vconst.cameraman_orders_topic, async_delivery=True, handler=self.OnCameramanOrders),
+						vmqtt.Subscription(vconst.cameraman_process_topic, async_delivery=True, handler=self.OnCameramanProcess),
+						vmqtt.Subscription(vconst.mission_init_topic, async_delivery=True, handler=self.OnMissionInit),
+						vmqtt.Subscription(vconst.mission_log_start_topic, async_delivery=True, handler=self.OnMissionLogStart),
+						vmqtt.Subscription(vconst.mission_log_stop_topic, async_delivery=True, handler=self.OnMissionLogStop)
 					],
 							SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.burst_fps_rate = 0			# capture speed of last burst

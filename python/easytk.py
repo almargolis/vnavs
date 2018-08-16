@@ -86,7 +86,7 @@ class Notebook(Tkinter.Frame):
         # ttk.Notebook does something with the same effect and darkroom depends on
         # that. In general, it seems to make sense to assure that the client
         # applications gets the initial select event.
-        if self.selected_tab is None:
+        if len(self.tab_labels_text) == 1:
             self.after(500, self.select, text)
         else:
             frame.lower()
@@ -649,7 +649,7 @@ class TkWidgetDef(object):
         elif isinstance(self.tkd, Tkinter.StringVar):
             debug += "StringVar '{0}".format(self.tkd.get())
         else:
-            debug += "{0} '{1}'".format(self.tkd.__class__.__name__, `self.tkd`)
+            debug += "{0} '{1}'".format(self.tkd.__class__.__name__, repr(self.tkd))
         #print(debug)
 
         if isinstance(self.tkw, ScrolledText.ScrolledText):

@@ -40,6 +40,7 @@ class ProcessStep(object):
     __slots__ = ('cv_filter_name', 'cv_specs',
 			'deposition',
 			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_hsvspec', 'exec_im', 'exec_lines', 'exec_rect',
+			'execution_time',
 			'filter_selection',
 			'image_widget', 'info_data', 'info_widgets', 'input_panel', 'ix', 'output_panel',
 			'parm_widgets', 'parm_values', 'parms_specs', 'point_target',
@@ -73,7 +74,7 @@ class ProcessStep(object):
         #
         # input_panel
         #
-        self.filter_selection = self.input_panel.AddListbox('Filters', OpticChiasm.ImageFilter.filter_names, Selection=FilterName, command=self.NewFilter, rowspan=4)
+        self.filter_selection = self.input_panel.AddListbox('Filters', OpticChiasm.ImageFilterCollection.image_filter_names, Selection=FilterName, command=self.NewFilter, rowspan=4)
         self.info_data = []
         self.info_widgets = []
         for ix in range(6):
@@ -224,7 +225,7 @@ class ProcessStep(object):
         if new_filter_name != self.cv_filter_name:
             self.filter_selection.ReplaceValue(new_filter_name)
             self.cv_filter_name = new_filter_name
-            self.cv_specs = OpticChiasm.ImageFilter.filters[self.cv_filter_name]
+            self.cv_specs = OpticChiasm.ImageFilterCollection.image_filters[self.cv_filter_name]
             self.parms_specs = self.cv_specs.parms
             for ix, this_widget in enumerate(self.parm_widgets):
                 if ix < len(self.parms_specs):
