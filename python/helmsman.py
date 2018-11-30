@@ -80,6 +80,7 @@ class vehicle(object):
         self.steering_offset = 90
         self.steering_increment	= 10		# degrees of casual steering adjustment
         self.steering_max = 30			# 60 degrees left or right
+        self.steering_max = 90			# 60 degrees left or right
         self.steering_last = 0			# last actual steering position
         self.steering_base = 0			# general goal, 0 for navigation, X for circles
         self.steering_plan = None		# steering variations from base
@@ -322,6 +323,11 @@ SPEED_STOP = 0
 STEER_STRAIGHT = 0
 
 HELMSMAN_GOVERNOR = 'governor'
+HELMSMAN_SPEED_CONTROL = 'speed_control'
+HELMSMAN_SPEED_CONTROL_DEFAULT = '*'
+HELMSMAN_MAX_SPEED_CONTROL = 'max_speed_control'
+HELMSMAN_STEERING_CONTROL = 'steering_control'
+HELMSMAN_STEERING_CONTROL_DEFAULT = '*'
 
 HELMSMAN_STATE = 'state'
 HELMSMAN_SPEED = 'speed'
@@ -339,15 +345,17 @@ class helmsman(vmqtt.mqtt_node):
     def __init__(self):
         self.orders_q = queue.Queue(10)
         super().__init__(Subscriptions=[
-						vmqtt.Subscription(vconst.helmsman_orders_topic, async=True, handler=self.OnHelmsmanOrders),
-						vmqtt.Subscription(vconst.helmsman_controls_topic, async=True, handler=self.OnHelmsmanControls),
-						vmqtt.Subscription(vconst.mission_log_start_topic, async=True, handler=self.OnMissionLogStart),
-                                                vmqtt.Subscription(vconst.mission_log_stop_topic, async=True, handler=self.OnMissionLogStop)
+						vmqtt.Subscription(vconst.helmsman_orders_topic, async_delivery=True, handler=self.OnHelmsmanOrders),
+						vmqtt.Subscription(vconst.helmsman_controls_topic, async_delivery=True, handler=self.OnHelmsmanControls),
+						vmqtt.Subscription(vconst.mission_log_start_topic, async_delivery=True, handler=self.OnMissionLogStart),
+                                                vmqtt.Subscription(vconst.mission_log_stop_topic, async_delivery=True, handler=self.OnMissionLogStop)
 				], SingleThreaded=False, BrokerType='F', Verbose=False)
         self.v = vehicle()
         self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
         self.mission_logging = False
         self.deadman_time = 0		# E-Stop if time.time() exceeds this
+        self.speed_control = HELMSMAN_SPEED_CONTROL_DEFAULT
+        self.steering_control = HELMSMAN_STEERING_CONTROL_DEFAULT
         self.state = STATE_DEADMAN
 
     def ClearOrdersQueue(self):
@@ -362,6 +370,12 @@ class helmsman(vmqtt.mqtt_node):
     def OnHelmsmanControls(self, payload):
         if HELMSMAN_GOVERNOR in payload:
             self.v.governor = int(payload[HELMSMAN_GOVERNOR])
+        if HELMSMAN_MAX_SPEED_CONTROL in payload:
+            self.v.speed_max = int(payload[HELMSMAN_MAX_SPEED_CONTROL])
+        if HELMSMAN_STEERING_CONTROL in payload:
+            self.steering_control = payload[HELMSMAN_STEERING_CONTROL].strip()
+        if HELMSMAN_SPEED_CONTROL in payload:
+            self.speed_control = payload[HELMSMAN_SPEED_CONTROL].strip()
 
     def OnHelmsmanOrders(self, payload):
         #print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
@@ -389,32 +403,51 @@ class helmsman(vmqtt.mqtt_node):
     def OnMissionLogStop(self, payload):
         self.mission_logging = False
 
+    def InterpretOrdersSpeed(self, payload):
+        if self.speed_control == HELMSMAN_SPEED_CONTROL_DEFAULT:
+            pass
+        else:
+          if self.speed_control == payload['_sender']:
+              pass
+          else:
+              print("HELMSMAN - Unauthorized Speed Order from %s".format(payload['_sender']))
+              return
+        if HELMSMAN_SPEED_SCALE_MIN in payload:
+            speed_raw = int(payload[HELMSMAN_SPEED])
+            speed_scale_min = int(payload[HELMSMAN_SPEED_SCALE_MIN])
+            speed_scale_max = int(payload[HELMSMAN_SPEED_SCALE_MAX])
+            speed_request = self.ScaleRequest(speed_raw, -speed_scale_min, -speed_scale_max, -self.v.speed_max, self.v.speed_max)
+        else:
+            speed_request = payload[HELMSMAN_SPEED]	# Note: alphanumeric
+        self.v.NewSpeedGoal(speed_request)
+        print("SPEED", speed_request)
+
+    def InterpretOrdersHeading(self, payload):
+        if self.steering_control == HELMSMAN_STEERING_CONTROL_DEFAULT:
+            pass
+        else:
+          if self.steering_control == payload['_sender']:
+              pass
+          else:
+              print("HELMSMAN - Unauthorized Steering Order from %s".format(payload['_sender']))
+              return
+        if HELMSMAN_HEADING_SCALE_MIN in payload:
+            heading_raw = int(payload[HELMSMAN_HEADING])
+            heading_scale_min = int(payload[HELMSMAN_HEADING_SCALE_MIN])
+            heading_scale_max = int(payload[HELMSMAN_HEADING_SCALE_MAX])
+            heading_request = self.ScaleRequest(heading_raw, heading_scale_min, heading_scale_max, -self.v.steering_max, self.v.steering_max, sensitivity=None)
+        else:
+            try:
+                heading_request = int(payload[HELMSMAN_HEADING])	# Note: alphanumeric
+            except TypeError:
+                heading_request = 0
+        self.v.NewSteeringGoal(heading_request)
+
     def InterpretOrders(self, payload):
         if HELMSMAN_SPEED in payload:
-            if HELMSMAN_SPEED_SCALE_MIN in payload:
-                speed_raw = int(payload[HELMSMAN_SPEED])
-                speed_scale_min = int(payload[HELMSMAN_SPEED_SCALE_MIN])
-                speed_scale_max = int(payload[HELMSMAN_SPEED_SCALE_MAX])
-                speed_request = self.ScaleRequest(speed_raw, -speed_scale_min, -speed_scale_max, -self.v.speed_max, self.v.speed_max)
-            else:
-                speed_request = payload[HELMSMAN_SPEED]	# Note: alphanumeric
-            self.v.NewSpeedGoal(speed_request)
-            print("SPEED", speed_request)
-            #self.GetGoalSpeed(speed_request)
+            self.InterpretOrdersSpeed(payload)
         if HELMSMAN_HEADING in payload:
-            if HELMSMAN_HEADING_SCALE_MIN in payload:
-                heading_raw = int(payload[HELMSMAN_HEADING])
-                heading_scale_min = int(payload[HELMSMAN_HEADING_SCALE_MIN])
-                heading_scale_max = int(payload[HELMSMAN_HEADING_SCALE_MAX])
-                heading_request = self.ScaleRequest(heading_raw, heading_scale_min, heading_scale_max, -self.v.steering_max, self.v.steering_max, sensitivity=None)
-            else:
-                try:
-                    heading_request = int(payload[HELMSMAN_HEADING])	# Note: alphanumeric
-                except TypeError:
-                    heading_request = 0
-            #print ("STEER", heading_request)
-            self.v.NewSteeringGoal(heading_request)
-            #self.GetGoalSteering(heading_request)
+            self.InterpretOrdersHeading(payload)
         if HELMSMAN_TIMER in payload:
             print("TIMER", payload[HELMSMAN_TIMER])
             timer = int(payload[HELMSMAN_TIMER])
