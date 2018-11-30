@@ -169,9 +169,9 @@ class cameraman(vmqtt.mqtt_node):
         self.burst_fps_start_time = time.time()
         self.iso = 100
         self.shutter_speed = 0
-        self.camera_resolution = (320, 240)
-        self.camera_resolution = (160, 120)
         self.camera_resolution = (640, 480)
+        self.camera_resolution = (160, 120)
+        self.camera_resolution = (320, 240)
         if picamera is not None:
             try:
                 self.camera = picamera.PiCamera(resolution=self.camera_resolution)
@@ -240,11 +240,11 @@ class cameraman(vmqtt.mqtt_node):
         self.mission_logging = False
 
     def DoLoop(self):
-        # executed repetitively by mqtt_node.Loop() which handles exceptions and propper shutdown.
+        # executed repetitively by mqtt_node.Loop() which handles exceptions and proper shutdown.
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
         if self.orders_payload is not None:
             payload, self.orders_payload = self.orders_payload, None
-            self.orders_parms.ValidatePayload(payload, self)
+            self.orders_dict.ValidatePayload(payload, self)
         self.ImageBurst()
 
     def PostProcess(self, process, Im=None, An=None):

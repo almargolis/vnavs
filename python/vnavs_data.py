@@ -25,7 +25,7 @@ class Dict(object):
             key = this_attrib.name
             if key in payload:
                 value = payload[key]
-                value, fld_valid = this_atttrib.Validate(value)
+                value, fld_valid = this_attrib.Validate(value)
                 if fld_valid and (target is not None):
                     setattr(target, key, value)
 
