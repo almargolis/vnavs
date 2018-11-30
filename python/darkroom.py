@@ -660,7 +660,7 @@ class Darkroom(vmqtt.mqtt_node):
     def DoCameramanPicReady(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
-        #print("rmsg_cameraman_pic_ready()", payload)
+        print("rmsg_cameraman_pic_ready()", payload)
         self.last_pic_payload = payload
 
     def DeleteProcessStep(self, ix):
@@ -722,6 +722,7 @@ class Darkroom(vmqtt.mqtt_node):
                     payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
                     self.pic_fn = payload['filename']
                     path = os.path.join(self.downloadDir, self.pic_fn)
+                    print("DoLoop() GetFile: ", path)
                     if not self.file_client.GetFile(self.pic_fn, path=path):
                         print("Unable to fetch PIC", self.pic_fn)
                         return
