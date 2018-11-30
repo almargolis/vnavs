@@ -88,7 +88,7 @@ def PiShutdown():
 
 class process(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[vmqtt.Subscription(vconst.process_log_list_topic, async=True, handler=self.DoProcessLogList, LatestOnly=False)],
+        super().__init__(Subscriptions=[vmqtt.Subscription(vconst.process_log_list_topic, async_delivery=True, handler=self.DoProcessLogList, LatestOnly=False)],
 					SingleThreaded=False, BlockIfNotConnected=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.system =  platform.system()
         if self.system == 'Linux':
