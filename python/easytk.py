@@ -214,7 +214,8 @@ class TkWidgetDef(object):
             if current_selection in choices:
                 self.tkd.set(current_selection)
             else:
-                self.tkd.set(choices[0])
+                if len(choices) > 0:
+                    self.tkd.set(choices[0])
     
     def ReplaceValue(self, new_value, Caption=None):
         debug = "ReplaceValue({0}): tkw {1} '{2}' -- ".format(new_value, self.tkw.__class__.__name__, self.Value())

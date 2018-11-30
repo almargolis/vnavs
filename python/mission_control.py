@@ -566,7 +566,7 @@ def RunGps(waypoint):
         print("RunGps() requesting waypoint", waypoint)
         payload = {}
         payload['key'] = waypoint
-        value_payload = vmqtt.Publish('data/get', payload, ResponseTopic='data/value')
+        value_payload = vmqtt.Publish(vconst.data_get_topic, payload, ResponseTopic='data/value')
         value = value_payload['value']
         start_position = engineer_1.PositionStringToPosition(value)
     while start_position is None:
@@ -594,7 +594,7 @@ def SaveGps(waypoint):
             payload = {}
             payload['key'] = waypoint
             payload['value'] = this_position
-            vmqtt.Publish('data/save', payload)
+            vmqtt.Publish(vconst.data_save_topic, payload)
 
 if __name__ == '__main__':
     if sys.argv[1] == 'gui':
