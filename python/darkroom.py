@@ -40,6 +40,7 @@ class ProcessStep(object):
     __slots__ = ('cv_filter_name', 'cv_specs',
 			'deposition',
 			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_hsvspec', 'exec_im', 'exec_lines', 'exec_rect',
+			'execution_time',
 			'filter_selection',
 			'image_widget', 'info_data', 'info_widgets', 'input_panel', 'ix', 'output_panel',
 			'parm_widgets', 'parm_values', 'parms_specs', 'point_target',
@@ -73,7 +74,7 @@ class ProcessStep(object):
         #
         # input_panel
         #
-        self.filter_selection = self.input_panel.AddListbox('Filters', OpticChiasm.ImageFilter.filter_names, Selection=FilterName, command=self.NewFilter, rowspan=4)
+        self.filter_selection = self.input_panel.AddListbox('Filters', OpticChiasm.ImageFilterCollection.image_filter_names, Selection=FilterName, command=self.NewFilter, rowspan=4)
         self.info_data = []
         self.info_widgets = []
         for ix in range(6):
@@ -224,7 +225,7 @@ class ProcessStep(object):
         if new_filter_name != self.cv_filter_name:
             self.filter_selection.ReplaceValue(new_filter_name)
             self.cv_filter_name = new_filter_name
-            self.cv_specs = OpticChiasm.ImageFilter.filters[self.cv_filter_name]
+            self.cv_specs = OpticChiasm.ImageFilterCollection.image_filters[self.cv_filter_name]
             self.parms_specs = self.cv_specs.parms
             for ix, this_widget in enumerate(self.parm_widgets):
                 if ix < len(self.parms_specs):
@@ -647,6 +648,7 @@ class Darkroom(vmqtt.mqtt_node):
         # filter. Again not expected, but not a serious usability issue.
         #
         tabid = self.notebook.tkw.select()
+        print("Darkroom.OnTabSelected()", tabid, self.notebook_add_id)
         if tabid == self.notebook_add_id:
             # The plus tab was clicked, add a new tab just before that.
             # We want the new tab to be selected but TK ignores select() here,
@@ -655,10 +657,10 @@ class Darkroom(vmqtt.mqtt_node):
             self.new_step = ProcessStep(Where=tabid)
 
 
-    def DoCammeramanPicReady(self, payload):
+    def DoCameramanPicReady(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
-        #print("rmsg_cameraman_pic_ready()", payload)
+        print("rmsg_cameraman_pic_ready()", payload)
         self.last_pic_payload = payload
 
     def DeleteProcessStep(self, ix):
@@ -720,6 +722,7 @@ class Darkroom(vmqtt.mqtt_node):
                     payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
                     self.pic_fn = payload['filename']
                     path = os.path.join(self.downloadDir, self.pic_fn)
+                    print("DoLoop() GetFile: ", path)
                     if not self.file_client.GetFile(self.pic_fn, path=path):
                         print("Unable to fetch PIC", self.pic_fn)
                         return

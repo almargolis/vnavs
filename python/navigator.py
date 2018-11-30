@@ -291,7 +291,7 @@ class StepData(MissionStep):
         self.navigator.PutPersistentData(self.dname, self.parm_kword)
         return True
 
-class StepFollowLine(MissionStep):
+class StepFollowLinePid(MissionStep):
     __slots__ = ('next_time', 'speed', 'pid')
     def __init__(self, stage):
         super().__init__(stage)
@@ -320,7 +320,39 @@ class StepFollowLine(MissionStep):
             self.nav.p_error = self.pid.error
             self.nav.i_accumulator = self.pid.i_accumulator
             self.nav.derivative = self.pid.derivative
-            print("StepFollowLine.DoStageStepRun() LINE", self.navigator.line_x, self.nav.speed, self.nav.steering)
+            print("StepFollowLinePid.DoStageStepRun() LINEpid", self.navigator.line_x, self.nav.speed, self.nav.steering)
+            self.PublishNavigation()
+            self.next_time = time.time() + 1.0
+            self.next_time = time.time() + 0.5
+        return False
+
+class StepFollowLineTrace(MissionStep):
+    __slots__ = ('base_angle', 'next_time', 'sensitvity_x', 'sensitivity_general', 'speed', 'target_x')
+    def __init__(self, stage):
+        super().__init__(stage)
+        self.next_time = None
+        self.base_angle = 135
+        self.sensitivity_general = 1.5
+        self.sensitivity_x = 1.0
+        self.speed = 4
+
+    def DoStageStepInit(self):
+        if 'speed' in self.parm_kword:
+            self.speed = int(self.parm_kword['speed'])
+        if 'base_angle' in self.parm_kword:
+            self.base_angle = float(self.parm_kword['base_angle'])
+        rect = OpticChiasm.RectFromPayload(self.parm_kword) 
+        self.target_x = rect.center_x
+        self.next_time = 0
+
+    def DoStageStepRun(self, loop_ct):
+        if time.time() > self.next_time:
+            x_error = self.navigator.line_x - self.target_x
+            x_steering = float(x_error) * self.sensitivity_x
+            path_steering = self.navigator.line_angle - self.base_angle
+            self.nav.steering = int(((x_steering + path_steering) * self.sensitivity_general))
+            self.nav.speed = self.speed
+            print("StepFollowLinePid.DoStageStepRun() LINEtrace", self.navigator.line_x, self.nav.speed, self.nav.steering)
             self.PublishNavigation()
             self.next_time = time.time() + 1.0
             self.next_time = time.time() + 0.5
@@ -605,16 +637,17 @@ class Mission(object):
             return StepMessage(stage)
 
         step_defs = {}
-        MissionStepDef('data',		sclass=StepData, defs=step_defs)
-        MissionStepDef('gps',		sclass=StepGpsWaypoint, defs=step_defs)
-        MissionStepDef('follow_line',	sclass=StepFollowLine, defs=step_defs)
-        MissionStepDef('log_start',	func=StartLog, defs=step_defs)
-        MissionStepDef('log_stop',	func=StopLog, defs=step_defs)
-        MissionStepDef('magic',		sclass=StepMagic, defs=step_defs)
-        MissionStepDef('move',		sclass=StepMove, defs=step_defs)
-        MissionStepDef('message',	sclass=StepMessage, defs=step_defs)
-        MissionStepDef('sleep',		sclass=StepSleep, defs=step_defs)
-        MissionStepDef('wait',		sclass=StepWait, defs=step_defs)
+        MissionStepDef('data',			sclass=StepData, defs=step_defs)
+        MissionStepDef('gps',			sclass=StepGpsWaypoint, defs=step_defs)
+        MissionStepDef('follow_line_pid',	sclass=StepFollowLinePid, defs=step_defs)
+        MissionStepDef('follow_line_trace',	sclass=StepFollowLineTrace, defs=step_defs)
+        MissionStepDef('log_start',		func=StartLog, defs=step_defs)
+        MissionStepDef('log_stop',		func=StopLog, defs=step_defs)
+        MissionStepDef('magic',			sclass=StepMagic, defs=step_defs)
+        MissionStepDef('move',			sclass=StepMove, defs=step_defs)
+        MissionStepDef('message',		sclass=StepMessage, defs=step_defs)
+        MissionStepDef('sleep',			sclass=StepSleep, defs=step_defs)
+        MissionStepDef('wait',			sclass=StepWait, defs=step_defs)
 
 
         self.mission_script = script
@@ -883,8 +916,8 @@ class navigator(vmqtt.mqtt_node):
 						vmqtt.Subscription(vconst.mission_cancel_topic, handler=self.DoMissionCancel),
 						vmqtt.Subscription(vconst.mission_sync_event_topic, handler=self.DoMissionSyncEvent),
 						# vmqtt.Subscription(vconst.navigator_service_topic, handler=self.DoNavigatorService),
-						vmqtt.Subscription(vconst.data_save_topic, async=True, handler=self.OnDataSave),
-						vmqtt.Subscription(vconst.data_get_topic, async=True, handler=self.OnDataGet)
+						vmqtt.Subscription(vconst.data_save_topic, async_delivery=True, handler=self.OnDataSave),
+						vmqtt.Subscription(vconst.data_get_topic, async_delivery=True, handler=self.OnDataGet)
 					],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.missionDir = self.config.get("Pilot", "MissionDir")
@@ -892,8 +925,9 @@ class navigator(vmqtt.mqtt_node):
         self.imu_data = engineer_1.ImuDataRecord()
         self.imageFn = None
         self.imageRequested = None
-        self.line_x = None
+        self.line_angle = None
         self.line_centers = []
+        self.line_x = None
         self.mission = None
         self.mission_load_payload = None
         self.mission_sync_event_payload = None
@@ -1028,8 +1062,16 @@ class navigator(vmqtt.mqtt_node):
             self.line_centers = []
             if len(list_of_OpenCvRect) > 0:
                 self.line_x = list_of_OpenCvRect[0].center_x
+                start_y = list_of_OpenCvRect[0].center_y
                 for this_rect in list_of_OpenCvRect:
                     self.line_centers.append(this_rect.center)
+                    end_x = this_rect.center_x
+                    end_y = this_rect.center_y
+                if end_y < start_y:
+                    adjacent_len = float(start_y - end_y)
+                    opposite_len = float(self.line_x - end_x)
+                    self.line_angle = math.degrees(math.atan2(adjacent_len, opposite_len))
+                    #print("DoCameramanPicReady()", self.line_x, start_y, end_x, end_y, self.line_angle, "<<<")
 
     def DoMissionLoad(self, payload):
         self.mission_load_payload = payload

@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function
+from past.builtins import basestring    # pip install future
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
@@ -111,26 +112,13 @@ class Image(object):
         return self._im
 
     def ImAsBGR(self):
-        if self._im is None:
-            return None
-        if self.colorcode == IM_BGR:
-            return self._im
-        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_BGR))
-        return cv2.cvtColor(self._im, transform)
+        return self.ImAsAny(IM_BGR)
 
     def ImAsRGB(self):
-        if self._im is None:
-            return None
-        if self.colorcode == IM_RGB:
-            return self._im
-        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_RGB))
-        return cv2.cvtColor(self._im, transform)
+        return self.ImAsAny(IM_RGB)
 
     def ImAsHSV(self):
-        if self.colorcode == IM_HSV:
-            return self._im
-        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_HSV))
-        return cv2.cvtColor(self._im, transform)
+        return self.ImAsAny(IM_HSV)
 
     def ImAsGray(self, Copy=False):
         if self.colorcode == IM_GRAY:
@@ -138,8 +126,7 @@ class Image(object):
                 return self._im.copy()
             else:
                 return self._im
-        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_GRAY))
-        return cv2.cvtColor(self._im, transform)
+        return self.ImAsAny(IM_GRAY)
 
     def ImAsAny(self, colorcode):
         print("ImAsAny()", self.colorcode, colorcode, self._im.__class__.__name__)
@@ -150,7 +137,9 @@ class Image(object):
             return None
         if self.colorcode == colorcode:
             return self._im
-        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_HSV))
+        transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_HSV), None)
+        if transform is None:
+            return None
         return cv2.cvtColor(self._im, transform)
 
     def ReplaceImage(self, im, colorcode):
@@ -272,7 +261,7 @@ class Image(object):
             if this_hsvspec is not None:
                 line_hsvspec = this_hsvspec
             if (missing_slices > max_missing) or (not AdvanceLineSearch(this_segment)):
-                # Missing_slices filters for reasonably continuous lines.
+                # Missing_slices image_filters for reasonably continuous lines.
                 # Added because when line was lost this was finding random blobs to chase
                 # far from line. If following dashed line, we might want a more cyclic check.
                 # False positives are worse than false negatives.
@@ -317,7 +306,7 @@ def ImageFromPicamera(picam_image, format, file_path=None):
     return img
 # Filter functions should modify only:
 #	xstep.im
-# GetParm() must filter parameters to avoid code injection attacks
+# GetParm() must image_filter parameters to avoid code injection attacks
 
 
 
@@ -330,10 +319,12 @@ FILTER_NAME_IMAGE		= 'Image'
 FLAG_ISBASE = 'isbase'
 FLAG_SLIDERS = 'sliders'
 
+class ImageFilterCollection(object):
+    image_filters = {}
+    image_filter_names = []
+
 class ImageFilter(object):
-    __slots__ = ('annotate_code', 'filter_names', 'filters', 'flags', 'code', 'name', 'parms')
-    filters = {}
-    filter_names = []
+    __slots__ = ('annotate_code', 'clsdata', 'flags', 'code', 'name', 'parms')
 
     def __init__(self, name, code, parms, Flags=None):
         self.name = name
@@ -341,9 +332,10 @@ class ImageFilter(object):
         self.parms = parms		# a list of vdata.DataAttrib() and descendent objects
         self.flags = Flags		# a list of string flag names
         self.annotate_code = None
-        self.filters[name] = self
-        self.filter_names.append(name)
-        self.filter_names.sort()
+        self.clsdata = ImageFilterCollection
+        self.clsdata.image_filters[name] = self
+        self.clsdata.image_filter_names.append(name)
+        self.clsdata.image_filter_names.sort()
 
 #
 # Filter code is processed with exec with available globals OpticCiasm, cv2,
@@ -381,22 +373,22 @@ ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
 			],
                         Flags=[FLAG_SLIDERS])
 
-filter = ImageFilter(FILTER_NAME_CROPPP,
+image_filter = ImageFilter(FILTER_NAME_CROPPP,
 			'{x_output_rect} = im_in.RectFromSymbolicPP({p1}, {p2})\n'
 				+ '{x_output_im} = im_in.Crop({x_output_rect})\n'
 				+ 'print(im_in.shape, {x_output_rect})\n',
 			[vdata.DataAttribPointSym('p1', 'm-50,m+50'), vdata.DataAttribPointSym('p2', '-100,e')],
 			Flags=[])
-filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
-filter = ImageFilter('CropYX',
+image_filter = ImageFilter('CropYX',
 			'{x_output_rect} = im_in.RectFromSymbolicYX({y_range}, {x_range})\n'
 				+ '{x_output_im} = im_in.Crop({x_output_rect})\n'
 				+ 'print(im_in.shape, {x_output_rect})\n',
 			[vdata.DataAttribPointSym('y_range', '-100,'), vdata.DataAttribPointSym('x_range', 'm-50,m+50')],
 			Flags=[])
-filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 ImageFilter('Gray',
@@ -413,7 +405,7 @@ ImageFilter('BlurBilateralFilter',
 			'{x_output_im} = oc.Image(im=cv2.bilateralFilter(im_in.im, {diameter}, {sigmaColor}, {sigmaSpace}), colorcode=im_in.colorcode)',
 			[vdata.DataAttribInt('diameter', '5'), vdata.DataAttribInt('sigmaColor', '17'), vdata.DataAttribInt('sigmaSpace', '17')],
 			Flags=[])
-                        # diameter > 5 is very slow, use 5 for real time processing or 9 for off-line heavy filtering
+                        # diameter > 5 is very slow, use 5 for real time processing or 9 for off-line heavy image_filtering
 			# the two sigma values are often the same value. <10 doesn't do much, >150 is cartoonish
 
 ImageFilter('BlurGaussian',
@@ -436,14 +428,14 @@ ImageFilter('CannyAuto',
 			[vdata.DataAttribFloat('sigma', '0.33')],
 			Flags=[])
 
-filter = ImageFilter('ChaseLine',
+image_filter = ImageFilter('ChaseLine',
 			'line_points = im_base.ChaseLine(hsvspec_in, rect_in)',
 			[],
 			Flags=[])
                         # ChaseLine depends on previous rect and hsvspec. These probably changed im_in to a
 			# black and while image from HueMaskSingle or similar. This therefore uses
                         # im_base to reset to the original color image
-filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ '{x_output_annotated}.DrawLinePoints(line_points, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 
@@ -458,7 +450,7 @@ ImageFilter('ColorBalance',
 # erode are defined. Kernel can be non-rectanglar and there is a function to build those. If we enhance kernel,
 # probably want to specify anchor too.
 #
-# https://docs.opencv.org/2.4/modules/imgproc/doc/filtering.html
+# https://docs.opencv.org/2.4/modules/imgproc/doc/image_filtering.html
 # https://docs.opencv.org/3.0-beta/doc/py_tutorials/py_imgproc/py_morphological_ops/py_morphological_ops.html
 #
 ImageFilter('MorphClose',
@@ -505,11 +497,11 @@ ImageFilter('MorphOpen',
 # Contour Filters
 #
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
-filter = ImageFilter('ContoursFind',
+image_filter = ImageFilter('ContoursFind',
 			'cont2, {x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
 			[vdata.DataAttribInt('MaxLevel', '-1')],
 			Flags=[])
-filter.annotate_code = '{x_output_annotated} = im_base.CopyAsGray().CopyAsBGR()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.CopyAsGray().CopyAsBGR()\n' \
 				+ 'oc.CrayolaContours({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy}, MaxLevel={MaxLevel})\n' \
 				+ 'oc.ContoursToLineVectors({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy})\n'
 		#		+ 'cv2.drawContours({x_output_annotated}.im, {x_output_contours}, -1, oc.DRAW_BGR_RED, 1)\n'
@@ -532,19 +524,19 @@ ImageFilter('HistogramCB',
 			[],
 			Flags=[])
 
-filter = ImageFilter(FILTER_NAME_ANALYZER,
+image_filter = ImageFilter(FILTER_NAME_ANALYZER,
 			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n',
 			[vdata.DataAttribPointSym('p1', 'm-3,m-3'), vdata.DataAttribPointSym('p2', 'p+3,p+3')],
 			Flags=[])
-filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n' \
 				+ 'xstep.SetInfo(0, "Hue", im_in.Crop(r).AverageHue())\n'
 
-filter = ImageFilter('HoughLinesP',
+image_filter = ImageFilter('HoughLinesP',
 			'{x_output_lines} = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
 			[vdata.DataAttribInt('MinLineLength', '30'), vdata.DataAttribInt('MaxLineGap', 10)],
 			Flags=[''])
-filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
 				+ 'print({x_output_lines})\n' \
 				+ 'color_ix = -1\n' \
 				+ 'if ({x_output_lines} is not None) and (len({x_output_lines}) > 0):\n' \
@@ -977,8 +969,8 @@ def ColorMaskWhite(hsvChannels, threshold=50):
     maxSaturation = threshold
     ret, saturationMask = cv2.threshold(hsvChannels[1], maxSaturation, 255, cv2.THRESH_BINARY_INV)
     ret, valueMask = cv2.threshold(hsvChannels[2], minValue, 255, cv2.THRESH_BINARY)
-    filterMask = cv2.bitwise_and(saturationMask, valueMask)
-    return filterMask
+    image_filterMask = cv2.bitwise_and(saturationMask, valueMask)
+    return image_filterMask
 
 class HsvSpec(object):
     __slots__ = ('hue', 'huerange', 'saturation', 'saturationrange', 'value', 'valuerange')
@@ -1518,7 +1510,7 @@ class ReflexEntities(object):
 #   ext: (extent) maximum index value for that axis (integer)
 def ResolveSymbolicIndex(c, ext, p1=None):
     def Raw_ResolveSymbolicIndex(c, ext, p1=None):
-        print('Raw_ResolveSymbolicIndex', `c`, ext, p1)
+        print('Raw_ResolveSymbolicIndex', repr(c), ext, p1)
         if isinstance(c, basestring):
             if c[0] == 'm':
                 if c == 'm':
@@ -1732,7 +1724,7 @@ class Robogames(object):
             cum_slope = 0
             ct_slope = 0
             #print("MAP", h, m, w)
-            self.filteredLines = []
+            self.filtered_lines = []
             for this in self.map_lines[:5]:
                 slope = abs(this[2])
                 print(slope)
@@ -1742,14 +1734,14 @@ class Robogames(object):
                 p1 = this[5]
                 p2 = this[6]
                 middleX = int((p1[0] + p2[0]) / 2)
-                self.filteredLines.append((middleX, this))
+                self.filtered_lines.append((middleX, this))
 
     def SelectLines(self):
-            print("FILTERED", len(self.filteredLines))
+            print("FILTERED", len(self.filtered_lines))
             self.rectangles = []
             self.selectedLines = []
             Allpoints = []
-            for thisX in self.filteredLines:
+            for thisX in self.filtered_lines:
                 this = thisX[1]
                 points = [this[5], this[6]]
                 Allpoints  += points
@@ -1757,12 +1749,12 @@ class Robogames(object):
 
     def SelectCone(self):
             self.selectedLines = []
-            if len(self.filteredLines) >= 2:
+            if len(self.filtered_lines) >= 2:
                 # we need two lines to form a cone
-                self.filteredLines.sort()
-                for ix, this in enumerate(self.filteredLines[:-1]):
+                self.filtered_lines.sort()
+                for ix, this in enumerate(self.filtered_lines[:-1]):
                     l1 = this[1]
-                    l2 = self.filteredLines[ix+1][1]
+                    l2 = self.filtered_lines[ix+1][1]
                     slope1 = l1[2]
                     slope2 = l2[2]
                     if (slope1 > 0) and (slope2 < 0):
@@ -1816,7 +1808,7 @@ class ImageAnalyzer(object):
         self.annotate_fill_method = ContourFill
         self.annotate_contour_outline = ContourOutline
         self.annotate_opencv_contours = True
-        self.do_filter_contours = DoFilterContours
+        self.do_image_filter_contours = DoFilterContours
         self.img_contour_colors = "r"
         self.img_contour_colors = "wy"
         self.snap_shots = []
@@ -1882,7 +1874,7 @@ class ImageAnalyzer(object):
         print("Contour Ct:", len(opencv_contours))
 
         print("FindLines() elapsed time:", time.clock() - start_clock)
-        if self.do_filter_contours:
+        if self.do_image_filter_contours:
             contours = FilterContours(cropped_image, opencv_contours, SelectColors=self.img_contour_colors)
             print("Filtered Contour Ct:", len(contours))
             self.ClassifyContours(cropped_image, contours)
@@ -2110,8 +2102,8 @@ def test_old():
   brain.img_source_dir = 'samples'
   brain.img_fname_suffix = ''
   brain.img_fname_suffix = '_s'
-  brain.do_filter_contours = True
-  brain.do_filter_contours = False
+  brain.do_image_filter_contours = True
+  brain.do_image_filter_contours = False
   brain.FindLines()
   stop_time = time.clock()
   print("Elapsed Time:", (stop_time - start_time))
@@ -2137,7 +2129,7 @@ def test_Cone():
     params.maxThreshold = 256;
 
     # Filter by Area.
-    params.filterByArea = True
+    params.image_filterByArea = True
     params.minArea = 30
 
     # Filter by Circularity

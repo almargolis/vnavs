@@ -122,6 +122,8 @@ class MissionControl(vmqtt.mqtt_node):
         self.mission_id_entry = nother_frame.AddEntryField('Mission ID', width=15, value='')
         self.local_mission_entry = nother_frame.AddDropdown(caption='Local Missions', row=SAME_ROW, col=NEXT_COL)
         nother_frame.AddButton('Replay', command=self.OnReplayLocal, row=SAME_ROW, col=NEXT_COL)
+        nother_frame.AddButton('>', command=self.OnReplayLocalFrame, width=1, row=SAME_ROW, col=NEXT_COL)
+        nother_frame.AddButton('<', command=self.OnReplayLocalBack, width=1, row=SAME_ROW, col=NEXT_COL)
         self.bot_mission_entry = nother_frame.AddDropdown(caption='Bot Missions', row=SAME_ROW, col=NEXT_COL)
         nother_frame.AddButton('Download', command=self.OnReplayDownload, row=SAME_ROW, col=NEXT_COL)
 
@@ -134,8 +136,8 @@ class MissionControl(vmqtt.mqtt_node):
 
         buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
         buttonframe.AddButton('Cancel', command=self.OnCancelMission, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('+', command=self.OnSpeedPlus, row=SAME_ROW, col=NEXT_COL)
-        buttonframe.AddButton('-', command=self.OnSpeedMinus, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('+', command=self.OnSpeedPlus, width=1, row=SAME_ROW, col=NEXT_COL)
+        buttonframe.AddButton('-', command=self.OnSpeedMinus, width=1, row=SAME_ROW, col=NEXT_COL)
         buttonframe.AddButton('Stop', command=self.OnSpeedStop, row=SAME_ROW, col=NEXT_COL)
         #buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
         #buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
@@ -169,7 +171,8 @@ class MissionControl(vmqtt.mqtt_node):
         self.message_tab.AddButton('Send Message', command=self.SendMessage, row=NEXT_ROW, col=NEXT_COL)
 
         self.alert_tab = self.notebook.AddTab('Alerts')
-        self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
+        #self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
+        self.alert_text = self.alert_tab.AddTable('Script', width=400, height=200, row=NEXT_ROW, col=NEXT_COL)
 
         self.pic_fn = None
         self.pic_path = None
@@ -190,6 +193,7 @@ class MissionControl(vmqtt.mqtt_node):
         self.replay_log_transfer_wanted = False
         self.replay_log_lines = None
         self.replay_log_payloads = None
+        self.replay_frames = -1				# ct of frames to replay, -1 is continuous
         self.UpdateLocalMissionList()
 
     def OpenScriptFile(self):
@@ -280,6 +284,7 @@ class MissionControl(vmqtt.mqtt_node):
         f.close()
         self.mission = navigator.Mission(name=mission_name, script=mission_script.split('\n'))
         if len(self.mission.stages_list) > 0:
+            self.mission.stages_list.sort()
             self.mission_stage_entry.ReplaceChoices(self.mission.stages_list)
             self.mission_stage_entry.ReplaceValue(self.mission.stages_list[0])
         else:
@@ -295,6 +300,33 @@ class MissionControl(vmqtt.mqtt_node):
         self.ConfigureReplay(Mkdir=False)
         self.OpenReplayLog()
         self.display_mode = DISPLAY_MODE_REPLAY
+        self.replay_frames = -1
+
+    def OnReplayLocalBack(self):
+        # Most of the time, when we get here we have been in single step
+        # mode, with self.replay_log_ix pointing to data following the
+        # frame currently being displayed. Since data can arrive
+        # sporadically, its hard to know what data to display.
+        # for the best odds of displaying correct data without too much
+        # complexity, we will step back to all data following the image
+        # before the one we want to see.
+        # So we step back two images (the one currently shown and the one
+        # we want to see, plus the data just before the image we want to see.
+        image_skip_ct = 3  
+        while self.replay_log_ix > 0:
+            self.replay_log_ix -= 1
+            payload = self.replay_log_payloads[self.replay_log_ix]
+            topic = payload['_topic']
+            if topic == vconst.cameraman_pic_ready_topic:
+                image_skip_ct -= 1
+                if image_skip_ct <= 0:
+                    # at image before the one we want, point to the next data record and get out
+                    self.replay_log_ix += 1
+                    break
+        self.replay_frames = 1
+
+    def OnReplayLocalFrame(self):
+        self.replay_frames = 1
 
     def OnReplayDownload(self):
         self.replay_log_transfer_wanted = True
@@ -418,6 +450,7 @@ class MissionControl(vmqtt.mqtt_node):
         if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
             return
         log_list = payload['log_list']
+        log_list.sort()
         self.bot_mission_entry.ReplaceChoices(log_list)
 
     def DoHelmsmanOrders(self, payload, Replay=False):
@@ -477,6 +510,7 @@ class MissionControl(vmqtt.mqtt_node):
                 log_path = os.path.join(dpath, this+vcomms.FMQTT_LOG_EXTENSION)
                 if os.path.isfile(log_path):
                     mission_id_list.append(this)
+        mission_id_list.sort()
         self.local_mission_entry.ReplaceChoices(mission_id_list)
 
     def ConfigureReplay(self, Mkdir=True):
@@ -529,6 +563,13 @@ class MissionControl(vmqtt.mqtt_node):
                 while self.replay_log_ix < len(self.replay_log_payloads):
                     payload = self.replay_log_payloads[self.replay_log_ix]
                     topic = payload['_topic']
+                    if self.replay_frames == 0:
+                        # In single frame mode, don't advance past next image till clicked again.
+                        # But we do display non-images up to next frame so we see navigation
+                        # decisions. There probably needs to be a few modes of single frame.
+                        # Maybe a separate tab that shows all messages individually.
+                        if topic == vconst.cameraman_pic_ready_topic:
+                            break
                     self.replay_log_ix += 1
                     if topic == vconst.cameraman_pic_ready_topic:
                         if self.display_mode ==DISPLAY_MODE_DOWNLOAD:
@@ -536,6 +577,8 @@ class MissionControl(vmqtt.mqtt_node):
                         else:
                             self.ConfigureImageLocation(payload, self.replay_mission_dir, TransferNeeded=False)
                             self.ProcessImage()
+                        if self.replay_frames > 0:
+                            self.replay_frames -= 1
                         break
                     elif topic in self.subscriptions:
                         sub = self.subscriptions[topic]

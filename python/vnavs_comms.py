@@ -299,7 +299,10 @@ class SocketWrapper(object):
         if s in self.fragments:
             data = self.fragments[s] + data
             del self.fragments[s]
-        messages = data.split('\x01')
+        if sys.version_info[0] < 3:
+            messages = data.split('\x01')
+        else:
+            messages = data.split(b'\x01')
         #print("PRC", data, "**", messages)
         if data[-1] != '\x01':
             # the last message isn't complete, save the fragment
@@ -310,11 +313,15 @@ class SocketWrapper(object):
                 # This happens routinely if the last character of data is \x01.
                 # split() always splits, so it creates an empty string at the end of the list.
                 continue
-            parts = this_message.split('\x00')
+            if sys.version_info[0] < 3:
+                parts = this_message.split('\x00')
+            else:
+                parts = this_message.split(b'\x00')
             #print("RCV", parts)
             self.ProcessMessage(s, parts)
 
     def QueueMessage(self, message, s=None, QueueClass=Queue.Queue):
+        # message is a string
         if s is None:				# This should only be true if self.isServer is False
             s = self.os_socket
         if not s in self.outputQueues:
@@ -396,7 +403,10 @@ class SocketWrapper(object):
                 pass			# socket buffer available, but no messages to send
             else:
                 try:
-                    s.send(next_msg)
+                    if sys.version_info[0] < 3:
+                        s.send(next_msg)
+                    else:
+                        s.send(next_msg.encode('utf-8'))		# convert to bytes for Python 3.x
                     self.sent_ct += 1
                     if self.verbose:
                         print("SEND", next_msg)

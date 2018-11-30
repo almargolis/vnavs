@@ -41,6 +41,151 @@ EXTEND_COL = -4
 OVERLAY_COL = -5
 COL_SPAN_ALL = -1
 
+#
+# Notebook - substitute for ttk.Notebook
+#	Intended to work identically, except for styling
+#
+class Notebook(Tkinter.Frame):
+    def __init__(self, master):
+        Tkinter.Frame.__init__(self, master)
+        self.tabs_frame = Tkinter.Frame(self)
+        self.tabs_frame.grid(column=0, row=0)
+        self.tab_labels_text = []
+        self.tab_labels_widget = []
+        self.tab_labels_tk = []
+        self.tab_frames = []
+        self.content_frame = Tkinter.Frame(self)
+        self.content_frame.grid(column=0, row=1)
+        self.selected_tab = None
+
+    def add(self, frame, text=None, Where=None):
+        print("Notebook.add()", text)
+        ix = len(self.tab_labels_text)
+        if text is None:
+            text = 'Tab {}'.format(ix+1)
+        label = Tkinter.Label(self.tabs_frame, text=text)
+        label.bind('<Button-1>', self.OnTabClick)
+        if Where is None:
+            self.tab_labels_text.append(text)
+            self.tab_labels_widget.append(label)
+            self.tab_labels_tk.append(label._w)
+            self.tab_frames.append(frame)
+        else:
+            ix = self.tab_ix(Where)
+            self.tab_labels_text.insert(ix, text)
+            self.tab_labels_widget.insert(ix, label)
+            self.tab_labels_tk.insert(ix, label._w)
+            self.tab_frames.insert(ix, frame)
+        frame.grid(column=0, row=1)
+        for label_col in range(ix, len(self.tab_labels_text)):
+            self.tab_labels_widget[label_col].grid(column=label_col, row=0)
+	# The new tab is not visible, unless its the first tab.
+        # This is the behavior of ttk.Notebook.
+        # We cannot run select() immediately because the client (darkroom)
+        # won't get it. Waiting for 100 is too short. after_idle() didn't solve.
+        # ttk.Notebook does something with the same effect and darkroom depends on
+        # that. In general, it seems to make sense to assure that the client
+        # applications gets the initial select event.
+        if len(self.tab_labels_text) == 1:
+            self.after(500, self.select, text)
+        else:
+            frame.lower()
+
+    def enable_traversal(self):
+        pass
+
+    def insert(self, Where, frame, text=None):
+        self.add(frame, text=text, Where=Where)
+
+    def select(self, tabid=None):
+        if tabid is None:
+            return self.tab_labels_text[self.selected_tab]
+        ix = self.tab_ix(tabid)
+        print("Notebook.select()", ix, self.tab_labels_text[ix])
+        self.selected_tab = ix
+        tab = self.tab_frames[ix]
+        tab.lift()
+        # The event must be generated last because the handler get executed immediately.
+        # Before the method completes execution.
+        self.event_generate('<<NotebookTabChanged>>')
+        return tab
+
+    def tab_ix(self, tabid):
+        #
+        # Not all these matches are used
+        #   self.tab_labels_tk is used by event handlers as event.widget.
+        #     It is probably the C++ widget id. It is found in Tkinter widget
+        #     attribute _w.
+        #   self.tab_labels_text is the tab caption. It is used as the tabid
+        #     for select() and OnTabSelected events.
+        #   self.tab_frames is the tab content frame. It is used in darkroom
+        #     to select the tab for a process step.
+        #
+        # The above were in use by darkroom and mission_control using
+        # ttk.Notebook. This works identically.
+        #
+        try:
+            return self.tab_frames.index(tabid)
+        except ValueError:
+            pass
+        except:
+            raise
+        try:
+            return self.tab_labels_tk.index(tabid)
+        except ValueError:
+            pass
+        except:
+            raise
+        try:
+            return self.tab_labels_widget.index(tabid)
+        except ValueError:
+            pass
+        except:
+            raise
+        return self.tab_labels_text.index(tabid)
+
+    def tabs(self):
+        return self.tab_labels_text
+
+    def OnTabClick(self, event):
+        print("Notebook.OnTabClick()", event.widget)
+        """
+        for this in self.tab_labels_widget:
+            print(">>>")
+            for that in dir(this):
+                print("   ", that, ":", getattr(this, that))
+        """
+        self.select(tabid=event.widget)
+
+#
+# ScrolledFrame - A child of Frame with scroll bars
+#
+# Adapted from http://code.activestate.com/recipes/580793-tkinter-table-with-scrollbars/
+#
+"""
+    def __init__(self, master, columns, column_weights=None, column_minwidths=None, height=500, minwidth=20, minheight=20, padx=5, pady=5, cell_font=None, cell_foreground="black", cell_background="white", cell_anchor=W, header_font=None, header_background="white", header_foreground="black", header_anchor=CENTER, bordercolor = "#999999", innerborder=True, outerborder=True, stripped_rows=("#EEEEEE", "white"), on_change_data=None, mousewheel_speed = 2, scroll_horizontally=False, scroll_vertically=True):
+"""
+
+class ScrolledFrame(Tkinter.Frame):
+    def __init__(self, HeadingRow=False, HeadingColumn=False, bordercolor='#999999', outerborder=True,
+					scroll_horizontally=False, scroll_vertically=True):
+        super().__init__()
+        outerborder_width = 1 if outerborder else 0
+        self.heading_frame = Tkinter.Frame(self, highlightbackground=bordercolor, highlightcolor=bordercolor, highlightthickness=outerborder_width, bd= 0)
+        self.heading_frame.grid(row=0, column=0, sticky=Tkinter.E+Tkinter.W)
+        if scroll_horizontally:
+            xscrollbar = Scrollbar(self, orient=HORIZONTAL)
+            xscrollbar.grid(row=2, column=0, sticky=E+W)
+        else:
+            xscrollbar = None
+
+        if scroll_vertically:
+            yscrollbar = Scrollbar(self, orient=VERTICAL)
+            yscrollbar.grid(row=1, column=1, sticky=N+S)
+        else:
+            yscrollbar = None
+
+
 class TkWidgetDef(object):
     __slots__ = (
 		'bottom_row', 'canvas_height', 'canvas_width', 'children', 'col', 'col_span',
@@ -92,12 +237,6 @@ class TkWidgetDef(object):
         self.file_opt['initialfile'] = 'myfile.txt'
         self.file_opt['title'] = 'This is a title'
 
-    def ReprPos(self):
-       res = "(%s,%s) Span(%s,%s) Ext(%s,%s) Last(%s,%s)" % (self.row, self.col,
-								self.row_span, self.col_span,
-								self.bottom_row, self.right_col,
-								self.last_used_row, self.last_used_col)
-       return res
 
     def FileDialogParms(self, FileName=None, Dir=None, FileTypes=None):
         self.file_opt['parent'] = self.tkw
@@ -120,170 +259,88 @@ class TkWidgetDef(object):
         self.FileDialogParms(Dir=Dir, FileTypes=FileTypes)
         return tkFileDialog.askopenfile(mode=mode, **self.file_opt)
 
-    def Focus(self):
-        self.tkw.focus()
-
-    def Update(self):			# Process Tkinter events
-        self.is_initializing = False
-        self.tkw.update()
-
-    def Position(self, row=NEXT_ROW, col=-SAME_COL):
-        # This makes convenient substitutions for special, negative values.
-        # Positive or zero values are unchanged since they are specified positions.
-        # SAME_ROW/COL and NEXT_ROW/COL are relative to last component placed, which may 
-        # not be sequential. The others are relative to the extents of component.
-        # This is called in the context of a container for the component thas is about to be created.
-        if (row == OVERLAY_ROW) or (col == OVERLAY_COL):
-            # an overlay is an overlay. This is a convenience so you don't have to specify both row and col
-            row = OVERLAY_ROW
-            col = OVERLAY_COL
-        if row == SAME_ROW:
-            # same row as the previous item, fixup initial value for first row.
-            if self.last_used_row < FIRST_ROW:
-                self.last_used_row = FIRST_ROW
-            row = self.last_used_row
-        elif row == NEXT_ROW:
-            # next sequential row
-            row = self.last_used_row + self.last_used_rowspan
-            self.last_used_rowspan = 1
-            self.last_used_col = -1		# initialize column for new row
-            self.last_used_colspan = 1
-        elif row == BOTTOM_ROW:
-            # row below everything else
-            row = self.bottom_row
-        elif row == EXTEND_ROW:
-            # row below everything else
-            row = self.bottom_row + 1
-        elif row == OVERLAY_ROW:
-            # row & col in same place, to swap widgets with lift / lower
-            row = self.last_used_row
-        if col == SAME_COL:
-            # use current column, fixup initial value for first column.
-            if self.last_used_col < 0:
-                self.last_used_col = 0
-            col = self.last_used_col
-        elif col == NEXT_COL:
-            col = self.last_used_col + self.last_used_colspan
-        elif col == RIGHT_COL:
-            col = self.right_col
-        elif col == LEFT_COL:
-            col = 0
-        elif col == EXTEND_COL:
-            # use next column to right of everything else.
-            # If components are placed sequentially, this is the same as NEXT_COL.
-            col = self.right_col + 1
-        elif col == OVERLAY_COL:
-            # row & col in same place, to swap widgets with lift / lower
-            col = self.last_used_col
-        return (row, col)
-
-    def RememberPosition(self, new_TkWidgetDef, row, col, colspan=1, rowspan=1):
-        # Update the new widgets position info.
-        # Theses properties are relative to the container, ususally set by Position().
-        # The last_used_XXX properties and corresponding NEXT_XXX position
-        # substitutions work only when doing a rectangular grid, layed out by 
-        # rows and left to right within each row.
-        new_TkWidgetDef.row = row
-        new_TkWidgetDef.col = col
-        new_TkWidgetDef.col_span = colspan
-        new_TkWidgetDef.row_span = rowspan
-        # Update container positioning to reflect this new widget
-        assert self.is_container
-        new_widget_right_col = col + colspan - 1
-        new_widget_bottom_row = row + rowspan - 1
-        self.last_used_row = row
-        if rowspan > self.last_used_rowspan:
-            self.last_used_rowspan  = rowspan		# track deepest widget per row
-        self.last_used_col = col
-        self.last_used_colspan = colspan
-        if new_widget_bottom_row > self.bottom_row:
-            self.bottom_row = new_widget_bottom_row
-        if new_widget_right_col > self.right_col:
-            self.right_col = new_widget_right_col
-        if self.debug_this:
-            print("RememberPosition/new", new_TkWidgetDef.ReprPos())
-            print("RememberPosition/parent", self.ReprPos())
-
-    def ReplaceChoices(self, choices):
-        if isinstance(self.tkw, Tkinter.OptionMenu):
-            # adpated from https://stackoverflow.com/questions/17580218/changing-the-options-of-a-optionmenu-when-clicking-a-button
-            current_selection = self.tkd.get()
-            self.tkw['menu'].delete(0, 'end')
-            for this_choice in choices:
-                self.tkw['menu'].add_command(label=this_choice, command=Tkinter._setit(self.tkd, this_choice))
-            if current_selection in choices:
-                self.tkd.set(current_selection)
-            else:
-                if len(choices) > 0:
-                    self.tkd.set(choices[0])
-    
-    def ReplaceValue(self, new_value, Caption=None):
-        debug = "ReplaceValue({0}): tkw {1} '{2}' -- ".format(new_value, self.tkw.__class__.__name__, self.Value())
-        if self.tkd is None:
-            debug += 'None'
-        elif isinstance(self.tkd, Tkinter.StringVar):
-            debug += "StringVar '{0}".format(self.tkd.get())
-        else:
-            debug += "{0} '{1}'".format(self.tkd.__class__.__name__, `self.tkd`)
-        #print(debug)
-        
-        if isinstance(self.tkw, ScrolledText.ScrolledText):
-            self.tkw.delete("1.0", Tkinter.END)
-            self.tkw.insert("1.0", new_value)
-        elif isinstance(self.tkw, ttk.Label) and (self.tkw_label is None):
-            # if self.tkw_label is not None, this is from AddLabelInfo(): update self.tk_data
-            self.tkw.config(text=new_value)
-        elif isinstance(self.tkw, Tkinter.Listbox):
-            # clear current selection first, else multi-selection occurs
-            cur_selection = self.tkw.curselection()
-            self.tkw.select_clear(cur_selection)
-            ix = self.list_items.index(new_value)
-            self.tkw.selection_set(ix)
-            self.tkw.see(ix)
-        elif isinstance(self.tkw, Tkinter.Scale):
-            self.tkw.set(new_value)
-        else:
-            # For many/most widgets, the value is in the self.tkd StringVar
-            if isinstance(self.tkd, Tkinter.StringVar):
-                self.tkd.set(new_value)
-        if Caption is not None:
-            self.tkw_label.config(text=Caption)
-
-    def Value(self):
-        if isinstance(self.tkw, ScrolledText.ScrolledText):
-            return self.tkw.get("1.0", Tkinter.END)
-        if isinstance(self.tkw, Tkinter.Listbox):
-            # ix is a tuple like (2,). I assume the 2nd element would be the end of
-            # the range. Or maybe it a list of items for multi-selection.
-            # This works for now.
-            ix = self.tkw.curselection()
-            return self.tkw.get(ix)
-        if isinstance(self.tkw, Tkinter.Scale):
-            return self.tkw.get()
-        # For many/most widgets, the value is in the self.tkd StringVar
-        if isinstance(self.tkd, Tkinter.StringVar):
-            v = self.tkd.get()
-            if isinstance(self.tkw, Tkinter.OptionMenu) and (v == 'None'):
-                # I'm not sure if its me or Tkinter that turned no selection to a string
-                v = None
-            #print("Value() tkd '{0}'".format(v))
-            return v
-
-    def AddButton(self, caption, command, row=NEXT_ROW, col=SAME_COL):
+    def AddButton(self, caption, command, width=None, padx=None, row=NEXT_ROW, col=SAME_COL):
         if self.debug_this:
             print("AddButton", row, col, caption)
-        row, col = self.Position(row=row, col=col)
+        row, col = self._Position(row=row, col=col)
         refname = caption.lower().replace(' ', '_')
-        frame = TkWidgetDef(refname, ttk.Button(self.tkw, text=caption, command=command))
+        options = {}
+        options['text'] = caption
+        options['command'] = command
+        if width is not None:
+            options['width'] = width
+        if padx is not None:
+            options['padx'] = padx
+        frame = TkWidgetDef(refname, Tkinter.Button(self.tkw, **options))
         frame.tkw.grid(row=row, column=col)
-        self.RememberPosition(frame, row, col)
+        self._RememberPosition(frame, row, col)
+        self.children.append(frame)
+        return frame
+
+    def AddCanvas(self, pil_fn=None, rgb_im=None, opencv_fn=None,
+				OnClick=None,
+				thumbnailof=None, thumbnailwidth=100,
+				width=400, height=200,
+				row=NEXT_ROW, col=SAME_COL, colspan=1, rowspan=1):
+        frame = self._AddScrolledWidget(Tkinter.Canvas, {'width': width, 'height': height},
+						OnClick=OnClick,
+						row=row, col=col, rowspan=rowspan, XSCROLL=True)
+        frame.scrollable_image = None
+        frame.canvas_width = width
+        frame.canvas_height = height
+
+        if (pil_fn is not None) or (opencv_fn is not None) or (rgb_im is not None):
+            if thumbnailof is None:
+                frame.UpdateImage(pil_fn=pil_fn, rgb_im=rgb_im, opencv_fn=opencv_fn)
+            else:
+                # after this, the thumbnail will be automatically updated whenever the base image is updated
+                frame.UpdateImage(rgb_im=self.MakeThumbnail(thumbnailof.rgb_im, thumbnailwidth))
+                thumbnailof.thumbnail = frame
+                thumbnailof.thumbnail_width = thumbnailwidth
+        return frame
+
+    def AddDropdown(self, caption=None, s_items=['None'], Selection=None, row=NEXT_ROW, col=SAME_COL, command=None):
+        # If command is specified, this uses variable trace to provide an on_change event.
+        # The callback supplies three paramters that are meaningful to tk but not useful to the application,
+        # so the callback declarations should be something like "def command(self, *args).
+        # I am leaving this as a required idiom when using easytk. There is something to be said for creating
+        # an OnChange event for easytk, but I would then have to track more tk internals in order to identify
+        # the control that changed.
+        #
+        # If s_items is an empty list, Tkinter.OptionMenu() raises the confusing exception:
+        #     TypeError: __init__() takes at least 4 arguments (3 given)
+        #
+        if self.debug_this:
+            print("AddDropdown", row, col, caption)
+        row, col = self._Position(row=row, col=col)
+        if caption is None:
+            refname = "QWE"
+            tk_caption = None
+            entry_col = col
+            remember_colspan = 1
+        else:
+            refname = caption.lower().replace(' ', '_')
+            tk_caption = Tkinter.Label(self.tkw, text=caption)
+            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
+            entry_col = col + 1
+            remember_colspan = 2
+
+        tk_data = Tkinter.StringVar()
+        tk_data.set(Selection)
+        if command is not None:
+            tk_data.trace('w', command)
+        args = [self.tkw, tk_data] + s_items
+        tk_entry = Tkinter.OptionMenu(*args)
+        tk_entry.grid(column=entry_col, row=row, sticky=(Tkinter.W, Tkinter.E))
+        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
+        self._RememberPosition(frame, row, col, colspan=remember_colspan)
         self.children.append(frame)
         return frame
 
     def AddEntryField(self, caption=None, width=10, value='', row=NEXT_ROW, col=SAME_COL, OnDoubleClick=None):
         if self.debug_this:
             print("AddEntryField", row, col, caption)
-        row, col = self.Position(row=row, col=col)
+        row, col = self._Position(row=row, col=col)
 
         tk_data = Tkinter.StringVar()
         tk_data.set(value)
@@ -292,33 +349,128 @@ class TkWidgetDef(object):
             tk_caption = None
             refname = "EntryBox"
         else:
-            tk_caption = ttk.Label(self.tkw, text=caption)
+            tk_caption = Tkinter.Label(self.tkw, text=caption)
             tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
             col_span = 2
             refname = caption.lower().replace(' ', '_')
-        tk_entry = ttk.Entry(self.tkw, width=width, textvariable=tk_data)
+        tk_entry = Tkinter.Entry(self.tkw, width=width, textvariable=tk_data)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
         if OnDoubleClick is not None:
             tk_entry.bind('<Double-Button-1>', OnDoubleClick)
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
-        self.RememberPosition(frame, row, col, colspan=col_span)
+        self._RememberPosition(frame, row, col, colspan=col_span)
         self.children.append(frame)
+        return frame
+
+    def AddFrame(self, row=NEXT_ROW, col=SAME_COL, colspan=1):
+        if self.debug_this:
+            print("AddFrame", row, col, colspan)
+        row, col = self._Position(row=row, col=col)
+        refname = 'X'
+        frame = TkWidgetDef(refname, Tkinter.Frame(self.tkw), IsContainer=True)
+        if colspan == COL_SPAN_ALL:
+            colspan = self.right_col - col + 1
+        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
+        self._RememberPosition(frame, row, col, colspan=colspan)
+        self.children.append(frame)
+        return frame
+
+    def AddLabel(self, text='', width=10, row=NEXT_ROW, col=SAME_COL):
+        # An alternate method would be to create a TK StringVar and when creating the label
+        # use the textvariable property instead of text. Visually this shouldn't be any different.
+        # The update process would be a bit different in some cases because the label would
+        # be automagically updated if something changed the variable.
+        refname = 'X'
+        row, col = self._Position(row=row, col=col)
+        tk_caption = Tkinter.Label(self.tkw, text=text)
+        tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
+        frame = TkWidgetDef(refname, tk_caption)
+        self._RememberPosition(frame, row, col)
+        self.children.append(frame)
+        return frame
+
+    def AddLabelFrame(self, caption, row=NEXT_ROW, col=SAME_COL, colspan=1):
+        row, col = self._Position(row=row, col=col)
+        refname = caption.lower().replace(' ', '_')
+        frame = TkWidgetDef(refname, Tkinter.LabelFrame(self.tkw, text=caption), IsContainer=True)
+        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
+        self._RememberPosition(frame, row, col, colspan=colspan)
+        self.children.append(frame)
+        return frame
+
+    def AddLabelImage(self, pil_fn=None, opencv_im=None, opencv_fn=None,
+				thumbnailof=None, thumbnailwidth=100,
+				row=NEXT_ROW, col=SAME_COL, colspan=1):
+        row, col = self._Position(row=row, col=col)
+        frame = TkWidgetDef('', Tkinter.Label(self.tkw))
+        if thumbnailof is None:
+            frame.UpdateImage(pil_fn=pil_fn, source_im=opencv_im, opencv_fn=opencv_fn)
+        else:
+            # after this, the thumbnail will be automatically updated whenever the base image is updated
+            frame.UpdateImage(rgb_im=self.MakeThumbnail(thumbnailof.rgb_im, thumbnailwidth))
+            thumbnailof.thumbnail = frame
+            thumbnailof.thumbnail_width = thumbnailwidth
+
+        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
+        self._RememberPosition(frame, row, col, colspan=colspan)
+        self.children.append(frame)
+        return frame
+
+    def AddLabelInfo(self, caption, value='', width=10, row=NEXT_ROW, col=SAME_COL):
+        # This is much like AddEntryField() but the field is another lable so it is
+        # display only.
+        row, col = self._Position(row=row, col=col)
+        tk_data = Tkinter.StringVar()
+        tk_data.set(value)
+        if caption is None:
+            col_span = 1
+            tk_caption = None
+            refname = "LabelInfo"
+        else:
+            refname = caption.lower().replace(' ', '_')
+            tk_caption = Tkinter.Label(self.tkw, text=caption)
+            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
+            col_span = 2
+        tk_info = Tkinter.Label(self.tkw, textvariable=tk_data)
+        tk_info.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
+        frame = TkWidgetDef(refname, tk_info, tkw_label=tk_caption, Data=tk_data)
+        self._RememberPosition(frame, row, col, colspan=col_span)
+        self.children.append(frame)
+        return frame
+
+    def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, command=None, XSCROLL=False):
+        frame = self._AddScrolledWidget(Tkinter.Listbox, {'exportselection': 0, 'height': rowspan},
+						caption=caption, row=row, col=col, rowspan=rowspan, XSCROLL=XSCROLL)
+        for this_item in s_items:
+            frame.tkw.insert(Tkinter.END, this_item)
+        if command is not None:
+            frame.tkw.bind("<Double-Button-1>", command)
+        if Selection is None:
+            active_index = 0
+        else:
+            try:
+                active_index = s_items.index(Selection)
+            except ValueError:
+                active_index = 0
+        frame.tkw.selection_set(active_index)
+        frame.tkw.see(active_index)
+        frame.list_items = s_items
         return frame
 
     def AddScrolledEntryField(self, caption, width=10, height=5, value='', row=NEXT_ROW, col=SAME_COL):
         if self.debug_this:
             print("AddScrolledEntryField", row, col, caption)
-        row, col = self.Position(row=row, col=col)
+        row, col = self._Position(row=row, col=col)
         refname = caption.lower().replace(' ', '_')
 
         tk_data = Tkinter.StringVar()
         tk_data.set(value)
-        tk_caption = ttk.Label(self.tkw, text=caption)
+        tk_caption = Tkinter.Label(self.tkw, text=caption)
         tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
         tk_entry = ScrolledText.ScrolledText(master=self.tkw, width=width, height=height, wrap=Tkinter.WORD)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
-        self.RememberPosition(frame, row, col, colspan=2, rowspan=height)
+        self._RememberPosition(frame, row, col, colspan=2, rowspan=height)
         self.children.append(frame)
         return frame
 
@@ -327,16 +479,15 @@ class TkWidgetDef(object):
         if self.debug_this:
           print("AddSliderField", row, col, caption)
         print('Slider', row, col, self.last_used_row, self.last_used_col)
-        row, col = self.Position(row=row, col=col)
+        row, col = self._Position(row=row, col=col)
         print('Slider', row, col, self.last_used_row, self.last_used_col)
         if caption is None:
             refname = "Slider"
             tk_caption = None
         else:
             refname = caption.lower().replace(' ', '_')
-            tk_caption = ttk.Label(self.tkw, text=caption)
+            tk_caption = Tkinter.Label(self.tkw, text=caption)
             tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
-        # there is also a ttk.Scale, which doesn't support many options
         # if specified, label appears above the slider
         # the default showvalue=1 displays the value above the slider, moving with tthe cursor
         tk_entry = Tkinter.Scale(self.tkw, length=width, from_=MinValue, to=MaxValue, orient=orient)
@@ -345,7 +496,7 @@ class TkWidgetDef(object):
             tk_entry.set(value)
         tk_entry.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption)
-        self.RememberPosition(frame, row, col, colspan=2)
+        self._RememberPosition(frame, row, col, colspan=2)
         self.children.append(frame)
         return frame
 
@@ -353,7 +504,7 @@ class TkWidgetDef(object):
         popup = Tkinter.Toplevel()
         popup.title(title)
 
-        ksbar=ttk.Scrollbar(popup, orient=Tkinter.VERTICAL)
+        ksbar=Tkinter.Scrollbar(popup, orient=Tkinter.VERTICAL)
         ksbar.grid(row=0, column=1, sticky="ns")
 
         popCanv = Tkinter.Canvas(popup, width=300, height = 300,
@@ -379,140 +530,90 @@ class TkWidgetDef(object):
         frame = TkWidgetDef(refname, top, IsContainer=True)
         return frame
 
-    def AddLabel(self, text='', width=10, row=NEXT_ROW, col=SAME_COL):
-        # An alternate method would be to create a TK StringVar and when creating the label
-        # use the textvariable property instead of text. Visually this shouldn't be any different.
-        # The update process would be a bit different in some cases because the label would 
-        # be automagically updated if something changed the variable.
-        refname = 'X'
-        row, col = self.Position(row=row, col=col)
-        tk_caption = ttk.Label(self.tkw, text=text)
-        tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
-        frame = TkWidgetDef(refname, tk_caption)
-        self.RememberPosition(frame, row, col)
+#
+# Scrollable Table
+#
+    def AddCell(self, text="", row=0, col=0):
+        cell = Tkinter.Label(self.table, text=text)
+        cell.grid(column=col, row=row)
+
+    def AddTable(self, OnClick=None, width=400, height=200, XSCROLL=True,
+				row=NEXT_ROW, col=SAME_COL, colspan=1, rowspan=1):
+        # width and height are the size of the visible portion of the canvas
+        row, col = self._Position(row=row, col=col)
+        refname = 'T'
+        frame = self._AddScrolledWidget(Tkinter.Canvas, {'width': width, 'height': height},
+						row=0, col=0, rowspan=1, XSCROLL=XSCROLL)
+        # frame.tkw is a canvas with scroll bars
+        # frame.scroll_container is a container for the canvas plus its scroll bars
+        frame.table = Tkinter.Frame(frame.tkw)
+        frame.tkw.create_window(0, 0, window=frame.table, anchor='nw')
+        for r in range(50):
+            for c in range(5):
+                frame.AddCell(text="{}{}".format(chr(ord('A')+c), r), row=r, col=c)
+        frame.tkw.update()			# this calculates reqwidth / reqheight (among otehr things)
+        frame.tkw.configure(scrollregion=(0, 0, frame.table.winfo_reqwidth(), frame.table.winfo_reqheight()))	# size of logical drawing area
+        if colspan == COL_SPAN_ALL:
+            colspan = self.right_col - col + 1
+        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
+        self._RememberPosition(frame, row, col, colspan=colspan)
+        self.children.append(frame)
+        self.is_container = False
+        return frame
+
+#
+# Tabed Notebook Widget
+#
+    def AddNotebook(self, OnTabSelected=None, row=NEXT_ROW, col=SAME_COL, colspan=1):
+        row, col = self._Position(row=row, col=col)
+        nb_class = ttk.Notebook
+        nb_class = Notebook
+        frame = TkWidgetDef('', nb_class(self.tkw), IsContainer=True)
+        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
+        frame.tkw.enable_traversal()
+        if OnTabSelected is not None:
+            frame.tkw.bind('<<NotebookTabChanged>>', OnTabSelected)
+        self._RememberPosition(frame, row, col, colspan=colspan)
         self.children.append(frame)
         return frame
 
-    def AddLabelInfo(self, caption, value='', width=10, row=NEXT_ROW, col=SAME_COL):
-        # This is much like AddEntryField() but the field is another lable so it is
-        # display only.
-        row, col = self.Position(row=row, col=col)
-        tk_data = Tkinter.StringVar()
-        tk_data.set(value)
-        if caption is None:
-            col_span = 1
-            tk_caption = None
-            refname = "LabelInfo"
+    def DeleteTab(self, ix):
+        print("TAB CT", self.tkw.index('end'))
+        self.tkw.forget(ix)
+        self.children.pop(ix)
+
+    def AddTab(self, caption, Where=None, OnClick=None):
+        # Add a tab to notebook
+        refname = caption.lower().replace(' ', '_')
+        frame = TkWidgetDef(refname, Tkinter.Frame(self.tkw), IsContainer=True)
+        frame.tkw.grid(sticky=Tkinter.NSEW)
+        if Where is None:
+            self.tkw.add(frame.tkw, text=caption)
         else:
-            refname = caption.lower().replace(' ', '_')
-            tk_caption = ttk.Label(self.tkw, text=caption)
-            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
-            col_span = 2
-        tk_info = ttk.Label(self.tkw, textvariable=tk_data)
-        tk_info.grid(column=col+1, row=row, sticky=(Tkinter.W, Tkinter.E))
-        frame = TkWidgetDef(refname, tk_info, tkw_label=tk_caption, Data=tk_data)
-        self.RememberPosition(frame, row, col, colspan=col_span)
-        self.children.append(frame)
-        return frame
-
-    def AddDropdown(self, caption=None, s_items=['None'], Selection=None, row=NEXT_ROW, col=SAME_COL, command=None):
-        # If command is specified, this uses variable trace to provide an on_change event.
-        # The callback supplies three paramters that are meaningful to tk but not useful to the application,
-        # so the callback declarations should be something like "def command(self, *args).
-        # I am leaving this as a required idiom when using easytk. There is something to be said for creating
-        # an OnChange event for easytk, but I would then have to track more tk internals in order to identify
-        # the control that changed.
-        #
-        # If s_items is an empty list, Tkinter.OptionMenu() raises the confusing exception:
-        #     TypeError: __init__() takes at least 4 arguments (3 given)
-        #
-        if self.debug_this:
-            print("AddDropdown", row, col, caption)
-        row, col = self.Position(row=row, col=col)
-        if caption is None:
-            refname = "QWE"
-            tk_caption = None
-            entry_col = col
-            remember_colspan = 1
-        else:
-            refname = caption.lower().replace(' ', '_')
-            tk_caption = ttk.Label(self.tkw, text=caption)
-            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
-            entry_col = col + 1
-            remember_colspan = 2
-
-        tk_data = Tkinter.StringVar()
-        tk_data.set(Selection)
-        if command is not None:
-            tk_data.trace('w', command)
-        args = [self.tkw, tk_data] + s_items
-        tk_entry = Tkinter.OptionMenu(*args)
-        tk_entry.grid(column=entry_col, row=row, sticky=(Tkinter.W, Tkinter.E))
-        frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
-        self.RememberPosition(frame, row, col, colspan=remember_colspan)
-        self.children.append(frame)
-        return frame
-
-    def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, command=None, XSCROLL=False):
-        frame = self.AddScrolledWidget(Tkinter.Listbox, {'exportselection': 0, 'height': rowspan},
-						caption=caption, row=row, col=col, rowspan=rowspan, XSCROLL=XSCROLL)
-        for this_item in s_items:
-            frame.tkw.insert(Tkinter.END, this_item)
-        if command is not None:
-            frame.tkw.bind("<Double-Button-1>", command)
-        if Selection is None:
-            active_index = 0
-        else:
-            try:
-                active_index = s_items.index(Selection)
-            except ValueError:
-                active_index = 0
-        frame.tkw.selection_set(active_index)
-        frame.tkw.see(active_index)
-        frame.list_items = s_items
-        return frame
-
-    def AddScrolledWidget(self, tk_widget_class, tk_widget_parms, caption=None, OnClick=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, XSCROLL=False):
-        # Getting scrolled widgets right is verbose and fussy. I found this technique using a seperate frame and 
-        # explicit borderwidth and weight on StackOverflow somewhere.
-        # The goal is for this tmethod to create any widget that needs scroll bars.
-        #
-        row, col = self.Position(row=row, col=col)
-
-        if caption is None:
-            tk_caption = None
-            refname = "ZXC"
-        else:
-            refname = caption.lower().replace(' ', '_')
-            tk_caption = ttk.Label(self.tkw, text=caption)
-            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
-
-        container = ttk.Frame(master=self.tkw, borderwidth=2, relief=Tkinter.SUNKEN)
-        tkw = tk_widget_class(master=container, borderwidth=0, **tk_widget_parms)
-        frame = TkWidgetDef(refname, tkw, tkw_label=tk_caption)
-        frame.scroll_container = container		# may be needed to avoid garbage collection
-
-        if XSCROLL:
-            frame.hbar = ttk.Scrollbar(master=frame.scroll_container, orient=Tkinter.HORIZONTAL)
-            frame.hbar.grid(row=1, column=0, sticky=Tkinter.E+Tkinter.W)
-        else:
-            frame.hbar = None
-        frame.vbar = ttk.Scrollbar(master=frame.scroll_container, orient=Tkinter.VERTICAL)
-        frame.vbar.grid(row=0, column=1, sticky=Tkinter.N+Tkinter.S)
-        frame.tkw.config(yscrollcommand=frame.vbar.set)
-        frame.vbar.config(command=frame.tkw.yview)
-        if XSCROLL:
-            frame.tkw.config(xscrollcommand=frame.hbar.set)
-            frame.hbar.config(command=frame.tkw.xview)
-        frame.tkw.grid(row=0, column=0, sticky=Tkinter.N+Tkinter.S+Tkinter.E+Tkinter.W)
-        frame.scroll_container.grid_rowconfigure(0, weight=1)
-        frame.scroll_container.grid_columnconfigure(0, weight=1)
-        frame.scroll_container.grid(row=row, column=col+1)
+            self.tkw.insert(Where, frame.tkw, text=caption)
         if OnClick is not None:
-            frame.tkw.bind("<Button-1>", OnClick)
-        self.RememberPosition(frame, row, col, rowspan=rowspan, colspan=2)
+            frame.tkw.bind('<Button-1>', OnClick)
         self.children.append(frame)
         return frame
+
+    #
+    # Standardized Operations
+    #
+    #   TK has lots of idioms for different widgets. The following methods
+    #   attempt to standardize them so there is less to remember.
+    #
+
+    def CreateSubstituteImage(self, width, height, caption=None, textcolor=(255,255,255), TextStartXY=(10,10)):
+        blank_image = np.zeros((height, width, 3), np.uint8)
+        if caption is not None:
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 4
+            line_thickness = 2
+            cv2.putText(blank_image, caption, TextStartXY, font, font_scale, textcolor, line_thickness, cv2.LINE_AA)
+        return blank_image
+
+    def Focus(self):
+        self.tkw.focus()
 
     def MakeThumbnail(self, im, width):
         # im is an OpenCv / numpy buffer. It can be either RGB or BGR. The color format is not changed.
@@ -528,56 +629,54 @@ class TkWidgetDef(object):
         t = cv2.resize(im, (tw, th), interpolation=cv2.INTER_LINEAR)
         return t
 
-
-    def AddCanvas(self, pil_fn=None, opencv_im=None, opencv_fn=None,
-				OnClick=None,
-				thumbnailof=None, thumbnailwidth=100,
-				width=400, height=200,
-				row=NEXT_ROW, col=SAME_COL, colspan=1, rowspan=1):
-        frame = self.AddScrolledWidget(Tkinter.Canvas, {'width': width, 'height': height},
-						OnClick=OnClick,
-						row=row, col=col, rowspan=rowspan, XSCROLL=True)
-        frame.scrollable_image = None
-        frame.canvas_width = width
-        frame.canvas_height = height
-
-        if (pil_fn is not None) or (opencv_fn is not None) or (opencv_im is not None):
-            if thumbnailof is None:
-                frame.UpdateImage(pil_fn=pil_fn, opencv_im=opencv_im, opencv_fn=opencv_fn)
+    def ReplaceChoices(self, choices):
+        if isinstance(self.tkw, Tkinter.OptionMenu):
+            # adpated from https://stackoverflow.com/questions/17580218/changing-the-options-of-a-optionmenu-when-clicking-a-button
+            current_selection = self.tkd.get()
+            self.tkw['menu'].delete(0, 'end')
+            for this_choice in choices:
+                self.tkw['menu'].add_command(label=this_choice, command=Tkinter._setit(self.tkd, this_choice))
+            if current_selection in choices:
+                self.tkd.set(current_selection)
             else:
-                # after this, the thumbnail will be automatically updated whenever the base image is updated
-                frame.UpdateImage(rgb_im=self.MakeThumbnail(thumbnailof.rgb_im, thumbnailwidth))
-                thumbnailof.thumbnail = frame
-                thumbnailof.thumbnail_width = thumbnailwidth
+                if len(choices) > 0:
+                    self.tkd.set(choices[0])
 
-        return frame
-
-    def AddLabelImage(self, pil_fn=None, opencv_im=None, opencv_fn=None,
-				thumbnailof=None, thumbnailwidth=100,
-				row=NEXT_ROW, col=SAME_COL, colspan=1):
-        row, col = self.Position(row=row, col=col)
-        frame = TkWidgetDef('', ttk.Label(self.tkw))
-        if thumbnailof is None:
-            frame.UpdateImage(pil_fn=pil_fn, source_im=opencv_im, opencv_fn=opencv_fn)
+    def ReplaceValue(self, new_value, Caption=None):
+        debug = "ReplaceValue({0}): tkw {1} '{2}' -- ".format(new_value, self.tkw.__class__.__name__, self.Value())
+        if self.tkd is None:
+            debug += 'None'
+        elif isinstance(self.tkd, Tkinter.StringVar):
+            debug += "StringVar '{0}".format(self.tkd.get())
         else:
-            # after this, the thumbnail will be automatically updated whenever the base image is updated
-            frame.UpdateImage(rgb_im=self.MakeThumbnail(thumbnailof.rgb_im, thumbnailwidth))
-            thumbnailof.thumbnail = frame
-            thumbnailof.thumbnail_width = thumbnailwidth
+            debug += "{0} '{1}'".format(self.tkd.__class__.__name__, repr(self.tkd))
+        #print(debug)
 
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
-        self.RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
-        return frame
+        if isinstance(self.tkw, ScrolledText.ScrolledText):
+            self.tkw.delete("1.0", Tkinter.END)
+            self.tkw.insert("1.0", new_value)
+        elif isinstance(self.tkw, Tkinter.Label) and (self.tkw_label is None):
+            # if self.tkw_label is not None, this is from AddLabelInfo(): update self.tk_data
+            self.tkw.config(text=new_value)
+        elif isinstance(self.tkw, Tkinter.Listbox):
+            # clear current selection first, else multi-selection occurs
+            cur_selection = self.tkw.curselection()
+            self.tkw.select_clear(cur_selection)
+            ix = self.list_items.index(new_value)
+            self.tkw.selection_set(ix)
+            self.tkw.see(ix)
+        elif isinstance(self.tkw, Tkinter.Scale):
+            self.tkw.set(new_value)
+        else:
+            # For many/most widgets, the value is in the self.tkd StringVar
+            if isinstance(self.tkd, Tkinter.StringVar):
+                self.tkd.set(new_value)
+        if Caption is not None:
+            self.tkw_label.config(text=Caption)
 
-    def CreateSubstituteImage(self, width, height, caption=None, textcolor=(255,255,255), TextStartXY=(10,10)):
-        blank_image = np.zeros((height, width, 3), np.uint8)
-        if caption is not None:
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 4
-            line_thickness = 2
-            cv2.putText(blank_image, caption, TextStartXY, font, font_scale, textcolor, line_thickness, cv2.LINE_AA)
-        return blank_image
+    def Update(self):			# Process Tkinter events
+        self.is_initializing = False
+        self.tkw.update()
 
     def UpdateImage(self, pil_fn=None, source_im=None, opencv_fn=None, rgb_im=None):
         # Replaces image in Canvas and Label widgets
@@ -634,7 +733,7 @@ class TkWidgetDef(object):
             print("UpdateImage() unable to create TK image object")
             # should blank thumbnail here
             return False
-        if isinstance(self.tkw, ttk.Label):
+        if isinstance(self.tkw, Tkinter.Label):
             self.tkw.configure(image=self.tkd)
         elif isinstance(self.tkw, Tkinter.Canvas):
             if self.scrollable_image is None:
@@ -659,56 +758,162 @@ class TkWidgetDef(object):
         else:
             return True
 
-    def AddLabelFrame(self, caption, row=NEXT_ROW, col=SAME_COL, colspan=1):
-        row, col = self.Position(row=row, col=col)
-        refname = caption.lower().replace(' ', '_')
-        frame = TkWidgetDef(refname, ttk.Labelframe(self.tkw, text=caption), IsContainer=True)
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
-        self.RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
-        return frame
+    def Value(self):
+        if isinstance(self.tkw, ScrolledText.ScrolledText):
+            return self.tkw.get("1.0", Tkinter.END)
+        if isinstance(self.tkw, Tkinter.Listbox):
+            # ix is a tuple like (2,). I assume the 2nd element would be the end of
+            # the range. Or maybe it a list of items for multi-selection.
+            # This works for now.
+            ix = self.tkw.curselection()
+            return self.tkw.get(ix)
+        if isinstance(self.tkw, Tkinter.Scale):
+            return self.tkw.get()
+        # For many/most widgets, the value is in the self.tkd StringVar
+        if isinstance(self.tkd, Tkinter.StringVar):
+            v = self.tkd.get()
+            if isinstance(self.tkw, Tkinter.OptionMenu) and (v == 'None'):
+                # I'm not sure if its me or Tkinter that turned no selection to a string
+                v = None
+            #print("Value() tkd '{0}'".format(v))
+            return v
 
-    def AddFrame(self, row=NEXT_ROW, col=SAME_COL, colspan=1):
-        if self.debug_this:
-            print("AddFrame", row, col, colspan)
-        row, col = self.Position(row=row, col=col)
-        refname = 'X'
-        frame = TkWidgetDef(refname, ttk.Frame(self.tkw), IsContainer=True)
-        if colspan == COL_SPAN_ALL:
-            colspan = self.right_col - col + 1
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
-        self.RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
-        return frame
 
-    def AddNotebook(self, OnTabSelected=None, row=NEXT_ROW, col=SAME_COL, colspan=1):
-        row, col = self.Position(row=row, col=col)
-        frame = TkWidgetDef('', ttk.Notebook(self.tkw), IsContainer=True)
-        frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=Tkinter.W)
-        frame.tkw.enable_traversal()
-        if OnTabSelected is not None:
-            frame.tkw.bind('<<NotebookTabChanged>>', OnTabSelected)
-        self.RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
-        return frame
+    #
+    # These are internal management functions that simplify and standardize widget coding.
+    #
 
-    def DeleteTab(self, ix):
-        print("TAB CT", self.tkw.index('end'))
-        self.tkw.forget(ix)
-        self.children.pop(ix)
+    def _AddScrolledWidget(self, tk_widget_class, tk_widget_parms, caption=None, OnClick=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, XSCROLL=False):
+        # Getting scrolled widgets right is verbose and fussy. I found this technique using a seperate frame and
+        # explicit borderwidth and weight on StackOverflow somewhere.
+        # The goal is for this tmethod to create any widget that needs scroll bars.
+        #
+        row, col = self._Position(row=row, col=col)
 
-    def AddTab(self, caption, Where=None, OnClick=None):
-        # Add a tab to notebook
-        refname = caption.lower().replace(' ', '_')
-        frame = TkWidgetDef(refname, ttk.Frame(self.tkw), IsContainer=True)
-        if Where is None:
-            self.tkw.add(frame.tkw, text=caption)
+        if caption is None:
+            tk_caption = None
+            refname = "ZXC"
         else:
-            self.tkw.insert(Where, frame.tkw, text=caption)
+            refname = caption.lower().replace(' ', '_')
+            tk_caption = Tkinter.Label(self.tkw, text=caption)
+            tk_caption.grid(column=col, row=row, sticky=Tkinter.W)
+
+        container = Tkinter.Frame(master=self.tkw, borderwidth=2, relief=Tkinter.SUNKEN)
+        tkw = tk_widget_class(master=container, borderwidth=0, **tk_widget_parms)
+        frame = TkWidgetDef(refname, tkw, tkw_label=tk_caption)
+        frame.scroll_container = container		# may be needed to avoid garbage collection
+
+        if XSCROLL:
+            frame.hbar = Tkinter.Scrollbar(master=frame.scroll_container, orient=Tkinter.HORIZONTAL)
+            frame.hbar.grid(row=1, column=0, sticky=Tkinter.E+Tkinter.W)
+        else:
+            frame.hbar = None
+        frame.vbar = Tkinter.Scrollbar(master=frame.scroll_container, orient=Tkinter.VERTICAL)
+        frame.vbar.grid(row=0, column=1, sticky=Tkinter.N+Tkinter.S)
+        frame.tkw.config(yscrollcommand=frame.vbar.set)
+        frame.vbar.config(command=frame.tkw.yview)
+        if XSCROLL:
+            frame.tkw.config(xscrollcommand=frame.hbar.set)
+            frame.hbar.config(command=frame.tkw.xview)
+        frame.tkw.grid(row=0, column=0, sticky=Tkinter.N+Tkinter.S+Tkinter.E+Tkinter.W)
+        frame.scroll_container.grid_rowconfigure(0, weight=1)
+        frame.scroll_container.grid_columnconfigure(0, weight=1)
+        frame.scroll_container.grid(row=row, column=col+1)
         if OnClick is not None:
-            frame.tkw.bind('<Button-1>', OnClick)
+            frame.tkw.bind("<Button-1>", OnClick)
+        self._RememberPosition(frame, row, col, rowspan=rowspan, colspan=2)
         self.children.append(frame)
         return frame
+
+    def _Position(self, row=NEXT_ROW, col=-SAME_COL):
+        # This makes convenient substitutions for special, negative values.
+        # Positive or zero values are unchanged since they are specified positions.
+        # SAME_ROW/COL and NEXT_ROW/COL are relative to last component placed, which may
+        # not be sequential. The others are relative to the extents of component.
+        # This is called in the context of a container for the component thas is about to be created.
+        if (row == OVERLAY_ROW) or (col == OVERLAY_COL):
+            # an overlay is an overlay. This is a convenience so you don't have to specify both row and col
+            row = OVERLAY_ROW
+            col = OVERLAY_COL
+        if row == SAME_ROW:
+            # same row as the previous item, fixup initial value for first row.
+            if self.last_used_row < FIRST_ROW:
+                self.last_used_row = FIRST_ROW
+            row = self.last_used_row
+        elif row == NEXT_ROW:
+            # next sequential row
+            row = self.last_used_row + self.last_used_rowspan
+            self.last_used_rowspan = 1
+            self.last_used_col = -1		# initialize column for new row
+            self.last_used_colspan = 1
+        elif row == BOTTOM_ROW:
+            # row below everything else
+            row = self.bottom_row
+        elif row == EXTEND_ROW:
+            # row below everything else
+            row = self.bottom_row + 1
+        elif row == OVERLAY_ROW:
+            # row & col in same place, to swap widgets with lift / lower
+            row = self.last_used_row
+        if col == SAME_COL:
+            # use current column, fixup initial value for first column.
+            if self.last_used_col < 0:
+                self.last_used_col = 0
+            col = self.last_used_col
+        elif col == NEXT_COL:
+            col = self.last_used_col + self.last_used_colspan
+        elif col == RIGHT_COL:
+            col = self.right_col
+        elif col == LEFT_COL:
+            col = 0
+        elif col == EXTEND_COL:
+            # use next column to right of everything else.
+            # If components are placed sequentially, this is the same as NEXT_COL.
+            col = self.right_col + 1
+        elif col == OVERLAY_COL:
+            # row & col in same place, to swap widgets with lift / lower
+            col = self.last_used_col
+        return (row, col)
+
+    def _RememberPosition(self, new_TkWidgetDef, row, col, colspan=1, rowspan=1):
+        # Update the new widgets position info.
+        # Theses properties are relative to the container, ususally set by _Position().
+        # The last_used_XXX properties and corresponding NEXT_XXX position
+        # substitutions work only when doing a rectangular grid, layed out by
+        # rows and left to right within each row.
+        new_TkWidgetDef.row = row
+        new_TkWidgetDef.col = col
+        new_TkWidgetDef.col_span = colspan
+        new_TkWidgetDef.row_span = rowspan
+        # Update container positioning to reflect this new widget
+        assert self.is_container
+        new_widget_right_col = col + colspan - 1
+        new_widget_bottom_row = row + rowspan - 1
+        self.last_used_row = row
+        if rowspan > self.last_used_rowspan:
+            self.last_used_rowspan  = rowspan		# track deepest widget per row
+        self.last_used_col = col
+        self.last_used_colspan = colspan
+        if new_widget_bottom_row > self.bottom_row:
+            self.bottom_row = new_widget_bottom_row
+        if new_widget_right_col > self.right_col:
+            self.right_col = new_widget_right_col
+        if self.debug_this:
+            print("RememberPosition/new", new_TkWidgetDef._ReprPos())
+            print("RememberPosition/parent", self._ReprPos())
+
+    def _ReprPos(self):
+       res = "(%s,%s) Span(%s,%s) Ext(%s,%s) Last(%s,%s)" % (self.row, self.col,
+								self.row_span, self.col_span,
+								self.bottom_row, self.right_col,
+								self.last_used_row, self.last_used_col)
+       return res
+
+
+
+#
+# This is the application class at the root of an app.
+#
 
 class EasyTk(TkWidgetDef):
     __slots__ = ()
