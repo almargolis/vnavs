@@ -355,7 +355,7 @@ class StepFollowLineTrace(MissionStep):
             print("StepFollowLinePid.DoStageStepRun() LINEtrace", self.navigator.line_x, self.nav.speed, self.nav.steering)
             self.PublishNavigation()
             self.next_time = time.time() + 1.0
-            self.next_time = time.time() + 0.5
+            self.next_time = time.time() + 0.1
         return False
 
 class StepGpsWaypoint(MissionStep):
