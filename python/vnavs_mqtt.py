@@ -435,6 +435,10 @@ class mqtt_node(object):
         else:
             self.imageDir = self.config.get("Cameraman", "ImageDir")
         self.imageDir = os.path.expanduser(self.imageDir)		# this expands tilde in path
+        if not os.path.isdir(self.imageDir):
+            raise ValueError("Invalid Cameraman.ImageDir '{}' in vnavs.ini".format(self.imageDir))
+        if not os.access(self.imageDir, os.W_OK):
+            raise ValueError("Cameraman.ImageDir '{}' in vnavs.ini is not writeable".format(self.imageDir))
         self.single_threaded = SingleThreaded
         self.select_timeout = SelectTimeoutSecs
         self.subscriptions = {}
