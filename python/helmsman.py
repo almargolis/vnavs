@@ -1,7 +1,7 @@
-from __future__ import absolute_import, division, print_function
-from past.builtins import basestring    # pip install future
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
+# from __future__ import absolute_import, division, print_function
+# from past.builtins import basestring    # pip install future
+# from builtins import (bytes, str, open, super, range,
+#                      zip, round, input, int, pow, object)
 
 import json
 import math
@@ -274,7 +274,7 @@ class vehicle(object):
         # The following is the old steering code which is a mess but may be useful when filling out the
         # above new code.
 
-        if (steering_goal is None) or (not isinstance(steering_goal, basestring)) or (steering_goal == ''):
+        if (steering_goal is None) or (not isinstance(steering_goal, str)) or (steering_goal == ''):
             pass
         elif steering_goal[0] == 'R':
             self.steering_type = 'R'
@@ -544,7 +544,7 @@ class helmsman(vmqtt.mqtt_node):
         # pending increments. There shouldn't be much latency, but for big
         # fast bots, some caution is in order.
         speed_goal = None
-        if isinstance(speed_request, basestring):
+        if isinstance(speed_request, str):
             speed_goal = self.SpeedRequestStr(speed_request)
         if speed_goal is None:
           try:

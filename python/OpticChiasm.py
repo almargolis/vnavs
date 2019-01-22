@@ -1511,7 +1511,7 @@ class ReflexEntities(object):
 def ResolveSymbolicIndex(c, ext, p1=None):
     def Raw_ResolveSymbolicIndex(c, ext, p1=None):
         print('Raw_ResolveSymbolicIndex', repr(c), ext, p1)
-        if isinstance(c, basestring):
+        if isinstance(c, str):
             if c[0] == 'm':
                 if c == 'm':
                     return int(ext / 2)
