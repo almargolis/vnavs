@@ -1,7 +1,7 @@
-from __future__ import absolute_import, division, print_function
-from past.builtins import basestring    # pip install future
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
+#from __future__ import absolute_import, division, print_function
+#from past.builtins import basestring    # pip install future
+#from builtins import (bytes, str, open, super, range,
+#                      zip, round, input, int, pow, object)
 
 import base64
 import cv2
@@ -147,9 +147,11 @@ class cameraman(vmqtt.mqtt_node):
     __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
 			'camera', 'camera_resolution',
 			'capture_format', 'capture_publish',
+			'do_auto_iso',
 			'image_ct', 'iso', 'idle_image_max',
-			'last_fn', 'last_format', 'loop_format', 'loop_mode', 'loop_publish'
+			'last_fn', 'last_format', 'loop_format', 'loop_mode', 'loop_publish',
 			'mark_hsv_spec', 'mark_payload', 'mark_rect',
+			'mission_id', 'mission_logging',
 			'orders_dict', 'orders_payload', 'post_processes',
 			'shutter_speed',
                     )
