@@ -723,7 +723,7 @@ class Darkroom(vmqtt.mqtt_node):
                     self.pic_fn = payload['filename']
                     path = os.path.join(self.downloadDir, self.pic_fn)
                     print("DoLoop() GetFile: ", path)
-                    if not self.file_client.GetFile(self.pic_fn, path=path):
+                    if not self.file_client.GetFile('i', self.pic_fn, path=path):
                         print("Unable to fetch PIC", self.pic_fn)
                         return
                     iso = payload['iso']
