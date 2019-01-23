@@ -481,7 +481,7 @@ class SocketWrapperClient(SocketWrapper):
     # in multiple application and OS threads. Once connected, don't do anything here,
     # assuming this is some sort of race condition.
     #
-    # As this has eveolved, clients are now always socket i/o blocking. I have left some
+    # As this has evolved, clients are now always socket i/o blocking. I have left some
     # of the non-blocking code in place because it is hard-won knowledge that may be useful
     # again. Client socket operations are almost always sequential, so they might as well be
     # blocking. This client supports threading so the main applicaion loop runs even when
@@ -499,8 +499,10 @@ class SocketWrapperClient(SocketWrapper):
             print("ConnectAsync() Successful")
             return True
         except socket.error as e:
-            self.PrintError("ConnectAsync()", e)
-            if e.errno in [22, 36, 37, 56, 61, 111, 115]:
+            if e.errno in [22, 36, 37, 56, 61, 111, 114, 115]:
+                # BlockingIOError started appearing in exception messages instead of socket_error
+                # in Raspbian Stretch / Python3.5. Not sure if any action needed.
+                #
                 # Succesful non-blocking connection innitiaion
                 # raises 36 under OSX or 115 under Raspbian.
                 # Repeated attemps raises 37 under OSX or 115 under Raspbian
@@ -528,10 +530,10 @@ class SocketWrapperClient(SocketWrapper):
                 # socket.error: [Errno 22] Invalid argument
                 # socket.error: [Errno 36] Operation now in progress
                 # socket.error: [Errno 37] Operation already in progress
-                # socket.error: [Errno 114] Operation already in progress (new, Raspbian Stretch)
                 # socket error: [Errno 56] Socket is already connected
                 # socket.error: [Errno 61] Connection refused
                 # socket.error: [Errno 111] Connection refused
+                # socket.error: [Errno 114] Operation already in progress (new, Raspbian Stretch)
                 # socket.error: [Errno 115] Operation now in progress
                 if e.errno in [56]:
                     self.connected = True
@@ -544,6 +546,7 @@ class SocketWrapperClient(SocketWrapper):
                     self.connect_in_progress = True
                     return False				# not connected but not a hard failure
             else:
+                self.PrintError("ConnectAsync()", e)
                 raise
 
     def Connect(self, host=None, port=None, keepalive=60, timeout=None):
@@ -563,6 +566,7 @@ class SocketWrapperClient(SocketWrapper):
                 if timeout is not None:
                     if (time.time() - start_time) > timeout:
                         return False
+                print("SocketWrapperClient.Connect() waiting for connection")
                 time.sleep(0.01)
         return True
 

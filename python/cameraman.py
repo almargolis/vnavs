@@ -1,7 +1,7 @@
-from __future__ import absolute_import, division, print_function
-from past.builtins import basestring    # pip install future
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
+#from __future__ import absolute_import, division, print_function
+#from past.builtins import basestring    # pip install future
+#from builtins import (bytes, str, open, super, range,
+#                      zip, round, input, int, pow, object)
 
 import base64
 import cv2
@@ -9,17 +9,12 @@ import io
 import json
 import numpy as np
 import os
+picamera = None					# imported below if needed
 import pickle
 import sys
 import threading
 import time
 import traceback
-
-try:
-    import picamera
-    import picamera.array
-except:
-    picamera = None
 
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
@@ -86,12 +81,12 @@ class macbook_camera(object):
         return ret, frame
 
     def capture(self, output, format=None, use_video_port=False, resize=None, splitter_port=0, bayer=False, **options):
-        assert isinstance(output, basestring)
+        assert isinstance(output, str)
         assert format == 'jpeg'
         ret, frame = self.read()
         if frame is None:
             return False
-        if isinstance(output, basestring):
+        if isinstance(output, str):
             rgb_image = OpticChiasm.BGR2RGB(frame)
             cv2.imwrite(output, rgb_image)
             return True
@@ -116,7 +111,7 @@ class macbook_camera(object):
         ctr = 0
         while True:
             ctr += 1
-            if isinstance(output, basestring):
+            if isinstance(output, str):
                 path = output.format(counter=ctr)
                 if self.capture(path, **kwargs):
                     yield path
@@ -145,16 +140,19 @@ class CameramanOrdersDict(vdata.Dict):
 
 class cameraman(vmqtt.mqtt_node):
     __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
-			'camera', 'camera_resolution',
+			'camera', 'camera_resolution', 'camera_type',
 			'capture_format', 'capture_publish',
+			'do_auto_iso',
 			'image_ct', 'iso', 'idle_image_max',
-			'last_fn', 'last_format', 'loop_format', 'loop_mode', 'loop_publish'
+			'last_fn', 'last_format', 'loop_format', 'loop_mode', 'loop_publish',
 			'mark_hsv_spec', 'mark_payload', 'mark_rect',
+			'mission_id', 'mission_logging',
 			'orders_dict', 'orders_payload', 'post_processes',
 			'shutter_speed',
                     )
 
     def __init__(self, Verbose=True):
+        global picamera
         super().__init__(Subscriptions=[
 						vmqtt.Subscription(vconst.cameraman_mark_topic, async_delivery=True, handler=self.OnCameramanMark),
 						vmqtt.Subscription(vconst.cameraman_orders_topic, async_delivery=True, handler=self.OnCameramanOrders),
@@ -172,7 +170,10 @@ class cameraman(vmqtt.mqtt_node):
         self.camera_resolution = (640, 480)
         self.camera_resolution = (160, 120)
         self.camera_resolution = (320, 240)
-        if picamera is not None:
+        self.camera_type = self.config.get("Cameraman", "Camera")
+        if self.camera_type == 'Picamera':
+            import picamera
+            import picamera.array
             try:
                 self.camera = picamera.PiCamera(resolution=self.camera_resolution)
             except picamera.exc.PiCameraMMALError:

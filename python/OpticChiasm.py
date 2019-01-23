@@ -1,7 +1,7 @@
-from __future__ import absolute_import, division, print_function
-from past.builtins import basestring    # pip install future
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
+#from __future__ import absolute_import, division, print_function
+#from past.builtins import basestring    # pip install future
+#from builtins import (bytes, str, open, super, range,
+#                      zip, round, input, int, pow, object)
 
 import io
 import os, cv2, numpy as np
@@ -1511,7 +1511,7 @@ class ReflexEntities(object):
 def ResolveSymbolicIndex(c, ext, p1=None):
     def Raw_ResolveSymbolicIndex(c, ext, p1=None):
         print('Raw_ResolveSymbolicIndex', repr(c), ext, p1)
-        if isinstance(c, basestring):
+        if isinstance(c, str):
             if c[0] == 'm':
                 if c == 'm':
                     return int(ext / 2)
