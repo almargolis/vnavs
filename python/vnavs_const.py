@@ -28,6 +28,8 @@ mission_sync_event_topic = 'mission/sync_event'
 
 system_abend_topic = 'system/abend'
 system_message_error_topic = 'system/nak'
+system_whoru = 'system/whoru'				# fast mqtt server query
+system_server = 'system/server'				# fast mqtt server id
 
 cameraman_mark_topic = 'cameraman/mark'
 cameraman_orders_topic = 'cameraman/orders'

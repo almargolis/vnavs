@@ -1,8 +1,3 @@
-#from __future__ import absolute_import, division, print_function
-#from past.builtins import basestring    # pip install future
-#from builtins import (bytes, str, open, super, range,
-#                      zip, round, input, int, pow, object)
-
 import base64
 import cv2
 import io
@@ -16,6 +11,7 @@ import threading
 import time
 import traceback
 
+import vnavs_comms as vcomms
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import vnavs_data as vdata
@@ -439,7 +435,7 @@ class cameraman(vmqtt.mqtt_node):
                 else:
                     self.mark_hsv_spec = hsv_spec
                 if 'save' in self.mark_payload:
-                    hsv_payload = self.PrepareResponse(self.mark_payload, ConfResponse=True)
+                    hsv_payload = vcomms.PrepareResponse(self.mark_payload, ConfResponse=True)
                     hsv_payload.update(self.mark_hsv_spec.AsPayload())
                     print("MARK HSV", hsv_payload)
                     hsv_payload[vconst.dname_field_name]  = self.mark_payload['save']

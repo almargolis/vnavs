@@ -1,7 +1,3 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
-
 try:
     import numpy as np
     import cv2
@@ -19,6 +15,7 @@ import string
 import sys
 import time
 
+import vnavs_comms as vcomms
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import engineer_1
@@ -727,7 +724,7 @@ class Mission(object):
         self.mission_state = MISSION_STATE_LOADED
         if InitiatorPayload is not None:
             # Only announce if part of runnng mission -- not mission control
-            payload = self.navigator.PrepareResponse(InitiatorPayload)
+            payload = vcomms.PrepareResponse(InitiatorPayload)
             self.navigator.Publish(vconst.mission_loaded_topic, payload)
         print("Mission Loaded", self.stages_list, InitiatorPayload)
 
@@ -792,7 +789,7 @@ class Mission(object):
             if initiator_payload is None:
                 stage_payload = {}
             else:
-                init_payload = self.navigator.PrepareResponse(initiator_payload)
+                init_payload = vcomms.PrepareResponse(initiator_payload)
             init_payload['mission_id'] = self.mission_id
             init_payload['mission_name'] = self.mission_name
             init_payload['mission_stage'] = stage_name
@@ -804,7 +801,7 @@ class Mission(object):
         if initiator_payload is None:
             stage_payload = {}
         else:
-            stage_payload = self.navigator.PrepareResponse(initiator_payload)
+            stage_payload = vcomms.PrepareResponse(initiator_payload)
         stage_payload['mission_id'] = self.mission_id
         stage_payload['mission_name'] = self.mission_name
         stage_payload['mission_stage'] = stage_name
@@ -1006,7 +1003,7 @@ class navigator(vmqtt.mqtt_node):
         print("OnDataGet()", payload)
         key = payload['key']
         value = self.GetPersistentData(key)
-        data_payload = self.PrepareResponse(payload, ConfResponse=True)
+        data_payload = vcomms.PrepareResponse(payload, ConfResponse=True)
         data_payload['key'] = key
         data_payload['value'] = value
         self.Publish('data/value', data_payload)
@@ -1023,7 +1020,7 @@ class navigator(vmqtt.mqtt_node):
         payload = self.serviceRequests.pop(0)
         print("PROCESS", payload)
         request = payload['request']
-        self.PrepareResponse(payload)
+        payload = vcomms.PrepareResponse(payload)
         payload['MissionName'] = self.mission.missionName
         payload['WaypointCt'] = len(self.mission.waypoints)
         if request == 'ClearWaypoints':

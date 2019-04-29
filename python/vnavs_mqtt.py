@@ -1,7 +1,3 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
-
 import datetime
 import json
 import multiprocessing
@@ -316,7 +312,7 @@ def LaunchNode(node_class):
     n = node_class()
     n.Loop()
 
-def Publish(topic, payload, ResponseTopic=None):
+def Publish(topic, payload, ResponseTopic=None, host=None, port=None, BlockIfNotConnected=True, Verbose=False):
     if ResponseTopic is None:
         subscriptions = []
         conf = None
@@ -325,13 +321,15 @@ def Publish(topic, payload, ResponseTopic=None):
         subscriptions = [Subscription(ResponseTopic)]
         conf = 'Publish' + NowStr()
         save_payload = True
-    node = mqtt_node(Subscriptions=subscriptions, BrokerType='F', SingleThreaded=True,
-			AckTopic=ResponseTopic)
-    print("BrokerType", node.broker_type)
-    try:
-        node.ConnectToMqttServer()
-    except:
-        pass
+    node = mqtt_node(Subscriptions=subscriptions, BrokerType='F',
+			BlockIfNotConnected=BlockIfNotConnected, SingleThreaded=True,
+			AckTopic=ResponseTopic, host=host, port=port, Verbose=Verbose)
+    node.ConnectToMqttServer()
+    if (not node.mqttc.connected) and (not BlockIfNotConnected):
+        # This exits quickly if not immediately connected. Used by find_server()
+        if Verbose:
+            print("Server not found")
+        return None
     while not node.mqttc.connected:
         try:
             node.ConnectToMqttServer()
@@ -344,6 +342,25 @@ def Publish(topic, payload, ResponseTopic=None):
         return None
     return node.WaitForPayload(conf)
 
+def find_server(port=vcomms.FAST_MQTT_PORT, Verbose=False):
+    this_host_ip = vcomms.host_primary_ip_address()
+    ix = this_host_ip.rfind('.')
+    this_network = this_host_ip[:ix+1]
+    #for scan_d in range(1,255):
+    for scan_d in range(18,25):
+        scan_ip = this_network + str(scan_d)
+        print(scan_ip)
+        payload = {}
+        response = Publish(vconst.system_whoru, payload, ResponseTopic=vconst.system_server,
+			host=scan_ip, port=port, BlockIfNotConnected=False, Verbose=Verbose)
+        if response is not None:
+            print("Server Found!!!")
+            return scan_ip
+    return None
+    
+#
+# Streamer() is the socket_xfer writer function which runs in its own process.
+# It empties the FIFO system queue as quickly as it can and converts that to a
 class Subscription(object):
     __slots__ = ('async_delivery', 'handler_method', 'handler_needs_topic', 'last_payload', 'queue', 'request_only', 'topic')
 
@@ -378,18 +395,6 @@ class ConfirmationRequest(object):
             chk = "checked"
         return "( CONF {} - {} - {} )".format(self.conf_id, conf, chk)
 
-def JsonShowTypes(payload):
-    for key, value in payload.items():
-        print(key, value.__class__.__name__, value)
-
-class JsonNumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.int64):
-            obj_out = int(obj)
-            #print("JsonNumpyEncoder()", obj.__class__.__name__, obj_out.__class__.__name__)
-            return obj_out
-        return super().default(obj)
-
 class mqtt_node(object):
     __slots__ = ('args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'confirmation_pending', 'debug', 'exception_ct', 'exception_last_time',
@@ -401,7 +406,7 @@ class mqtt_node(object):
     def __init__(self, node_name=None, Subscriptions=[], AckTopic=None,
 				LoopSleep=0.01,
 				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0,
-				BrokerType='F', Streamer=False, Verbose=True):
+				BrokerType='F', host=None, port=None, Streamer=False, Verbose=True):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         #	switch between cameras / bots manually.
         # BlockIfNotConnected is for nodes that only need to run when connected to a message server. DoLoop() is what is blocked.
@@ -423,6 +428,12 @@ class mqtt_node(object):
                 self.args[key] = val
             else:
                 self.args[this] = True
+        # __init__ parameters take priority over command line
+        if host is not None:
+            self.args[ARG_HOST] = host
+        if port is not None:
+            self.args[ARG_PORT] = port
+        #
         self.confirmation_pending = {}
         self.vnavs_pid = int(time.time())		# non-repeating with ~ 1 second
         self.vnavs_mid = 0				# Publish() sequence
@@ -446,6 +457,9 @@ class mqtt_node(object):
             self.subscriptions[this.topic] = this
         self.wildcard_handler = None
         self.broker_type = BrokerType
+        self.verbose = Verbose				# needed by InitMqttClient()
+        self.socket_host = None                         # needed by InitMqttClient()
+        self.socket_port = None                         # needed by InitMqttClient()
         self.InitMqttClient()
         self.broker_timeout = 60
         self.debug = 0
@@ -458,17 +472,16 @@ class mqtt_node(object):
         else:
             self.node_name = node_name
         self.stats = Counters()
-        self.verbose = Verbose
         self.streamer = None
         if Streamer:
             self.streamer = socket_xfer()
-        if self.single_threaded:
-            print("Blocking Mode")
-        else:
-            print("Non-Blocking Mode")
+        if self.verbose:
+            if self.single_threaded:
+                print("Single Threaded")
+            else:
+                print("Not Single Threaded")
 
     def InitMqttClient(self):
-        print("InitMqttClient()", self.broker_type)
         if self.broker_type == 'M':
             iniSection = 'MqttBroker'		# Mosquitto
             self.mqttc = PahoClient()
@@ -482,10 +495,16 @@ class mqtt_node(object):
             self.socket_host = self.args[ARG_HOST]
         else:
             self.socket_host = self.config.get(iniSection, "Host")
-        self.socket_port = int(self.config.get(iniSection, "Port"))
+        if ARG_PORT in self.args:
+            self.socket_port = int(self.args[ARG_PORT])
+        else:
+            self.socket_port = int(self.config.get(iniSection, "Port"))
+        if self.verbose:
+            print("InitMqttClient()", self.broker_type, '@', self.socket_host, ':', self.socket_port)
 
     def ConnectToMqttServer(self):
         if self.mqttc.connected:
+            print("mqtt_node() already connected")
             return
         while True:
             if self.block_if_not_connected:
@@ -517,15 +536,17 @@ class mqtt_node(object):
          # Depending on how you think about it, calling these blocking
          # may seem like an oxymoron.
          #
+         # print ("ZZZ Check Activity timeout", self.select_timeout)
          try:
              self.mqttc.loop(timeout=self.select_timeout)
-         except socket.error:
+         except socket.error as e:
             # THIS IS WRONG
             # connected will be handled by mqttc client object.
             # I need to figure out who to save data for logging and
             # reconnect to server when possible.
             # Maybe do an E-Stop sort of thing.i
             # Helmsman stiops on e-stop. Other may change mode, signal operator, whtever
+            print("CheckMqttPendingActivity() Socket Error:", e.errno)
             self.mqttc.connected = False
 
     def Disconnect(self):
@@ -540,7 +561,7 @@ class mqtt_node(object):
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
                     self.ConnectToMqttServer()
-                    print("Loop() Juat attemoted to connect")
+                    print("Loop() Juat attempted to connect")
                 if self.mqttc.connected:
                     if self.mqttc.thread is not None:
                         if not self.mqttc.thread.is_alive():
@@ -654,39 +675,15 @@ class mqtt_node(object):
             print("Publish() Not connected, not sent")
             # for now, silently ignore publish errors. Need to do better
             return
-        payload['_topic'] = topic
-        payload['_sender'] = self.node_name
-        payload['_sendTime'] = time.time()
-        payload['_sendPid'] = self.vnavs_pid
         self.vnavs_mid += 1
-        payload['_sendSeq'] = self.vnavs_mid
+        j = vcomms.PrepareMessage(self.node_name, self.vnavs_pid, self.vnavs_mid, topic, payload, ConfRequest=ConfRequest)
         if ConfRequest is not None:
-            payload['_confRequest'] = ConfRequest
             self.confirmation_pending[ConfRequest] = ConfirmationRequest(ConfRequest)
             print("Publish() has confirmation request", payload)
-        #JsonShowTypes(payload)
-        j = json.dumps(payload, cls=JsonNumpyEncoder)
         #print("Publish() JSON", j)
         res, mid = self.mqttc.publish(topic, j)
         if res != mqtt.MQTT_ERR_SUCCESS:
             print("MQTT Publish Error")
-
-    def PrepareResponse(self, payload, ConfResponse=False):
-        # Prepares payload to be used as a response.
-        # Copy identifier fields so recipients can match source message
-        # so it knows request is completed and where to continue its process.
-        # Info about original message is always there thanks to Publish()
-        new_payload = {}
-        if '_topic' in payload:
-            new_payload['_ackTopic'] = payload['_topic']
-        if '_sendPid' in payload:
-            new_payload['_ackPid'] = payload['_sendPid']
-        if '_sendSeq' in payload:
-            new_payload['_ackSeq'] = payload['_sendSeq']
-        if ConfResponse:
-            if '_confRequest' in payload:
-                new_payload['_isConfirmation'] = payload['_confRequest']
-        return new_payload
 
     def GetConfRequest(self, payload):
         return payload.get('_confRequest', None)
@@ -715,8 +712,9 @@ class mqtt_node(object):
         # to handle exception cases.
         while True:
             if not (conf in self.confirmation_pending):
+                print("WaitForPayload()", conf, "not pending.")
                 return None					# maybe should be exception
-            payload = self.CheckConfirmation('conf')
+            payload = self.CheckConfirmation(conf)
             if payload is not None:
                 return payload
             self.CheckMqttPendingActivity()
@@ -734,7 +732,7 @@ class mqtt_node(object):
     def on_message(self, client, userdata, message):
         if self.verbose:
             print("on_message()", message.topic + " " + str(message.qos) + " " + self.MessageStr(message.payload))
-        msg = message.payload.decode("utf-8")
+        msg = message.payload
         if msg == '':
             payload = {}
         else:
@@ -819,7 +817,9 @@ if __name__ == "__main__":
     else:
         print("QUIET")
         verbose = False
-    if sys.argv[1] == 's':
+    if sys.argv[1] == 'i':
+        find_server(Verbose=verbose)
+    elif sys.argv[1] == 's':
         n = TestSender()
         n.Connect()
         n.Loop()
