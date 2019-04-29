@@ -1,7 +1,3 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
-
 import datetime
 import math
 import os
@@ -76,7 +72,6 @@ class VnavsDataDict(object):
         return self.attributes.keys()
 
 class VnavsDataRecord(object):
-    __slots__ = ('_dict')
     _dict = None
 
     def __init__(self, payload=None):
@@ -171,11 +166,11 @@ class Position(object):
         if self.heading is None:
             note = ''
         else:
-            note = '-> ' + `self.heading`
+            note = '-> ' + repr(self.heading)
         if self.speed is not None:
             if note != '':
                 note += ' '
-            note += '@ ' + `self.speed`
+            note += '@ ' + repr(self.speed)
         return '({}, {}, {})'.format(self.latitude, self.longitude, note)
 
     def DistanceToWaypoint(self, waypoint):
@@ -274,14 +269,14 @@ class GpsDevice(object):
 
     def IncreaseUpdateRate(self):
         msg_str = "$PMTK251,38400*27" + '\r\n'
-        print("SendGpsCommand", `msg_str`)
+        print("SendGpsCommand", repr(msg_str))
         self.gps_port.write(msg_str.encode())				# convert to bytes and write
         self.gps_port.baudrate = GPS_BAUD_38400
         #
         msg_str = "$PMTK220,1000*1F" + '\r\n'				# 1 Hz
         msg_str = "$PMTK220,200*2C" + '\r\n'				# 5 Hz
         msg_str = "$PMTK220,100*2F" + '\r\n'				# 10 Hz
-        print("SendGpsCommand", `msg_str`)
+        print("SendGpsCommand", repr(msg_str))
         self.gps_port.write(msg_str.encode())				# convert to bytes and write
 
     def SendGpsCommand(self, talker, msgtype, parms):
@@ -289,7 +284,7 @@ class GpsDevice(object):
         msg_object = pynmea2.GGA(talker, msgtype, parms)		# this add leading $ and trailing checksum
         msg_str = str(msg_object) + '\c\n'
         msg_str = "$PMTK220,200*2C" + '\r\n'
-        print("SendGpsCommand", `msg_str`)
+        print("SendGpsCommand", repr(msg_str))
         self.gps_port.write(msg_str.encode())				# convert to bytes and write
 
     def UpdateGsaSentence(self, parsed_sentence):
@@ -342,7 +337,7 @@ class GpsDevice(object):
             speedKnots = float(speedRaw)
             self.data.gps_speed = speedKnots * METERS_PER_SECOND_PER_KNOT
         except ValueError:
-            print("Invalid RMC speed", `speedRaw`)
+            print("Invalid RMC speed", repr(speedRaw))
         heading_raw = parsed_sentence.data[7].strip()
         if heading_raw == '':
             pass				# None? only saw it at startup now
@@ -350,7 +345,7 @@ class GpsDevice(object):
             try:
                 self.data.gps_heading = float(heading_raw)	# degrees clockwise from North
             except ValueError:
-                print("Invalid RMC heading", `heading_raw`)
+                print("Invalid RMC heading", repr(heading_raw))
         self.gps_differential = parsed_sentence.data[11]	# A=autonomous, D=differeential GPS
         """
         print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
@@ -490,7 +485,7 @@ def TestGps():
         have_new_position_data = gps_device.UpdateGpsInfo()
         if gps_device.last_sentence_str is not None:
             print("GPS", gps_device.gps_port.baudrate)
-            print("GPS", `gps_device.last_sentence_str`)
+            print("GPS", repr(gps_device.last_sentence_str))
 
 def RunNode():
     h = engineer_1()
