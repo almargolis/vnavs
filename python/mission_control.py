@@ -6,11 +6,14 @@ import json
 import sys
 import os
 
-try:
+if sys.argv[1] == 'gui':
     from PIL import ImageTk, Image
-except ImportError:
+    import easytk
+    from easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+else:
     ImageTk = None
     Image = None
+    easytk = None
 
 import threading
 import time
@@ -23,12 +26,6 @@ except ImportError:
     cv2 = None
     numpy = None
     OpticChiasm = None
-
-try:
-    import easytk
-    from easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
-except ImportError:
-    easytk = None
 
 import engineer_1
 import helmsman
