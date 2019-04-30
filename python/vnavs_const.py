@@ -8,6 +8,11 @@
 # file.
 #
 
+# This should be importable anywehre in vnavs, so it should only import system modules.
+import configparser
+import os
+import sys
+
 data_save_topic = 'data/save'
 data_get_topic = 'data/get'
 
@@ -58,3 +63,62 @@ stage_finis = 'finis'
 dname_field_name = '_dname_'
 dtype_field_name = '_dtype_'
 
+config_file_path = os.path.expanduser("~/vnavs.ini")
+FAST_MQTT_PORT = 4000
+FILE_TRANSFER_PORT = 4010
+DEFAULT_PORT = 3000
+STANDARD_MQTT_PORT = 1883
+
+HOST_LOCAL = '127.0.0.1'
+GLOBAL_IP = '8.8.8.8'			# Google DNS resolver
+NON_ROUTABLE_IP = '192.168.0.1'
+
+ini_specs = {
+	'Cameraman': {
+		'ImageDir':	'~/vnavs/BotImages'
+		},
+
+	'FileClient': {
+		'Host':		HOST_LOCAL,
+		'Port':		FILE_TRANSFER_PORT,
+		'DownloadDir':	'~/vnavs/download'
+		},
+
+	'FileServer': {
+		'Port':		FILE_TRANSFER_PORT
+		},
+
+	'MqttBroker': {
+		'Host':		HOST_LOCAL,
+		'Port':		STANDARD_MQTT_PORT
+		},
+
+	'MqttFast': {
+		'Host':		HOST_LOCAL,
+		'Port':		FAST_MQTT_PORT
+		},
+
+	'MissionControl': {
+		'Scripts':	'~/vnavs/scripts'
+		}
+}
+
+def UpdateIni(IniPath=config_file_path):
+        config = configparser.ConfigParser()
+        config.read(IniPath)
+        for section_name, section_specs in ini_specs.items():
+            for item_name, item_default in section_specs.items():
+                try:
+                    current_value = config[section_name][item_name]
+                except KeyError:
+                    if section_name not in config.sections():
+                        config.add_section(section_name)
+                    config[section_name][item_name] = str(item_default)
+                #print(section_name, item_name, current_value)
+        with open(IniPath, 'w') as configfile:
+            config.write(configfile)
+
+if __name__ == '__main__':
+    if sys.argv[1] == 'i':
+        #UpdateIni(IniPath='test.ini')
+        UpdateIni()

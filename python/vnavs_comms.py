@@ -2,9 +2,11 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import configparser
 import json
 import multiprocessing
 import os
+import queue
 import select
 import socket
 import sys
@@ -14,35 +16,21 @@ import time
 
 import vnavs_const as vconst
 
-if sys.version_info[0] < 3:
-    import ConfigParser
-    import Queue
-else:
-    import configparser as ConfigParser
-    import queue as Queue
-
-config_file_path = os.path.expanduser("~/vnavs.ini")
-
 stop_process = False
 
 TCPIP_STD_BUFLEN = 4096
 TCPIP_STD_BUFLEN = 8192
 TCPIP_STD_BUFLEN = 1024
 TCPIP_XFR_BUFLEN = 4096
-FAST_MQTT_PORT = 4000
-DEFAULT_PORT = 3000
-HOST_LOCAL = '127.0.0.1'
-GLOBAL_IP = '8.8.8.8'			# Google DNS resolver
-NON_ROUTABLE_IP = '192.168.0.1'
 
 def host_primary_ip_address():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         # doesn't even have to be reachable
-        s.connect((NON_ROUTABLE_IP, 1))
+        s.connect((vconst.NON_ROUTABLE_IP, 1))
         ip_address = s.getsockname()[0]
     except:
-        ip_address = HOST_LOCAL
+        ip_address = vconst.HOST_LOCAL
     finally:
         s.close()
     return ip_address
@@ -112,7 +100,7 @@ def Streamer(q, q_len, host_ip, host_socket):
                     print("DISCARD")
                 lifo.append(stream)
                 q_len.value = len(lifo)
-            except Queue.Empty:
+            except queue.Empty:
                 #print("NO QUEUE", len(lifo))
                 break			# the interprocess queue is empty
         if len(lifo) > 0:
@@ -242,7 +230,7 @@ class QueueOne(object):
 
     def get_nowait(self):
         if self.message is None:
-            raise Queue.Empty
+            raise queue.Empty
         result, self.message = self.message, None
         return result
 
@@ -255,11 +243,11 @@ class SocketWrapper(object):
 				'os_socket',
 				'sent_ct', 'socket_host', 'socket_port', 'verbose')
 
-    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsServer=False, IsSocketBlocking=False, Port=DEFAULT_PORT, IsZeroOneProtocol=True,
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsServer=False, IsSocketBlocking=False, Port=vconst.DEFAULT_PORT, IsZeroOneProtocol=True,
 					Verbose=False):
         self.buffer_len = BufferLen
-        self.config = ConfigParser.SafeConfigParser()
-        self.config.readfp(open(config_file_path))
+        self.config = configparser.SafeConfigParser()
+        self.config.readfp(open(vconst.config_file_path))
         self.debug = 'c'
         self.socket_host = Host
         self.socket_port = Port
@@ -268,7 +256,7 @@ class SocketWrapper(object):
             try:
                 self.socket_host = self.config.get(IniSection, "Host")
                 self.socket_port = int(self.config.get(IniSection, "Port"))
-            except ConfigParser.NoSectionError:
+            except configparser.NoSectionError:
                 print("Ini section {} not found, using default host/port {}/{}".format(IniSection, Host, Port))
 
         # This can be a server or client. Either way self.os_socket is the primary socket
@@ -368,7 +356,7 @@ class SocketWrapper(object):
             # print("RCV", parts)
             self.ProcessMessage(s, parts)
 
-    def QueueMessage(self, message, s=None, QueueClass=Queue.Queue):
+    def QueueMessage(self, message, s=None, QueueClass=queue.Queue):
         # message is a string
         # print("ZZZ - Q request")
         if s is None:				# This should only be true if self.isServer is False
@@ -380,7 +368,7 @@ class SocketWrapper(object):
         if s not in self.outputSockets:
             self.outputSockets.append(s)
 
-    def QueueMessageZ(self, parts, s=None, QueueClass=Queue.Queue):
+    def QueueMessageZ(self, parts, s=None, QueueClass=queue.Queue):
         msg_parts = []
         for this in parts:
             msg_parts.append(this)
@@ -444,7 +432,7 @@ class SocketWrapper(object):
             # print("SOMETHING WRITEABLE")
             try:
                 next_msg = self.outputQueues[s].get_nowait()
-            except Queue.Empty:
+            except queue.Empty:
                 # print("No messages waiting so stop checking for writability.")
                 self.outputSockets.remove(s)
             except KeyError:
@@ -484,7 +472,7 @@ class SocketWrapper(object):
             self.Select(timeout=MaxAllowableWriteLatency)
 
 class SocketWrapperServer(SocketWrapper):
-    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsZeroOneProtocol=True, Port=DEFAULT_PORT, Verbose=False):
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsZeroOneProtocol=True, Port=vconst.DEFAULT_PORT, Verbose=False):
         # if IniSection is specified, it is used. Else specify Host/Port. Host of '' binds to all avalable networks.
         super().__init__(BufferLen=BufferLen, Host='', IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsServer=True, IsSocketBlocking=False, Port=Port, Verbose=Verbose)
 
@@ -757,7 +745,7 @@ class FastMqttServer(SocketWrapperServer):
     __slots__ = ('archive_dir', 'archiver', 'mission_id', 'no_archive', 'topics_last_message', 'subscriptions')
 
     def __init__(self, NoArchive=False, Verbose=False):
-        super().__init__(IniSection=FMQTT_INI_SECTION , Port=FAST_MQTT_PORT, Verbose=Verbose)
+        super().__init__(IniSection=FMQTT_INI_SECTION , Port=vconst.FAST_MQTT_PORT, Verbose=Verbose)
         self.topics_last_message = {}
         self.subscriptions = {}
         self.message_in_ct = 0
@@ -794,7 +782,7 @@ class FastMqttServer(SocketWrapperServer):
                         if this.mode == SUBSCRIPTION_MODE_LATEST:
                             queue_class = QueueOne
                         else:
-                            queue_class = Queue.Queue
+                            queue_class = queue.Queue
                         self.QueueMessageZ(['message', topic, repr(self.message_in_ct), payload], s=this.s, QueueClass=queue_class)
             if topic == vconst.mission_init_topic:
                 payload_dict = json.loads(payload)

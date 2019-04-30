@@ -22,8 +22,6 @@ else:
     import configparser as ConfigParser
     import queue as Queue
 
-config_file_path = os.path.expanduser("~/vnavs.ini")
-
 ARG_HOST = 'host'
 ARG_PORT = 'port'
 ARG_LOCAL = 'local'
@@ -342,7 +340,7 @@ def Publish(topic, payload, ResponseTopic=None, host=None, port=None, BlockIfNot
         return None
     return node.WaitForPayload(conf)
 
-def find_server(port=vcomms.FAST_MQTT_PORT, Verbose=False):
+def find_server(port=vconst.FAST_MQTT_PORT, Verbose=False):
     this_host_ip = vcomms.host_primary_ip_address()
     ix = this_host_ip.rfind('.')
     this_network = this_host_ip[:ix+1]
@@ -439,7 +437,7 @@ class mqtt_node(object):
         self.vnavs_mid = 0				# Publish() sequence
         self.block_if_not_connected = BlockIfNotConnected
         self.config = ConfigParser.SafeConfigParser()
-        self.config.readfp(open(config_file_path))
+        self.config.readfp(open(vconst.config_file_path))
         self.automatically_connect = AutomaticallyConnect
         if ARG_IMAGE_DIR in self.args:
             self.imageDir = self.args[ARG_IMAGE_DIR]

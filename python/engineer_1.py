@@ -209,6 +209,39 @@ class Position(object):
         setattr(o, 'distance_to_waypoint',  distance_to_waypoint)		# meters - haversine / great circle distance
         return o
 
+#
+# Find the center / average of a series of gps samples
+#
+# gps_samples is an iterable of indexable (latitude, longitude) samples.
+#
+# The samples are decimal degrees.
+#
+# This will fail of the range corsses the equator or prime meridian
+#
+# Adapted from: https://gist.github.com/amites/3718961
+#
+def find_center_of_gps_samples(gps_samples):
+    x = 0.0
+    y = 0.0
+    z = 0.0
+
+    for lat, lon in gps_samles:
+        lat = math.radians(float(lat))
+        lon = math.radians(float(lon))
+        x += math.cos(lat) * math.cos(lon)
+        y += math.cos(lat) * math.sin(lon)
+        z += math.sin(lat)
+
+    sample_ct = float(len(gps_samples))
+    x = x / sample_ct
+    y = y / sample_ct
+    z = z / sample_ct
+
+    center_logitude = math.degrees(math.atan2(y, x))
+    center_latitude = math.degrees(msth.atan2(z, sqrt(x * x + y * y)))
+    return (center_latitude, center_longitude)
+
+
 class GpsDevice(object):
     def __init__(self):
         self.gps_buffer = ''			# read buffer
