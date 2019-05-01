@@ -152,6 +152,13 @@ def PositionStringToPosition(position):
     Position(float(parts[0]), float(parts[1]))
     return Position
 
+class HelmOrder(object):
+    __slots__ = ('heading_to_waypoint', 'distance_to_waypoint')
+
+    def __init__(self, heading_to_waypoint, distance_to_waypoint):
+        self.heading_to_waypoint = heading_to_waypoint
+        self.distance_to_waypoint = distance_to_waypoint
+
 class Position(object):
     __slots__ = ('heading', 'latitude', 'longitude', 'speed')
 
@@ -204,15 +211,14 @@ class Position(object):
 
         #print("Position.DistanceToWaypoint()", `self`, `waypoint`, heading_to_waypoint, distance_to_waypoint)
 
-        o = object()
-        setattr(o, 'heading_to_waypoint', heading_to_waypoint)			# compass degrees
-        setattr(o, 'distance_to_waypoint',  distance_to_waypoint)		# meters - haversine / great circle distance
+        o = HelmOrder(heading_to_waypoint,						# compass degrees
+			distance_to_waypoint)					# meters - haversine / great circle distance
         return o
 
 #
 # Find the center / average of a series of gps samples
 #
-# gps_samples is an iterable of indexable (latitude, longitude) samples.
+# gps_samples is an iterable of Position objects.
 #
 # The samples are decimal degrees.
 #
@@ -225,9 +231,9 @@ def find_center_of_gps_samples(gps_samples):
     y = 0.0
     z = 0.0
 
-    for lat, lon in gps_samles:
-        lat = math.radians(float(lat))
-        lon = math.radians(float(lon))
+    for this in gps_samples:
+        lat = math.radians(float(this.latitude))
+        lon = math.radians(float(this.longitude))
         x += math.cos(lat) * math.cos(lon)
         y += math.cos(lat) * math.sin(lon)
         z += math.sin(lat)
@@ -237,9 +243,9 @@ def find_center_of_gps_samples(gps_samples):
     y = y / sample_ct
     z = z / sample_ct
 
-    center_logitude = math.degrees(math.atan2(y, x))
-    center_latitude = math.degrees(msth.atan2(z, sqrt(x * x + y * y)))
-    return (center_latitude, center_longitude)
+    center_longitude = math.degrees(math.atan2(y, x))
+    center_latitude = math.degrees(math.atan2(z, math.sqrt(x * x + y * y)))
+    return Position(center_latitude, center_longitude)
 
 
 class GpsDevice(object):
@@ -253,7 +259,9 @@ class GpsDevice(object):
 
     def OpenPort(self, baudrate=GPS_BAUD_9600):
         self.gps_port= serial.Serial(
-					port = '/dev/ttyAMA0',
+					# port = '/dev/ttyAMA0',
+					port = '/dev/serial0',
+					# port = '/dev/ttyS0',
 					baudrate = baudrate,
 					parity = serial.PARITY_NONE,
 					stopbits = serial.STOPBITS_ONE,
@@ -274,7 +282,7 @@ class GpsDevice(object):
         if self.next_eol_ix >= 0:
             pass				# process buffered sentence, don't read, risking timeout period
         else:
-            self.gps_buffer += self.gps_port.read(size=1024)
+            self.gps_buffer += self.gps_port.read(size=1024).decode(encoding='UTF-8', errors='ignore')
             self.next_eol_ix = self.gps_buffer.find('\r\n')
         if self.next_eol_ix < 0:
             last_sentence_str = None

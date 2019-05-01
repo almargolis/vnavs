@@ -1127,6 +1127,42 @@ class MissionMap(object):
         self.waypointColor = (0, 0, 255)		# red BGR
         self.navpointColor = "green"
         self.navpointColor = (0, 255, 0)
+        self.survey_ul = engineer_1.Position(0.0, 0.0)
+        self.survey_lr = engineer_1.Position(0.0, 0.0)
+
+    def InitSurvey(self):
+        # A survey is a plot of positions with some calculations made continuously.
+        self.navpoints = []
+        self.survey_min_latitudeZ = None
+        self.survey_max_latitudeZ = None
+        self.survey_min_longitudeZ = None
+        self.survey_max_longitudeZ = None
+        
+    def AppendSurveyPosition(self, position):
+        if self.navpoints is None:
+            self.InitSurvey()
+        self.navpoints.append(position)
+        latitudeZ = position.latitude + 90.0		# convert latitude (y-axis) to zero base 0 to 180
+        longitudeZ = position.longitude + 180.0		# convert longitude (x-axis) to zero base 0 to 360
+        if self.survey_min_latitudeZ is None:
+           self.survey_min_latitudeZ = latitudeZ
+           self.survey_max_latitudeZ = latitudeZ
+           self.survey_min_longitudeZ = longitudeZ
+           self.survey_max_longitudeZ = longitudeZ
+        if latitudeZ < self.survey_min_latitudeZ:
+           self.survey_min_latitudeZ = latitudeZ
+        if latitudeZ > self.survey_max_latitudeZ:
+           self.survey_max_latitudeZ = latitudeZ
+        if longitudeZ < self.survey_min_longitudeZ:
+           self.survey_min_longitudeZ = longitudeZ
+        if longitudeZ > self.survey_min_longitudeZ:
+           self.survey_max_longitudeZ = longitudeZ
+        self.survey_ul.latitude = self.survey_max_latitudeZ - 90.0
+        self.survey_lr.latitude = self.survey_min_latitudeZ - 90.0
+        self.survey_ul.longitude = self.survey_min_longitudeZ - 180.0
+        self.survey_lr.longitude = self.survey_max_longitudeZ - 180.0
+        d = self.survey_ul.DistanceToWaypoint(self.survey_lr)
+        self.survey_hypotenuse = d.distance_to_waypoint
 
     def FindExtentsLatLong(self, waypoints=None, navpoints=None):
         # waypoints are (latitude, longitude) or (y, x)

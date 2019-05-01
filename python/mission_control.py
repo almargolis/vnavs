@@ -623,6 +623,26 @@ def RunGps(waypoint):
             print("Distance:", d.distance_to_waypoint, "Heading:", d.heading_to_waypoint,
 			"Speed:", gps_device.data.gps_speed, "Quality:", gps_device.data.gps_quality)
 
+def LocateGps():
+    survey_map = navigator.MissionMap()
+    survey_map.InitSurvey()
+    gps_samples = []
+    p = None
+    d = 0.0
+    gps_device = engineer_1.GpsDevice()
+    while True:
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if have_new_position_data:
+            new_position = gps_device.PositionObject()
+            gps_samples.append(new_position)
+            survey_map.AppendSurveyPosition(new_position)
+            c = engineer_1.find_center_of_gps_samples(gps_samples)
+            if p is not None:
+                dw = c.DistanceToWaypoint(p)
+                d = dw.distance_to_waypoint
+            p = c
+            print(c.latitude, c.longitude, d, survey_map.survey_hypotenuse, "Latitude:", new_position.latitude, "Longitude:", new_position.longitude)
+
 def SaveGps(waypoint):
     gps_device = engineer_1.GpsDevice()
     gps_readings = []
@@ -645,6 +665,8 @@ if __name__ == '__main__':
         else:
             waypoint = None
         RunGps(waypoint)
+    elif sys.argv[1] == 'loc':
+        LocateGps()
     elif sys.argv[1] == 'save':
         waypoint = sys.argv[2]
         SaveGps(waypoint)
