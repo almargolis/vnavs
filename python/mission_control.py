@@ -624,6 +624,7 @@ def RunGps(waypoint):
 			"Speed:", gps_device.data.gps_speed, "Quality:", gps_device.data.gps_quality)
 
 def LocateGps():
+    data = navigator.PersistentData()
     survey_map = navigator.MissionMap()
     survey_map.InitSurvey()
     gps_samples = []
@@ -631,6 +632,8 @@ def LocateGps():
     d = 0.0
     gps_device = engineer_1.GpsDevice()
     while True:
+        if survey_map.SurveyCount() > 10:
+            break
         have_new_position_data = gps_device.UpdateGpsInfo()
         if have_new_position_data:
             new_position = gps_device.PositionObject()
@@ -642,6 +645,7 @@ def LocateGps():
                 d = dw.distance_to_waypoint
             p = c
             print(c.latitude, c.longitude, d, survey_map.survey_hypotenuse, "Latitude:", new_position.latitude, "Longitude:", new_position.longitude)
+    data.Put('Start', c)
 
 def SaveGps(waypoint):
     gps_device = engineer_1.GpsDevice()
