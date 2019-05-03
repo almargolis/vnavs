@@ -341,19 +341,20 @@ class SocketWrapper(object):
         if s in self.fragments:
             data = self.fragments[s] + data
             del self.fragments[s]
-        messages = data.split('\x01')
-        #print("PRC", data, "**", messages)
-        if data[-1] != '\x01':
+        messages = data.split(b'\x01')				# split data block into messages
+        #print("SocketWrapper.ProcessReceivedPacket()", data, "**", messages)
+        if data[-1] != b'\x01':
             # the last message isn't complete, save the fragment
             fragment = messages.pop()
             self.fragments[s] = fragment
         for this_message in messages:
+            this_message = this_message.decode('utf-8')
             if this_message == '':
                 # This happens routinely if the last character of data is \x01.
                 # split() always splits, so it creates an empty string at the end of the list.
                 continue
             parts = this_message.split('\x00')
-            # print("RCV", parts)
+            #print("SocketWrapper.ProcessReceivedPacket()", this_message, parts)
             self.ProcessMessage(s, parts)
 
     def QueueMessage(self, message, s=None, QueueClass=queue.Queue):
@@ -406,7 +407,8 @@ class SocketWrapper(object):
                     print('new connection from', client_address, 'total connections', len(self.inputSockets))
             else:
                 try:
-                    data = s.recv(self.buffer_len).decode('utf-8')	# convert bytes to string
+                    data = s.recv(self.buffer_len)		# data is bytes
+                    #print("SocketWrapper.Select() READ ", data)
                 except socket.error as e:
                     # I have seen e.errno = 54 and 104 as] "Connection reset by peer"
                     self.PrintError('Select:readable', e)
@@ -442,7 +444,9 @@ class SocketWrapper(object):
             else:
                 try:
                     # print("Select() trying to send:", next_msg)
-                    s.send(next_msg.encode('utf-8'))		# convert to bytes for Python 3.x
+                    if not isinstance(next_msg, bytes):
+                        next_msg = next_msg.encode('utf-8')	# convert to bytes for Python 3.x
+                    s.send(next_msg)
                     self.sent_ct += 1
                     if self.verbose:
                         print("SEND", next_msg)
@@ -671,7 +675,7 @@ class FileServer(SocketWrapperServer):
         while ix < len(c):
             rec = c[ix:ix+self.buffer_len]
             if ix == 0:
-                rec = repr(len(c)) + '\x00' + rec		# add file size to first block
+                rec = repr(len(c)).encode() + '\x00'.encode() + rec		# add file size to first block
             self.QueueMessage(rec, s=s)
             ix += self.buffer_len
 
