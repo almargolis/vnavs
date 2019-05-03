@@ -624,6 +624,8 @@ def RunGps(waypoint):
 			"Speed:", gps_device.data.gps_speed, "Quality:", gps_device.data.gps_quality)
 
 def LocateGps():
+    stop_time = time.time() + (int(sys.argv[2]) * 60)			# survey for this many minutes
+    location_name = sys.argv[3]
     data = navigator.PersistentData()
     survey_map = navigator.MissionMap()
     survey_map.InitSurvey()
@@ -631,9 +633,7 @@ def LocateGps():
     p = None
     d = 0.0
     gps_device = engineer_1.GpsDevice()
-    while True:
-        if survey_map.SurveyCount() > 10:
-            break
+    while stop_time > time.time():
         have_new_position_data = gps_device.UpdateGpsInfo()
         if have_new_position_data:
             new_position = gps_device.PositionObject()
@@ -645,7 +645,28 @@ def LocateGps():
                 d = dw.distance_to_waypoint
             p = c
             print(c.latitude, c.longitude, d, survey_map.survey_hypotenuse, "Latitude:", new_position.latitude, "Longitude:", new_position.longitude)
-    data.Put('Start', c)
+    data.Put(location_name, c)
+
+def DistanceGps():
+    data = navigator.PersistentData()
+    goal_name = sys.argv[2]
+    if len(sys.argv) > 3:
+        start_name = sys.argv[3]
+    else:
+        start_name = None
+    goal_location = data.Get(goal_name)
+    goal_position = engineer_1.Position(latitude=goal_location['latitude'], longitude=goal_location['longitude'])
+    gps_device = engineer_1.GpsDevice()
+    if start_name is not None:
+        start_location = data.Get(start_name)
+        start_position = engineer_1.Position(latitude=start_location['latitude'], longitude=start_location['longitude'])
+        gps_device.StartRelativeGpsPositioning(start_position)
+    while True:
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if have_new_position_data:
+            new_position = gps_device.PositionObject()
+            dw = new_position.DistanceToWaypoint(goal_position)
+            print(dw.distance_to_waypoint)
 
 def SaveGps(waypoint):
     gps_device = engineer_1.GpsDevice()
@@ -671,6 +692,8 @@ if __name__ == '__main__':
         RunGps(waypoint)
     elif sys.argv[1] == 'loc':
         LocateGps()
+    elif sys.argv[1] == 'dist':
+        DistanceGps()
     elif sys.argv[1] == 'save':
         waypoint = sys.argv[2]
         SaveGps(waypoint)

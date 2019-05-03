@@ -102,6 +102,8 @@ GPS_HEADING = 'gps_heading'
 GPS_QUALITY = 'gps_quality'
 GPS_LATITUDE = 'gps_latitude'
 GPS_LONGITUDE = 'gps_longitude'
+RAW_GPS_LATITUDE = 'raw_gps_latitude'
+RAW_GPS_LONGITUDE = 'raw_gps_longitude'
 GPS_TIMESTAMP = 'gps_timestamp'
 GPS_MODE = 'gps_mode'
 GPS_DIFFERENTIAL = 'gps_differential'
@@ -114,6 +116,10 @@ GpsDataDict.AddAttribute(GPS_QUALITY, DDT_STR, default_value='F',
 GpsDataDict.AddAttribute(GPS_LONGITUDE, DDT_FLOAT, default_value = 0,
 				min_value=0.0, limit_value=360.0)
 GpsDataDict.AddAttribute(GPS_LATITUDE, DDT_FLOAT, default_value = 0,
+				min_value=0.0, limit_value=360.0)
+GpsDataDict.AddAttribute(RAW_GPS_LONGITUDE, DDT_FLOAT, default_value = 0,
+				min_value=0.0, limit_value=360.0)
+GpsDataDict.AddAttribute(RAW_GPS_LATITUDE, DDT_FLOAT, default_value = 0,
 				min_value=0.0, limit_value=360.0)
 GpsDataDict.AddAttribute(GPS_QUALITY, DDT_STR, default_value='F',
 				values={'A': "Best Accuracy", 'B': "Reasonable Accuracy", 'F': 'Not Reliable'})
@@ -160,7 +166,7 @@ class HelmOrder(object):
         self.distance_to_waypoint = distance_to_waypoint
 
 class Position(object):
-    __slots__ = ('heading', 'latitude', 'longitude', 'speed')
+    __slots__ = ('heading', 'latitude', 'longitude', 'raw_latitude', 'raw_longitude', 'speed')
 
     def __init__(self, latitude, longitude, heading=None, speed=None):
         self.latitude = latitude		# float, decimal latitude
@@ -168,6 +174,8 @@ class Position(object):
         self.heading = heading			# float, 0 <= heading < -360, 0 = N, 90 = E (right)
 						#			180 = S, 270 = W (left)
         self.speed = speed			# float, m/s
+        self.raw_latitude = None
+        self.raw_longitude = None
 
     def __repr__(self):
         if self.heading is None:
@@ -255,6 +263,7 @@ class GpsDevice(object):
         self.gps_inited = False
         self.data = GpsDataRecord()
         self.last_sentence_str = None
+        self.relative_known_start_position = None
         self.OpenPort()
 
     def OpenPort(self, baudrate=GPS_BAUD_9600):
@@ -360,12 +369,37 @@ class GpsDevice(object):
             self.data.gps_quality = 'F'
         self.data.gps_mode = mode2
 
+    def StartRelativeGpsPositioning(self, position):
+        # Start moving as soon and fast as possible, need to exceed randomness of movement
+        if position is None:
+            # clear relative gps
+            self.relative_known_start_position = None
+        else:
+            self.relative_known_start_position = position
+            self.data.gps_longitude = position.longitude
+            self.data.gps_latitude = position.latitude
+            self.data.raw_gps_longitude = None
+            self.data.raw_gps_latitude = None
+
     def UpdateRmcSentence(self, parsed_sentence):
         speedRaw = parsed_sentence.data[6].strip()
         if speedRaw == '':
             return False		# on my sparkfun sensor, rest is also bad
-        self.data.gps_longitude = parsed_sentence.longitude
-        self.data.gps_latitude = parsed_sentence.latitude
+        if self.relative_known_start_position is None:
+            # return sensor reading
+            self.data.gps_longitude = parsed_sentence.longitude
+            self.data.gps_latitude = parsed_sentence.latitude
+            self.data.raw_gps_longitude = None
+            self.data.raw_gps_latitude = None
+        else:
+            # return a calculated position, based on a known starting point and incremental changes of sensor positions.
+            if self.data.raw_gps_longitude is None:
+                self.data.raw_gps_longitude = parsed_sentence.longitude
+                self.data.raw_gps_latitude = parsed_sentence.latitude
+            self.data.gps_longitude += (self.data.raw_gps_longitude - parsed_sentence.longitude)
+            self.data.gps_latitude += (self.data.raw_gps_latitude - parsed_sentence.latitude)
+            self.data.raw_gps_longitude = parsed_sentence.longitude
+            self.data.raw_gps_latitude = parsed_sentence.latitude
         try:
             self.data.gps_timestamp = parsed_sentence.datetime
             #self.data.gps_timestamp = 0
