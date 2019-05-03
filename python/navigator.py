@@ -248,7 +248,7 @@ class MissionStep(object):
         self.parm_mission = parm_mission
 
     def PublishNavigation(self, timer=6):
-        mission_specs = self.navigator.GetPersistentData('mission_specs')
+        mission_specs = self.navigator.persistent_data.Get('mission_specs')
         speed_method = mission_specs.get('speed_method', 'automatic')
 
         payload = {}
@@ -285,7 +285,7 @@ class StepData(MissionStep):
 
     def DoStageStepRun(self, loop_ct):
         self.parm_kword[vconst.dtype_field_name] = self.dtype		# save the data type with the data
-        self.navigator.PutPersistentData(self.dname, self.parm_kword)
+        self.navigator.persistent_data.Put(self.dname, self.parm_kword)
         return True
 
 class StepFollowLinePid(MissionStep):
@@ -364,7 +364,7 @@ class StepGpsWaypoint(MissionStep):
 
     def DoStageStepInit(self):
         key = self.parm_pos[0]
-        value = self.navigator.GetPersistentData(key)
+        value = self.navigator.persistent_data.Get(key)
         self.waypoint = engineer_1.PositionStringToPosition(value)
         self.speed = int(self.parm_pos[1])
         self.next_time = time.time()
@@ -767,7 +767,7 @@ class Mission(object):
             print("DoMission() Start Stage Step", self.active_stage.name, len(self.active_stage.steps), step.__class__.__name__, self.mission_state)
             print("DoMission() Step", step.parm_pos, step.parm_kword, step.parm_mission)
             for this in step.parm_mission:
-                d = self.navigator.GetPersistentData(this)
+                d = self.navigator.persistent_data.Get(this)
                 print("DoMission() Init Step Mission Data", this, d)
                 step.parm_kword.update(d)
             step.DoStageStepInit()
@@ -903,6 +903,74 @@ class NavStep(object):
         self.i_accumulator = 0
         self.derivative = 0
 
+class PersistentData(object):
+    def __init__(self):
+        self.persistent_data = None
+
+    def Save(self):
+        if self.persistent_data is None:
+            return					# its was never loaded
+
+        path = os.path.expanduser('~/vnavs.data')
+        d = json.dumps(self.persistent_data)
+        f = open(path, 'w')
+        #f.write(d.decode("utf-8"))
+        f.write(d)
+        f.close()
+
+    def Load(self):
+        if self.persistent_data is not None:
+            return					# its already loaded
+        path = os.path.expanduser('~/vnavs.data')
+        try:
+            f = open(path, 'r')
+        except IOError as e:
+            # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
+            if e.errno == 2:
+                self.persistent_data = {}
+                return
+            else:
+                raise
+
+        d = f.read()
+        f.close()
+        if d == "":
+            self.persistent_data = {}
+        else:
+            self.persistent_data = json.loads(d)
+
+    def Get(self, key):
+        self.Load()
+        return self.persistent_data.get(key, None)
+
+    def GetTransformed(self, key):
+        return self.Transform(self.Get(key))
+
+    def Put(self, key, value):
+        # value should be a dict-like, JSON serializable object
+        self.Load()
+        if isinstance(value, dict):
+            v = value
+        elif hasattr(value, '__slots__'):
+            v = {}
+            for this in value.__slots__:
+                v[this] = getattr(value, this)
+        else:
+            raise TypeError('Object of type % is not JSON serialiazable.'.format(value.__class__.__name__))
+        self.persistent_data[key] = v
+        self.Save()
+
+    def Transform(self, payload):
+        if (payload is None) or (not (vconst.dtype_field_name in payload)):
+            return payload
+        dtype = payload[vconst.dtype_field_name]
+        if dtype == 'object':
+            transform = object()
+            for key, value in payload.items():
+                setattr(transform, key, value)
+            return transform
+        return payload
+
 class navigator(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[
@@ -932,62 +1000,8 @@ class navigator(vmqtt.mqtt_node):
         self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
-        self.persistent_data = None
+        self.persistent_data = PersistentData()
 
-    def SavePersistentData(self):
-        if self.persistent_data is None:
-            return					# its was never loaded
-
-        path = os.path.expanduser('~/vnavs.data')
-        d = json.dumps(self.persistent_data)
-        f = open(path, 'w')
-        f.write(d.decode("utf-8"))
-        f.close()
-
-    def LoadPersistentData(self):
-        if self.persistent_data is not None:
-            return					# its already loaded
-        path = os.path.expanduser('~/vnavs.data')
-        try:
-            f = open(path, 'r')
-        except IOError as e:
-            # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
-            if e.errno == 2:
-                self.persistent_data = {}
-                return
-            else:
-                raise
-
-        d = f.read()
-        f.close()
-        if d == "":
-            self.persistent_data = {}
-        else:
-            self.persistent_data = json.loads(d)
-
-    def GetPersistentData(self, key):
-        self.LoadPersistentData()
-        return self.persistent_data.get(key, None)
-
-    def GetPersistentDataTransformed(self, key):
-        return self.TransformPersistentData(self.GetPersistentData(key))
-
-    def PutPersistentData(self, key, value):
-        # value should be a dict-like, JSON serializable object
-        self.LoadPersistentData()
-        self.persistent_data[key] = value
-        self.SavePersistentData()
-
-    def TransformPersistentData(self, payload):
-        if (payload is None) or (not (vconst.dtype_field_name in payload)):
-            return payload
-        dtype = payload[vconst.dtype_field_name]
-        if dtype == 'object':
-            transform = object()
-            for key, value in payload.items():
-                setattr(transform, key, value)
-            return transform
-        return payload
 
     def OnDataSave(self, payload):
         print("OnDataSave()", payload)
@@ -997,12 +1011,12 @@ class navigator(vmqtt.mqtt_node):
         else:
             key = payload['key']
             value = payload['value']
-        self.PutPersistentData(key, value)
+        self.persistent_data.Put(key, value)
 
     def OnDataGet(self, payload):
         print("OnDataGet()", payload)
         key = payload['key']
-        value = self.GetPersistentData(key)
+        value = self.persistent_data.Get(key)
         data_payload = vcomms.PrepareResponse(payload, ConfResponse=True)
         data_payload['key'] = key
         data_payload['value'] = value
@@ -1127,6 +1141,47 @@ class MissionMap(object):
         self.waypointColor = (0, 0, 255)		# red BGR
         self.navpointColor = "green"
         self.navpointColor = (0, 255, 0)
+        self.survey_ul = engineer_1.Position(0.0, 0.0)
+        self.survey_lr = engineer_1.Position(0.0, 0.0)
+
+    def InitSurvey(self):
+        # A survey is a plot of positions with some calculations made continuously.
+        self.navpoints = []
+        self.survey_min_latitudeZ = None
+        self.survey_max_latitudeZ = None
+        self.survey_min_longitudeZ = None
+        self.survey_max_longitudeZ = None
+      
+    def SurveyCount(self):
+        if self.navpoints is None:
+            return 0
+        return len(self.navpoints)
+  
+    def AppendSurveyPosition(self, position):
+        if self.navpoints is None:
+            self.InitSurvey()
+        self.navpoints.append(position)
+        latitudeZ = position.latitude + 90.0		# convert latitude (y-axis) to zero base 0 to 180
+        longitudeZ = position.longitude + 180.0		# convert longitude (x-axis) to zero base 0 to 360
+        if self.survey_min_latitudeZ is None:
+           self.survey_min_latitudeZ = latitudeZ
+           self.survey_max_latitudeZ = latitudeZ
+           self.survey_min_longitudeZ = longitudeZ
+           self.survey_max_longitudeZ = longitudeZ
+        if latitudeZ < self.survey_min_latitudeZ:
+           self.survey_min_latitudeZ = latitudeZ
+        if latitudeZ > self.survey_max_latitudeZ:
+           self.survey_max_latitudeZ = latitudeZ
+        if longitudeZ < self.survey_min_longitudeZ:
+           self.survey_min_longitudeZ = longitudeZ
+        if longitudeZ > self.survey_min_longitudeZ:
+           self.survey_max_longitudeZ = longitudeZ
+        self.survey_ul.latitude = self.survey_max_latitudeZ - 90.0
+        self.survey_lr.latitude = self.survey_min_latitudeZ - 90.0
+        self.survey_ul.longitude = self.survey_min_longitudeZ - 180.0
+        self.survey_lr.longitude = self.survey_max_longitudeZ - 180.0
+        d = self.survey_ul.DistanceToWaypoint(self.survey_lr)
+        self.survey_hypotenuse = d.distance_to_waypoint
 
     def FindExtentsLatLong(self, waypoints=None, navpoints=None):
         # waypoints are (latitude, longitude) or (y, x)

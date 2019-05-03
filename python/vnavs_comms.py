@@ -442,7 +442,9 @@ class SocketWrapper(object):
             else:
                 try:
                     # print("Select() trying to send:", next_msg)
-                    s.send(next_msg.encode('utf-8'))		# convert to bytes for Python 3.x
+                    if not isinstance(next_msg, bytes):
+                        next_msg = next_msg.encode('utf-8')	# convert to bytes for Python 3.x
+                    s.send(next_msg)
                     self.sent_ct += 1
                     if self.verbose:
                         print("SEND", next_msg)
@@ -671,7 +673,7 @@ class FileServer(SocketWrapperServer):
         while ix < len(c):
             rec = c[ix:ix+self.buffer_len]
             if ix == 0:
-                rec = repr(len(c)) + '\x00' + rec		# add file size to first block
+                rec = repr(len(c)).encode() + '\x00'.encode() + rec		# add file size to first block
             self.QueueMessage(rec, s=s)
             ix += self.buffer_len
 
