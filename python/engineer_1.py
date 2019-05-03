@@ -1,7 +1,5 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
 
+import dev_sense_hat
 import datetime
 import math
 import os
@@ -10,11 +8,6 @@ import pynmea2
 import serial
 import sys
 import time
-
-try:
-    from sense_hat import SenseHat
-except:
-    SenseHat = None
 
 
 import vnavs_mqtt as vmqtt
@@ -403,8 +396,7 @@ class engineer_1(vmqtt.mqtt_node):
         self.gps_device = GpsDevice()
         # self.gps_device.IncreaseUpdateRate()
         self.imu_data = ImuDataRecord()
-        self.sense = SenseHat()
-        self.sense.set_imu_config(False, True, False)
+        self.accellerometer = dev_sense_hat.accelerometer()
         self.last_acceleromter_timestamp = time.time()
 
     def DoLoop(self):
@@ -419,7 +411,7 @@ class engineer_1(vmqtt.mqtt_node):
             self.stats.Count('GpsMsg')
 
         if ((time.time() - self.last_acceleromter_timestamp) > SEND_ACCELEROMETER_PERIOD):
-            self.orientation = self.sense.get_orientation_degrees()
+            self.orientation = self.accelerometer.get_orientation_degrees()
             self.imu_data.imu_yaw = self.orientation['yaw']
             self.imu_data.imu_pitch = self.orientation['pitch']
             self.imu_data.imu_roll = self.orientation['roll']
