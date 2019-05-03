@@ -1,5 +1,8 @@
 
-import dev_sense_hat
+try:
+    import dev_sense_hat
+except:
+    dev_sense_hat = None
 import datetime
 import math
 import os

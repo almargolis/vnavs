@@ -638,6 +638,7 @@ def LocateGps():
     previous_center_position = None
     distance_from_previous_center = 0.0
     distance_from_last_position = 0.0
+    accumulated_movement = 0.0
     gps_device = engineer_1.GpsDevice()
     while True:
         if (stop_time is not None) and (stop_time <= time.time()):
@@ -654,10 +655,13 @@ def LocateGps():
             if previous_position is not None:
                 dw = new_position.DistanceToWaypoint(previous_position)
                 distance_from_last_position = dw.distance_to_waypoint
+                accumulated_movement += abs(distance_from_last_position)
+                #print(">>>", previous_position.latitude, previous_position.longitude, new_position.latitude, new_position.longitude)
+                print("{:f} {:f}".format(distance_from_last_position, accumulated_movement))
             previous_center_position = center_position
             previous_position = new_position
-            print("CENTER:", center_position.DMS(), distance_from_previous_center, survey_map.survey_hypotenuse,
-			"LOCATION:", distance_from_last_position, new_position.DMS())
+            # print("CENTER:", center_position.DMS(), distance_from_previous_center, survey_map.survey_hypotenuse,
+	#		"LOCATION:", distance_from_last_position, new_position.DMS())
     if location_name is not None:
         data.Put(location_name, c)
 
