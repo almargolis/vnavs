@@ -6,11 +6,14 @@ import json
 import sys
 import os
 
-try:
+if sys.argv[1] == 'gui':
     from PIL import ImageTk, Image
-except ImportError:
+    import easytk
+    from easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+else:
     ImageTk = None
     Image = None
+    easytk = None
 
 import threading
 import time
@@ -23,12 +26,6 @@ except ImportError:
     cv2 = None
     numpy = None
     OpticChiasm = None
-
-try:
-    import easytk
-    from easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
-except ImportError:
-    easytk = None
 
 import engineer_1
 import helmsman
@@ -626,6 +623,65 @@ def RunGps(waypoint):
             print("Distance:", d.distance_to_waypoint, "Heading:", d.heading_to_waypoint,
 			"Speed:", gps_device.data.gps_speed, "Quality:", gps_device.data.gps_quality)
 
+def LocateGps():
+    stop_time = None
+    location_name = None
+    if len(sys.argv) > 2:
+        stop_time = time.time() + (int(sys.argv[2]) * 60)			# survey for this many minutes
+    if len(sys.argv) > 3:
+        location_name = sys.argv[3]
+    data = navigator.PersistentData()
+    survey_map = navigator.MissionMap()
+    survey_map.InitSurvey()
+    gps_samples = []
+    previous_position = None
+    previous_center_position = None
+    distance_from_previous_center = 0.0
+    distance_from_last_position = 0.0
+    gps_device = engineer_1.GpsDevice()
+    while True:
+        if (stop_time is not None) and (stop_time <= time.time()):
+            break
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if have_new_position_data:
+            new_position = gps_device.PositionObject()
+            gps_samples.append(new_position)
+            survey_map.AppendSurveyPosition(new_position)
+            center_position = engineer_1.find_center_of_gps_samples(gps_samples)
+            if previous_center_position is not None:
+                dw = center_position.DistanceToWaypoint(previous_center_position)
+                distance_from_previous_center = dw.distance_to_waypoint
+            if previous_position is not None:
+                dw = new_position.DistanceToWaypoint(previous_position)
+                distance_from_last_position = dw.distance_to_waypoint
+            previous_center_position = center_position
+            previous_position = new_position
+            print("CENTER:", center_position.DMS(), distance_from_previous_center, survey_map.survey_hypotenuse,
+			"LOCATION:", distance_from_last_position, new_position.DMS())
+    if location_name is not None:
+        data.Put(location_name, c)
+
+def DistanceGps():
+    data = navigator.PersistentData()
+    goal_name = sys.argv[2]
+    if len(sys.argv) > 3:
+        start_name = sys.argv[3]
+    else:
+        start_name = None
+    goal_location = data.Get(goal_name)
+    goal_position = engineer_1.Position(latitude=goal_location['latitude'], longitude=goal_location['longitude'])
+    gps_device = engineer_1.GpsDevice()
+    if start_name is not None:
+        start_location = data.Get(start_name)
+        start_position = engineer_1.Position(latitude=start_location['latitude'], longitude=start_location['longitude'])
+        gps_device.StartRelativeGpsPositioning(start_position)
+    while True:
+        have_new_position_data = gps_device.UpdateGpsInfo()
+        if have_new_position_data:
+            new_position = gps_device.PositionObject()
+            dw = new_position.DistanceToWaypoint(goal_position)
+            print(dw.distance_to_waypoint)
+
 def SaveGps(waypoint):
     gps_device = engineer_1.GpsDevice()
     gps_readings = []
@@ -648,6 +704,10 @@ if __name__ == '__main__':
         else:
             waypoint = None
         RunGps(waypoint)
+    elif sys.argv[1] == 'loc':
+        LocateGps()
+    elif sys.argv[1] == 'dist':
+        DistanceGps()
     elif sys.argv[1] == 'save':
         waypoint = sys.argv[2]
         SaveGps(waypoint)

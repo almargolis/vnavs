@@ -1,13 +1,8 @@
-# from __future__ import absolute_import, division, print_function
-# from past.builtins import basestring    # pip install future
-# from builtins import (bytes, str, open, super, range,
-#                      zip, round, input, int, pow, object)
-
 import json
 import math
 import traceback
 import io
-import Queue as queue			# queue in v3
+import queue
 import sys
 import threading
 import time

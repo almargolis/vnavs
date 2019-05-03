@@ -195,7 +195,7 @@ class TkWidgetDef(object):
 		'list_items',
 		'opencv_im', 'parm_id', 'pil_im', 'pil_resize_ratio', 'rgb_im', 'right_col', 'row', 'row_span',
 		'scroll_container', 'scrollable_image',
-		'thumbnail', 'thumbnail_width', 'tkd', 'tkw', 'tkw_label',
+		'table', 'thumbnail', 'thumbnail_width', 'tkd', 'tkw', 'tkw_label',
 		'vbar', 'wname'
     )
 
@@ -220,6 +220,7 @@ class TkWidgetDef(object):
         self.last_used_colspan = 1
         self.row_span = 0		# height of this TkWidgetDef object (# of rows)
         self.col_span = 0		# width of this TkWidgetDef object (# of columns)
+        self.table = None		# table for scrollable table widget.
         self.thumbnail = None		# update this thumbnail if image is changed
         self.thumbnail_width = 0	# width of thumbnail
         self.children = []
