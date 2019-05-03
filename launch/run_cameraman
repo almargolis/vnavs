@@ -1,6 +1,5 @@
 #/bin/bash
 cd ~/projects/vnavs
 export VIRTUALENVWRAPPER_PYTHON=/usr/bin/python
-source /usr/local/bin/virtualenvwrapper.sh
-workon p2
+source ~/venv_cv/bin/activate
 python python/cameraman.py node
