@@ -1,7 +1,5 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
 
+import dev_sense_hat
 import datetime
 import math
 import os
@@ -10,11 +8,6 @@ import pynmea2
 import serial
 import sys
 import time
-
-try:
-    from sense_hat import SenseHat
-except:
-    SenseHat = None
 
 
 import vnavs_mqtt as vmqtt
@@ -76,7 +69,6 @@ class VnavsDataDict(object):
         return self.attributes.keys()
 
 class VnavsDataRecord(object):
-    __slots__ = ('_dict')
     _dict = None
 
     def __init__(self, payload=None):
@@ -107,6 +99,8 @@ GPS_HEADING = 'gps_heading'
 GPS_QUALITY = 'gps_quality'
 GPS_LATITUDE = 'gps_latitude'
 GPS_LONGITUDE = 'gps_longitude'
+RAW_GPS_LATITUDE = 'raw_gps_latitude'
+RAW_GPS_LONGITUDE = 'raw_gps_longitude'
 GPS_TIMESTAMP = 'gps_timestamp'
 GPS_MODE = 'gps_mode'
 GPS_DIFFERENTIAL = 'gps_differential'
@@ -119,6 +113,10 @@ GpsDataDict.AddAttribute(GPS_QUALITY, DDT_STR, default_value='F',
 GpsDataDict.AddAttribute(GPS_LONGITUDE, DDT_FLOAT, default_value = 0,
 				min_value=0.0, limit_value=360.0)
 GpsDataDict.AddAttribute(GPS_LATITUDE, DDT_FLOAT, default_value = 0,
+				min_value=0.0, limit_value=360.0)
+GpsDataDict.AddAttribute(RAW_GPS_LONGITUDE, DDT_FLOAT, default_value = 0,
+				min_value=0.0, limit_value=360.0)
+GpsDataDict.AddAttribute(RAW_GPS_LATITUDE, DDT_FLOAT, default_value = 0,
 				min_value=0.0, limit_value=360.0)
 GpsDataDict.AddAttribute(GPS_QUALITY, DDT_STR, default_value='F',
 				values={'A': "Best Accuracy", 'B': "Reasonable Accuracy", 'F': 'Not Reliable'})
@@ -157,8 +155,15 @@ def PositionStringToPosition(position):
     Position(float(parts[0]), float(parts[1]))
     return Position
 
+class HelmOrder(object):
+    __slots__ = ('heading_to_waypoint', 'distance_to_waypoint')
+
+    def __init__(self, heading_to_waypoint, distance_to_waypoint):
+        self.heading_to_waypoint = heading_to_waypoint
+        self.distance_to_waypoint = distance_to_waypoint
+
 class Position(object):
-    __slots__ = ('heading', 'latitude', 'longitude', 'speed')
+    __slots__ = ('heading', 'latitude', 'longitude', 'raw_latitude', 'raw_longitude', 'speed')
 
     def __init__(self, latitude, longitude, heading=None, speed=None):
         self.latitude = latitude		# float, decimal latitude
@@ -166,16 +171,18 @@ class Position(object):
         self.heading = heading			# float, 0 <= heading < -360, 0 = N, 90 = E (right)
 						#			180 = S, 270 = W (left)
         self.speed = speed			# float, m/s
+        self.raw_latitude = None
+        self.raw_longitude = None
 
     def __repr__(self):
         if self.heading is None:
             note = ''
         else:
-            note = '-> ' + `self.heading`
+            note = '-> ' + repr(self.heading)
         if self.speed is not None:
             if note != '':
                 note += ' '
-            note += '@ ' + `self.speed`
+            note += '@ ' + repr(self.speed)
         return '({}, {}, {})'.format(self.latitude, self.longitude, note)
 
     def DistanceToWaypoint(self, waypoint):
@@ -209,10 +216,81 @@ class Position(object):
 
         #print("Position.DistanceToWaypoint()", `self`, `waypoint`, heading_to_waypoint, distance_to_waypoint)
 
-        o = object()
-        setattr(o, 'heading_to_waypoint', heading_to_waypoint)			# compass degrees
-        setattr(o, 'distance_to_waypoint',  distance_to_waypoint)		# meters - haversine / great circle distance
+        o = HelmOrder(heading_to_waypoint,						# compass degrees
+			distance_to_waypoint)					# meters - haversine / great circle distance
         return o
+
+    def DMS(self):
+        # https://glenbambrick.com/2015/06/24/dd-to-dms/
+        # math.modf() splits whole number and decimal into tuple
+        # eg 53.3478 becomes (0.3478, 53)
+        split_degx = math.modf(self.longitude)
+    
+        # the whole number [index 1] is the degrees
+        degrees_x = int(split_degx[1])
+
+        # multiply the decimal part by 60: 0.3478 * 60 = 20.868
+        # split the whole number part of the total as the minutes: 20
+        # abs() absoulte value - no negative
+        minutes_x = abs(int(math.modf(split_degx[0] * 60)[1]))
+
+        # multiply the decimal part of the split above by 60 to get the seconds
+        # 0.868 x 60 = 52.08, round excess decimal places to 2 places
+        # abs() absoulte value - no negative
+        seconds_x = abs(round(math.modf(split_degx[0] * 60)[0] * 60,2))
+        if degrees_x < 0:
+            EorW = "W"
+        else:
+            EorW = "E"
+
+        # repeat for latitude
+        split_degy = math.modf(self.latitude)
+        degrees_y = int(split_degy[1])
+        minutes_y = abs(int(math.modf(split_degy[0] * 60)[1]))
+        seconds_y = abs(round(math.modf(split_degy[0] * 60)[0] * 60,2))
+        if degrees_y < 0:
+            NorS = "S"
+        else:
+            NorS = "N"
+
+        # abs() remove negative from degrees, was only needed for if-else above
+        longitude_dms = str(abs(degrees_x)) + u"\u00b0 " + str(minutes_x) + "' " + str(seconds_x) + "\" " + EorW
+        latitude_dms = str(abs(degrees_y)) + u"\u00b0 " + str(minutes_y) + "' " + str(seconds_y) + "\" " + NorS
+        return (latitude_dms, longitude_dms)
+
+#
+# Find the center / average of a series of gps samples
+#
+# gps_samples is an iterable of Position objects.
+#
+# The samples are decimal degrees.
+#
+# This will fail of the range corsses the equator or prime meridian
+#
+# Adapted from: https://gist.github.com/amites/3718961
+#
+def find_center_of_gps_samples(gps_samples):
+    x = 0.0
+    y = 0.0
+    z = 0.0
+
+    for this in gps_samples:
+        lat = math.radians(float(this.latitude))
+        lon = math.radians(float(this.longitude))
+        x += math.cos(lat) * math.cos(lon)
+        y += math.cos(lat) * math.sin(lon)
+        z += math.sin(lat)
+
+    sample_ct = float(len(gps_samples))
+    x = x / sample_ct
+    y = y / sample_ct
+    z = z / sample_ct
+
+    center_longitude = math.degrees(math.atan2(y, x))
+    center_latitude = math.degrees(math.atan2(z, math.sqrt(x * x + y * y)))
+    return Position(center_latitude, center_longitude)
+
+
 
 class GpsDevice(object):
     def __init__(self):
@@ -221,11 +299,14 @@ class GpsDevice(object):
         self.gps_inited = False
         self.data = GpsDataRecord()
         self.last_sentence_str = None
+        self.relative_known_start_position = None
         self.OpenPort()
 
     def OpenPort(self, baudrate=GPS_BAUD_9600):
         self.gps_port= serial.Serial(
-					port = '/dev/ttyAMA0',
+					# port = '/dev/ttyAMA0',
+					port = '/dev/serial0',
+					# port = '/dev/ttyS0',
 					baudrate = baudrate,
 					parity = serial.PARITY_NONE,
 					stopbits = serial.STOPBITS_ONE,
@@ -246,7 +327,7 @@ class GpsDevice(object):
         if self.next_eol_ix >= 0:
             pass				# process buffered sentence, don't read, risking timeout period
         else:
-            self.gps_buffer += self.gps_port.read(size=1024)
+            self.gps_buffer += self.gps_port.read(size=1024).decode(encoding='UTF-8', errors='ignore')
             self.next_eol_ix = self.gps_buffer.find('\r\n')
         if self.next_eol_ix < 0:
             last_sentence_str = None
@@ -274,14 +355,14 @@ class GpsDevice(object):
 
     def IncreaseUpdateRate(self):
         msg_str = "$PMTK251,38400*27" + '\r\n'
-        print("SendGpsCommand", `msg_str`)
+        print("SendGpsCommand", repr(msg_str))
         self.gps_port.write(msg_str.encode())				# convert to bytes and write
         self.gps_port.baudrate = GPS_BAUD_38400
         #
         msg_str = "$PMTK220,1000*1F" + '\r\n'				# 1 Hz
         msg_str = "$PMTK220,200*2C" + '\r\n'				# 5 Hz
         msg_str = "$PMTK220,100*2F" + '\r\n'				# 10 Hz
-        print("SendGpsCommand", `msg_str`)
+        print("SendGpsCommand", repr(msg_str))
         self.gps_port.write(msg_str.encode())				# convert to bytes and write
 
     def SendGpsCommand(self, talker, msgtype, parms):
@@ -289,7 +370,7 @@ class GpsDevice(object):
         msg_object = pynmea2.GGA(talker, msgtype, parms)		# this add leading $ and trailing checksum
         msg_str = str(msg_object) + '\c\n'
         msg_str = "$PMTK220,200*2C" + '\r\n'
-        print("SendGpsCommand", `msg_str`)
+        print("SendGpsCommand", repr(msg_str))
         self.gps_port.write(msg_str.encode())				# convert to bytes and write
 
     def UpdateGsaSentence(self, parsed_sentence):
@@ -324,12 +405,37 @@ class GpsDevice(object):
             self.data.gps_quality = 'F'
         self.data.gps_mode = mode2
 
+    def StartRelativeGpsPositioning(self, position):
+        # Start moving as soon and fast as possible, need to exceed randomness of movement
+        if position is None:
+            # clear relative gps
+            self.relative_known_start_position = None
+        else:
+            self.relative_known_start_position = position
+            self.data.gps_longitude = position.longitude
+            self.data.gps_latitude = position.latitude
+            self.data.raw_gps_longitude = None
+            self.data.raw_gps_latitude = None
+
     def UpdateRmcSentence(self, parsed_sentence):
         speedRaw = parsed_sentence.data[6].strip()
         if speedRaw == '':
             return False		# on my sparkfun sensor, rest is also bad
-        self.data.gps_longitude = parsed_sentence.longitude
-        self.data.gps_latitude = parsed_sentence.latitude
+        if self.relative_known_start_position is None:
+            # return sensor reading
+            self.data.gps_longitude = parsed_sentence.longitude
+            self.data.gps_latitude = parsed_sentence.latitude
+            self.data.raw_gps_longitude = None
+            self.data.raw_gps_latitude = None
+        else:
+            # return a calculated position, based on a known starting point and incremental changes of sensor positions.
+            if self.data.raw_gps_longitude is None:
+                self.data.raw_gps_longitude = parsed_sentence.longitude
+                self.data.raw_gps_latitude = parsed_sentence.latitude
+            self.data.gps_longitude += (self.data.raw_gps_longitude - parsed_sentence.longitude)
+            self.data.gps_latitude += (self.data.raw_gps_latitude - parsed_sentence.latitude)
+            self.data.raw_gps_longitude = parsed_sentence.longitude
+            self.data.raw_gps_latitude = parsed_sentence.latitude
         try:
             self.data.gps_timestamp = parsed_sentence.datetime
             #self.data.gps_timestamp = 0
@@ -342,7 +448,7 @@ class GpsDevice(object):
             speedKnots = float(speedRaw)
             self.data.gps_speed = speedKnots * METERS_PER_SECOND_PER_KNOT
         except ValueError:
-            print("Invalid RMC speed", `speedRaw`)
+            print("Invalid RMC speed", repr(speedRaw))
         heading_raw = parsed_sentence.data[7].strip()
         if heading_raw == '':
             pass				# None? only saw it at startup now
@@ -350,7 +456,7 @@ class GpsDevice(object):
             try:
                 self.data.gps_heading = float(heading_raw)	# degrees clockwise from North
             except ValueError:
-                print("Invalid RMC heading", `heading_raw`)
+                print("Invalid RMC heading", repr(heading_raw))
         self.gps_differential = parsed_sentence.data[11]	# A=autonomous, D=differeential GPS
         """
         print("RMC %s %s %s %4.7f %s %s %4.7f Hdg %4.2f Quality %s" % (
@@ -403,8 +509,7 @@ class engineer_1(vmqtt.mqtt_node):
         self.gps_device = GpsDevice()
         # self.gps_device.IncreaseUpdateRate()
         self.imu_data = ImuDataRecord()
-        self.sense = SenseHat()
-        self.sense.set_imu_config(False, True, False)
+        self.accellerometer = dev_sense_hat.accelerometer()
         self.last_acceleromter_timestamp = time.time()
 
     def DoLoop(self):
@@ -419,7 +524,7 @@ class engineer_1(vmqtt.mqtt_node):
             self.stats.Count('GpsMsg')
 
         if ((time.time() - self.last_acceleromter_timestamp) > SEND_ACCELEROMETER_PERIOD):
-            self.orientation = self.sense.get_orientation_degrees()
+            self.orientation = self.accelerometer.get_orientation_degrees()
             self.imu_data.imu_yaw = self.orientation['yaw']
             self.imu_data.imu_pitch = self.orientation['pitch']
             self.imu_data.imu_roll = self.orientation['roll']
@@ -490,7 +595,7 @@ def TestGps():
         have_new_position_data = gps_device.UpdateGpsInfo()
         if gps_device.last_sentence_str is not None:
             print("GPS", gps_device.gps_port.baudrate)
-            print("GPS", `gps_device.last_sentence_str`)
+            print("GPS", repr(gps_device.last_sentence_str))
 
 def RunNode():
     h = engineer_1()
@@ -498,6 +603,8 @@ def RunNode():
     h.Disconnect()
 
 if __name__ == '__main__':
+    p = Position( 37.62747778787879, -122.45387113636365)
+    print(p.DMS())
     if sys.argv[1] == 'node':
         RunNode()
     elif sys.argv[1] == 'testimu':

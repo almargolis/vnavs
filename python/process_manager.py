@@ -1,6 +1,3 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
 import os
 import platform
 import subprocess
@@ -116,7 +113,7 @@ class process(vmqtt.mqtt_node):
         for this in flist:
             if this[-ext_len:] == vcomms.FMQTT_LOG_EXTENSION:
                 log_list.append(this)
-        result_payload = self.PrepareResponse(payload, ConfResponse=True)
+        result_payload = vcomms.PrepareResponse(payload, ConfResponse=True)
         result_payload['log_list'] = log_list
         result_payload['free_space'] = free_space
         self.Publish(vconst.process_result_topic, result_payload)

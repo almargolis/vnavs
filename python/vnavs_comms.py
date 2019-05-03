@@ -2,9 +2,11 @@ from __future__ import absolute_import, division, print_function
 from builtins import (bytes, str, open, super, range,
                       zip, round, input, int, pow, object)
 
+import configparser
 import json
 import multiprocessing
 import os
+import queue
 import select
 import socket
 import sys
@@ -14,24 +16,64 @@ import time
 
 import vnavs_const as vconst
 
-if sys.version_info[0] < 3:
-    import ConfigParser
-    import Queue
-else:
-    import configparser as ConfigParser
-    import queue as Queue
-
-config_file_path = os.path.expanduser("~/vnavs.ini")
-
 stop_process = False
 
 TCPIP_STD_BUFLEN = 4096
 TCPIP_STD_BUFLEN = 8192
 TCPIP_STD_BUFLEN = 1024
 TCPIP_XFR_BUFLEN = 4096
-FAST_MQTT_PORT = 4000
-DEFAULT_PORT = 3000
-HOST_LOCAL = '127.0.0.1'
+
+def host_primary_ip_address():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # doesn't even have to be reachable
+        s.connect((vconst.NON_ROUTABLE_IP, 1))
+        ip_address = s.getsockname()[0]
+    except:
+        ip_address = vconst.HOST_LOCAL
+    finally:
+        s.close()
+    return ip_address
+
+def JsonShowTypes(payload):
+    for key, value in payload.items():
+        print(key, value.__class__.__name__, value)
+
+class JsonNumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.int64):
+            obj_out = int(obj)
+            #print("JsonNumpyEncoder()", obj.__class__.__name__, obj_out.__class__.__name__)
+            return obj_out
+        return super().default(obj)
+
+def PrepareMessage(sender_name, sender_pid, sender_seq, topic, payload, ConfRequest=None):
+    payload['_topic'] = topic
+    payload['_sender'] = sender_name
+    payload['_sendTime'] = time.time()
+    payload['_sendPid'] = sender_pid
+    payload['_sendSeq'] = sender_seq
+    if ConfRequest is not None:
+        payload['_confRequest'] = ConfRequest
+    j = json.dumps(payload, cls=JsonNumpyEncoder)
+    return j
+
+def PrepareResponse(payload, ConfResponse=False):
+    # Prepares payload to be used as a response.
+    # Copy identifier fields so recipients can match source message
+    # so it knows request is completed and where to continue its process.
+    # Info about original message is always there thanks to Publish()
+    new_payload = {}
+    if '_topic' in payload:
+        new_payload['_ackTopic'] = payload['_topic']
+    if '_sendPid' in payload:
+        new_payload['_ackPid'] = payload['_sendPid']
+    if '_sendSeq' in payload:
+        new_payload['_ackSeq'] = payload['_sendSeq']
+    if ConfResponse:
+        if '_confRequest' in payload:
+            new_payload['_isConfirmation'] = payload['_confRequest']
+    return new_payload
 
 #
 # Streamer() is the socket_xfer writer function which runs in its own process.
@@ -58,7 +100,7 @@ def Streamer(q, q_len, host_ip, host_socket):
                     print("DISCARD")
                 lifo.append(stream)
                 q_len.value = len(lifo)
-            except Queue.Empty:
+            except queue.Empty:
                 #print("NO QUEUE", len(lifo))
                 break			# the interprocess queue is empty
         if len(lifo) > 0:
@@ -188,7 +230,7 @@ class QueueOne(object):
 
     def get_nowait(self):
         if self.message is None:
-            raise Queue.Empty
+            raise queue.Empty
         result, self.message = self.message, None
         return result
 
@@ -201,11 +243,11 @@ class SocketWrapper(object):
 				'os_socket',
 				'sent_ct', 'socket_host', 'socket_port', 'verbose')
 
-    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsServer=False, IsSocketBlocking=False, Port=DEFAULT_PORT, IsZeroOneProtocol=True,
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsServer=False, IsSocketBlocking=False, Port=vconst.DEFAULT_PORT, IsZeroOneProtocol=True,
 					Verbose=False):
         self.buffer_len = BufferLen
-        self.config = ConfigParser.SafeConfigParser()
-        self.config.readfp(open(config_file_path))
+        self.config = configparser.SafeConfigParser()
+        self.config.readfp(open(vconst.config_file_path))
         self.debug = 'c'
         self.socket_host = Host
         self.socket_port = Port
@@ -214,7 +256,7 @@ class SocketWrapper(object):
             try:
                 self.socket_host = self.config.get(IniSection, "Host")
                 self.socket_port = int(self.config.get(IniSection, "Port"))
-            except ConfigParser.NoSectionError:
+            except configparser.NoSectionError:
                 print("Ini section {} not found, using default host/port {}/{}".format(IniSection, Host, Port))
 
         # This can be a server or client. Either way self.os_socket is the primary socket
@@ -299,10 +341,7 @@ class SocketWrapper(object):
         if s in self.fragments:
             data = self.fragments[s] + data
             del self.fragments[s]
-        if sys.version_info[0] < 3:
-            messages = data.split('\x01')
-        else:
-            messages = data.split(b'\x01')
+        messages = data.split('\x01')
         #print("PRC", data, "**", messages)
         if data[-1] != '\x01':
             # the last message isn't complete, save the fragment
@@ -313,15 +352,13 @@ class SocketWrapper(object):
                 # This happens routinely if the last character of data is \x01.
                 # split() always splits, so it creates an empty string at the end of the list.
                 continue
-            if sys.version_info[0] < 3:
-                parts = this_message.split('\x00')
-            else:
-                parts = this_message.split(b'\x00')
-            #print("RCV", parts)
+            parts = this_message.split('\x00')
+            # print("RCV", parts)
             self.ProcessMessage(s, parts)
 
-    def QueueMessage(self, message, s=None, QueueClass=Queue.Queue):
+    def QueueMessage(self, message, s=None, QueueClass=queue.Queue):
         # message is a string
+        # print("ZZZ - Q request")
         if s is None:				# This should only be true if self.isServer is False
             s = self.os_socket
         if not s in self.outputQueues:
@@ -331,12 +368,13 @@ class SocketWrapper(object):
         if s not in self.outputSockets:
             self.outputSockets.append(s)
 
-    def QueueMessageZ(self, parts, s=None, QueueClass=Queue.Queue):
+    def QueueMessageZ(self, parts, s=None, QueueClass=queue.Queue):
         msg_parts = []
         for this in parts:
             msg_parts.append(this)
             msg_parts.append('\x00')
         msg_parts.append('\x01')
+        # print("YYY", msg_parts)
         self.QueueMessage(''.join(msg_parts), s=s, QueueClass=QueueClass)
 
     def Select(self, timeout=1.0):
@@ -358,7 +396,7 @@ class SocketWrapper(object):
         #print('SELECT waiting for the next event', self.inputSockets, self.outputSockets, timeout)
         readable, writable, exceptional = select.select(self.inputSockets, self.outputSockets, self.inputSockets, timeout)
         for s in readable:
-            #print("READABLE")
+            # print("Select() READABLE")
             if self.isServer and (s is self.os_socket):
                 # A "readable" server socket is ready to accept a connection
                 connection, client_address = s.accept()
@@ -368,7 +406,7 @@ class SocketWrapper(object):
                     print('new connection from', client_address, 'total connections', len(self.inputSockets))
             else:
                 try:
-                    data = s.recv(self.buffer_len)
+                    data = s.recv(self.buffer_len).decode('utf-8')	# convert bytes to string
                 except socket.error as e:
                     # I have seen e.errno = 54 and 104 as] "Connection reset by peer"
                     self.PrintError('Select:readable', e)
@@ -391,11 +429,11 @@ class SocketWrapper(object):
                     # Interpret empty result as closed connection
                     self.CloseClientConnection(s)
         for s in writable:
-            #print("SOMETHING WRITABLE")
+            # print("SOMETHING WRITEABLE")
             try:
                 next_msg = self.outputQueues[s].get_nowait()
-            except Queue.Empty:
-                # No messages waiting so stop checking for writability.
+            except queue.Empty:
+                # print("No messages waiting so stop checking for writability.")
                 self.outputSockets.remove(s)
             except KeyError:
                 # This happened to a client *mission_control.py). Apparently when FastMqtt crashed.
@@ -403,10 +441,10 @@ class SocketWrapper(object):
                 pass			# socket buffer available, but no messages to send
             else:
                 try:
-                    if sys.version_info[0] < 3:
-                        s.send(next_msg)
-                    else:
-                        s.send(next_msg.encode('utf-8'))		# convert to bytes for Python 3.x
+                    # print("Select() trying to send:", next_msg)
+                    if not isinstance(next_msg, bytes):
+                        next_msg = next_msg.encode('utf-8')	# convert to bytes for Python 3.x
+                    s.send(next_msg)
                     self.sent_ct += 1
                     if self.verbose:
                         print("SEND", next_msg)
@@ -436,7 +474,7 @@ class SocketWrapper(object):
             self.Select(timeout=MaxAllowableWriteLatency)
 
 class SocketWrapperServer(SocketWrapper):
-    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsZeroOneProtocol=True, Port=DEFAULT_PORT, Verbose=False):
+    def __init__(self, BufferLen=TCPIP_STD_BUFLEN, Host='', IniSection=None, IsZeroOneProtocol=True, Port=vconst.DEFAULT_PORT, Verbose=False):
         # if IniSection is specified, it is used. Else specify Host/Port. Host of '' binds to all avalable networks.
         super().__init__(BufferLen=BufferLen, Host='', IniSection=IniSection, IsZeroOneProtocol=IsZeroOneProtocol, IsServer=True, IsSocketBlocking=False, Port=Port, Verbose=Verbose)
 
@@ -635,7 +673,7 @@ class FileServer(SocketWrapperServer):
         while ix < len(c):
             rec = c[ix:ix+self.buffer_len]
             if ix == 0:
-                rec = repr(len(c)) + '\x00' + rec		# add file size to first block
+                rec = repr(len(c)).encode() + '\x00'.encode() + rec		# add file size to first block
             self.QueueMessage(rec, s=s)
             ix += self.buffer_len
 
@@ -702,22 +740,27 @@ class Subscription(object):
     def __init__(self, topic, mode, s):
         self.topic = topic
         self.mode = mode
-        self.messsage = None
+        self.message = None
         self.s = s				# socket - this is the id of the subsriber
 
 class FastMqttServer(SocketWrapperServer):
-    __slots__ = ('archive_dir', 'archiver', 'mission_id', 'topics_last_message', 'subscriptions')
+    __slots__ = ('archive_dir', 'archiver', 'mission_id', 'no_archive', 'topics_last_message', 'subscriptions')
 
-    def __init__(self, Verbose=False):
-        super().__init__(IniSection=FMQTT_INI_SECTION , Port=FAST_MQTT_PORT, Verbose=Verbose)
+    def __init__(self, NoArchive=False, Verbose=False):
+        super().__init__(IniSection=FMQTT_INI_SECTION , Port=vconst.FAST_MQTT_PORT, Verbose=Verbose)
         self.topics_last_message = {}
         self.subscriptions = {}
         self.message_in_ct = 0
         self.message_out_ct = 0
         self.mission_id = None
-        self.archiver = MessageArchiver()
-        self.archive_dir = self.config.get(FMQTT_INI_SECTION, FMQTT_ARCHIVE_DIR)
-        self.archive_dir = os.path.expanduser(self.archive_dir)               # this expands tilde in path
+        self.no_archive = NoArchive
+        if self.no_archive:
+            self.archiver = None
+            self.archive_dir = None
+        else:
+            self.archiver = MessageArchiver()
+            self.archive_dir = self.config.get(FMQTT_INI_SECTION, FMQTT_ARCHIVE_DIR)
+            self.archive_dir = os.path.expanduser(self.archive_dir)               # this expands tilde in path
 
     def CloseClientConnection(self, s):
         super().CloseClientConnection(s)
@@ -741,7 +784,7 @@ class FastMqttServer(SocketWrapperServer):
                         if this.mode == SUBSCRIPTION_MODE_LATEST:
                             queue_class = QueueOne
                         else:
-                            queue_class = Queue.Queue
+                            queue_class = queue.Queue
                         self.QueueMessageZ(['message', topic, repr(self.message_in_ct), payload], s=this.s, QueueClass=queue_class)
             if topic == vconst.mission_init_topic:
                 payload_dict = json.loads(payload)
@@ -757,7 +800,15 @@ class FastMqttServer(SocketWrapperServer):
                 self.archiver.Close()
             elif topic == vconst.mission_end_topic:
                 pass
-            self.archiver.Archive(self.message_in_ct, server_time, payload)
+            elif topic == vconst.system_whoru:
+                # print("WHORU")
+                mid = 0
+                payload_dict = json.loads(payload)
+                payload_dict = PrepareResponse(payload_dict, ConfResponse=True)
+                j = PrepareMessage('FastMqtt', 0, 0, vconst.system_server, payload_dict)
+                self.QueueMessageZ(['message', vconst.system_server, repr(mid), j], s=s)
+            if self.archiver is not None:
+                self.archiver.Archive(self.message_in_ct, server_time, payload)
         elif action == 'read':
             topic = message[1]
             if topic in self.topics_last_message:
@@ -776,6 +827,9 @@ class FastMqttServer(SocketWrapperServer):
             self.subscriptions[topic][s] = subscription			# keep latest subscription if duplicate
             print("SUBSCRIPTIONS", topic, len(self.subscriptions[topic]))
 
+def StatusInfo():
+    print("This host IP Address:", host_primary_ip_address())
+
 if __name__ == "__main__":
     if 'verbose' in sys.argv:
         print("VERBOSE")
@@ -783,10 +837,16 @@ if __name__ == "__main__":
     else:
         print("QUIET")
         verbose = False
+    if 'noarchive' in sys.argv:
+        noarchive = True
+    else:
+        noarchive = False
     if sys.argv[1] == 'f':
         #s = FileServer(Verbose=verbose)
         s = FileServer(Verbose=False)
         s.Serve()
     elif sys.argv[1] == 'm':
-        s = FastMqttServer(Verbose=verbose)
+        s = FastMqttServer(NoArchive=noarchive, Verbose=verbose)
         s.Serve()
+    elif sys.argv[1] == 's':
+        StatusInfo()
