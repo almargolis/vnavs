@@ -341,19 +341,20 @@ class SocketWrapper(object):
         if s in self.fragments:
             data = self.fragments[s] + data
             del self.fragments[s]
-        messages = data.split(b'\x01')
-        #print("PRC", data, "**", messages)
-        if data[-1] != '\x01':
+        messages = data.split(b'\x01')				# split data block into messages
+        #print("SocketWrapper.ProcessReceivedPacket()", data, "**", messages)
+        if data[-1] != b'\x01':
             # the last message isn't complete, save the fragment
             fragment = messages.pop()
             self.fragments[s] = fragment
         for this_message in messages:
+            this_message = this_message.decode('utf-8')
             if this_message == '':
                 # This happens routinely if the last character of data is \x01.
                 # split() always splits, so it creates an empty string at the end of the list.
                 continue
-            parts = this_message.split(b'\x00')
-            # print("RCV", parts)
+            parts = this_message.split('\x00')
+            #print("SocketWrapper.ProcessReceivedPacket()", this_message, parts)
             self.ProcessMessage(s, parts)
 
     def QueueMessage(self, message, s=None, QueueClass=queue.Queue):
@@ -407,6 +408,7 @@ class SocketWrapper(object):
             else:
                 try:
                     data = s.recv(self.buffer_len)		# data is bytes
+                    #print("SocketWrapper.Select() READ ", data)
                 except socket.error as e:
                     # I have seen e.errno = 54 and 104 as] "Connection reset by peer"
                     self.PrintError('Select:readable', e)

@@ -1,5 +1,4 @@
 
-import dev_sense_hat
 import datetime
 import math
 import os

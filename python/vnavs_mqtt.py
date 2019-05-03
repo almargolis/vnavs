@@ -109,7 +109,7 @@ class FileClient(vcomms.SocketWrapperClient):
     def RecvData(self, s, data):
         self.buffer += data
         self.buf_sum += len(data)
-        p = self.buffer.find('\x00')
+        p = self.buffer.find(b'\x00')
         #print("RCV DATA", len(data), len(self.buffer), self.buf_sum)
         if p > 0:
             try:
