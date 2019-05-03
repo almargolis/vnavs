@@ -223,6 +223,44 @@ class Position(object):
 			distance_to_waypoint)					# meters - haversine / great circle distance
         return o
 
+    def DMS(self):
+        # https://glenbambrick.com/2015/06/24/dd-to-dms/
+        # math.modf() splits whole number and decimal into tuple
+        # eg 53.3478 becomes (0.3478, 53)
+        split_degx = math.modf(self.longitude)
+    
+        # the whole number [index 1] is the degrees
+        degrees_x = int(split_degx[1])
+
+        # multiply the decimal part by 60: 0.3478 * 60 = 20.868
+        # split the whole number part of the total as the minutes: 20
+        # abs() absoulte value - no negative
+        minutes_x = abs(int(math.modf(split_degx[0] * 60)[1]))
+
+        # multiply the decimal part of the split above by 60 to get the seconds
+        # 0.868 x 60 = 52.08, round excess decimal places to 2 places
+        # abs() absoulte value - no negative
+        seconds_x = abs(round(math.modf(split_degx[0] * 60)[0] * 60,2))
+        if degrees_x < 0:
+            EorW = "W"
+        else:
+            EorW = "E"
+
+        # repeat for latitude
+        split_degy = math.modf(self.latitude)
+        degrees_y = int(split_degy[1])
+        minutes_y = abs(int(math.modf(split_degy[0] * 60)[1]))
+        seconds_y = abs(round(math.modf(split_degy[0] * 60)[0] * 60,2))
+        if degrees_y < 0:
+            NorS = "S"
+        else:
+            NorS = "N"
+
+        # abs() remove negative from degrees, was only needed for if-else above
+        longitude_dms = str(abs(degrees_x)) + u"\u00b0 " + str(minutes_x) + "' " + str(seconds_x) + "\" " + EorW
+        latitude_dms = str(abs(degrees_y)) + u"\u00b0 " + str(minutes_y) + "' " + str(seconds_y) + "\" " + NorS
+        return (latitude_dms, longitude_dms)
+
 #
 # Find the center / average of a series of gps samples
 #
@@ -254,6 +292,7 @@ def find_center_of_gps_samples(gps_samples):
     center_longitude = math.degrees(math.atan2(y, x))
     center_latitude = math.degrees(math.atan2(z, math.sqrt(x * x + y * y)))
     return Position(center_latitude, center_longitude)
+
 
 
 class GpsDevice(object):
@@ -568,6 +607,8 @@ def RunNode():
     h.Disconnect()
 
 if __name__ == '__main__':
+    p = Position( 37.62747778787879, -122.45387113636365)
+    print(p.DMS())
     if sys.argv[1] == 'node':
         RunNode()
     elif sys.argv[1] == 'testimu':
