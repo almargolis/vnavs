@@ -341,7 +341,7 @@ class SocketWrapper(object):
         if s in self.fragments:
             data = self.fragments[s] + data
             del self.fragments[s]
-        messages = data.split('\x01')
+        messages = data.split(b'\x01')
         #print("PRC", data, "**", messages)
         if data[-1] != '\x01':
             # the last message isn't complete, save the fragment
@@ -352,7 +352,7 @@ class SocketWrapper(object):
                 # This happens routinely if the last character of data is \x01.
                 # split() always splits, so it creates an empty string at the end of the list.
                 continue
-            parts = this_message.split('\x00')
+            parts = this_message.split(b'\x00')
             # print("RCV", parts)
             self.ProcessMessage(s, parts)
 
@@ -406,7 +406,7 @@ class SocketWrapper(object):
                     print('new connection from', client_address, 'total connections', len(self.inputSockets))
             else:
                 try:
-                    data = s.recv(self.buffer_len).decode('utf-8')	# convert bytes to string
+                    data = s.recv(self.buffer_len)		# data is bytes
                 except socket.error as e:
                     # I have seen e.errno = 54 and 104 as] "Connection reset by peer"
                     self.PrintError('Select:readable', e)
