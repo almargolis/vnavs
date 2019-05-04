@@ -1,4 +1,8 @@
 
+try:
+    import dev_sense_hat
+except:
+    dev_sense_hat = None
 import datetime
 import math
 import os
@@ -431,8 +435,8 @@ class GpsDevice(object):
             if self.data.raw_gps_longitude is None:
                 self.data.raw_gps_longitude = parsed_sentence.longitude
                 self.data.raw_gps_latitude = parsed_sentence.latitude
-            self.data.gps_longitude += (self.data.raw_gps_longitude - parsed_sentence.longitude)
-            self.data.gps_latitude += (self.data.raw_gps_latitude - parsed_sentence.latitude)
+            self.data.gps_longitude += (parsed_sentence.longitude - self.data.raw_gps_longitude)
+            self.data.gps_latitude += (parsed_sentence.latitude - self.data.raw_gps_latitude)
             self.data.raw_gps_longitude = parsed_sentence.longitude
             self.data.raw_gps_latitude = parsed_sentence.latitude
         try:
@@ -463,7 +467,7 @@ class GpsDevice(object):
 					parsed_sentence.data[4], parsed_sentence.data[5], self.longitude,
 					self.heading, self.gps_quality))
         """
-        print("RMC ------")
+        # print("RMC ------")
         return True
 
     def UpdateGpsInfo(self):
