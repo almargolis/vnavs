@@ -9,7 +9,7 @@ class accelerometer(object):
     def __init__(self):
         hat.set_imu_config(False, True, False)
 
-    def get_orientation_degrees():
+    def get_orientation_degrees(self):
         return hat.get_orientation_degrees()
         # orientation['yaw']
         # orientation['pitch']

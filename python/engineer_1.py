@@ -13,6 +13,8 @@ import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
+dev_sense_hat = None
+
 SEND_ACCELEROMETER_PERIOD = 0.05
 SEND_ACCELEROMETER_PERIOD = 0.1			# sense has is far noisier at high read rates
 SEND_ACCELEROMETER_PERIOD = 0.3			# sense has is far noisier at high read rates
@@ -501,6 +503,8 @@ class GpsDevice(object):
 
 class engineer_1(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
+        global dev_sense_hat
+        import dev_sense_hat
         super().__init__(Subscriptions=[], SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.heading = 0
         self.goal_longitude = None
@@ -508,7 +512,7 @@ class engineer_1(vmqtt.mqtt_node):
         self.gps_device = GpsDevice()
         # self.gps_device.IncreaseUpdateRate()
         self.imu_data = ImuDataRecord()
-        self.accellerometer = dev_sense_hat.accelerometer()
+        self.accelerometer = dev_sense_hat.accelerometer()
         self.last_acceleromter_timestamp = time.time()
 
     def DoLoop(self):
