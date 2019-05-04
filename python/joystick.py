@@ -1,7 +1,3 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
-
 import sys
 import evdev
 import platform
@@ -27,8 +23,8 @@ def PrintCapability(gamepad):
 class joystick(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[
-                                                vmqtt.Subscription(vconst.mission_log_start_topic, async=True, handler=self.OnMissionLogStart),
-                                                vmqtt.Subscription(vconst.mission_log_stop_topic, async=True, handler=self.OnMissionLogStop)
+                                                vmqtt.Subscription(vconst.mission_log_start_topic, async_delivery=True, handler=self.OnMissionLogStart),
+                                                vmqtt.Subscription(vconst.mission_log_stop_topic, async_delivery=True, handler=self.OnMissionLogStop)
 					],
 					SingleThreaded=True, BlockIfNotConnected=False,
 					SelectTimeoutSecs=0.01,
