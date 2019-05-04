@@ -94,13 +94,11 @@ class FileClient(vcomms.SocketWrapperClient):
     def CheckTransfer(self, timeout=30.0):
         if self.transfer_state == FILE_TRANSFER_STARTED:
             self.Select(timeout=0.1)
-        """
-        if (self.transfer_state == FILE_TRANSFER_STARTED) and ((time.time() - self.start_time) < timeout):
+        if (self.transfer_state == FILE_TRANSFER_STARTED) and ((time.time() - self.start_time) > timeout):
             self.file_out.close()
             self.transfer_state = FILE_TRANSFER_COMPLETE
             print("FileClient.CheckTransfer() Timeout", self.file_name)
             self.timeout = True					# stays true until next transfer started
-        """
         if self.transfer_state == FILE_TRANSFER_COMPLETE:
             self.transfer_state = FILE_TRANSFER_IDLE
             return True
