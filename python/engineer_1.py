@@ -522,7 +522,7 @@ class engineer_1(vmqtt.mqtt_node):
 
     def OnSettings(self, payload):
         differential_base_position = payload['differential_base_position']
-        if differential_base_position = 'clear':
+        if differential_base_position == 'clear':
             start_position = None
         else:
             start_position = PositionStringToPosition(differential_base_position)

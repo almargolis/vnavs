@@ -7,7 +7,8 @@ import sys
 import threading
 import time
 
-from pyfirmata import Arduino, util
+Arduino = None
+util = None
 
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
@@ -39,6 +40,9 @@ class vehicle(object):
         control values are needed for the vehicle.
     """
     def __init__(self):
+        global Arduino
+        global util
+        from pyfirmata import Arduino, util
         self.board = Arduino('/dev/ttyUSB0')
         self.motor = self.board.get_pin('d:9:s')
         self.governor = 0
