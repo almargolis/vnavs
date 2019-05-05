@@ -158,6 +158,10 @@ def PositionStringToPosition(position):
     Position(float(parts[0]), float(parts[1]))
     return Position
 
+def PositionString(latitude, longitude):
+    position = "{},{}".format(latitude, longitude)
+    return position
+
 class HelmOrder(object):
     __slots__ = ('heading_to_waypoint', 'distance_to_waypoint')
 
@@ -322,8 +326,7 @@ class GpsDevice(object):
         return position
 
     def PositionString(self):
-        position = "{},{}".format(self.data.gps_latitude, self.data.gps_longitude)
-        return position
+        return PositionString(self.data.gps_latitude, self.data.gps_longitude)
 
     def Read(self):
         #print("GpsDevice.Read()", self.gps_port.in_waiting)
@@ -505,7 +508,9 @@ class GpsDevice(object):
 
 class engineer_1(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[], SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
+        super().__init__(Subscriptions=[
+				vmqtt.Subscription(vconst.engineer_1_settings_topic, handler=self.OnSettings)
+				], SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
         self.heading = 0
         self.goal_longitude = None
         self.goal_latitude = None
@@ -514,6 +519,14 @@ class engineer_1(vmqtt.mqtt_node):
         self.imu_data = ImuDataRecord()
         self.accellerometer = dev_sense_hat.accelerometer()
         self.last_acceleromter_timestamp = time.time()
+
+    def OnSettings(self, payload):
+        differential_base_position = payload['differential_base_position']
+        if differential_base_position = 'clear':
+            start_position = None
+        else:
+            start_position = PositionStringToPosition(differential_base_position)
+        self.gps_device.StartRelativeGpsPositioning(start_position)
 
     def DoLoop(self):
         # executed repetitively by mqtt_node.Loop() which handles exceptions and proper shutdown.

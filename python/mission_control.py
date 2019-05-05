@@ -700,6 +700,16 @@ def DistanceGps():
             dw = new_position.DistanceToWaypoint(goal_position)
             print(new_position.DMS(), dw.distance_to_waypoint)
 
+def NewSave():
+    data = navigator.PersistentData()
+    for wp_name in ['sc_start', 'sc_w1', 'sc_goal']:
+        wp = data.Get(wp_name)
+        payload = {}
+        payload['key'] = wp_name
+        payload['value'] = engineer_1.PositionString(wp['latitude'], wp['longitude'])
+        vmqtt.Publish(vconst.data_save_topic, payload)
+        
+
 def SaveGps(waypoint):
     gps_device = engineer_1.GpsDevice()
     gps_readings = []
