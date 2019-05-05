@@ -43,6 +43,7 @@ cameraman_process_topic = 'cameraman/process'
 
 engineer_1_gps_topic = 'engineer_1/gps'
 engineer_1_imu_topic = 'engineer_1/imu'
+engineer_1_settings_topic = 'engineer_1/settings'
 
 helmsman_controls_topic = 'helmsman/controls'
 helmsman_orders_topic = 'helmsman/orders'
