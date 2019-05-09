@@ -565,7 +565,8 @@ class TkWidgetDef(object):
         return frame
 
     def DeleteTab(self, ix):
-        print("TAB CT", self.tkw.index('end'))
+        #print("TAB CT", self.tkw.index('end'))		# index is documented, but not visible
+        print("TAB CT", len(self.tkw.tabs()))
         self.tkw.forget(ix)
         self.children.pop(ix)
 

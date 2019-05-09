@@ -1,6 +1,3 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
 
 #
 # This is a standarrdarized data diction for vnavs.
@@ -75,6 +72,22 @@ class DataAttrib(object):
             if not (value in self.values):
                 return value, False
         return value, True
+
+class DataAttribIntList(DataAttrib):
+    def GetValue(self, raw_value):
+        import OpticChiasm as oc
+        r = []
+        parts = raw_value.split(',')
+        for this in parts:
+            s = this.strip()
+            if s[:3] == 'oc.':
+                property_name = s[3:]
+                s2 = getattr(oc, property_name)
+                i = int(s2)
+            else:
+                i = int(s)
+            r.append(i)
+        return r
 
 class DataAttribFloat(DataAttrib):
     def GetValue(self, raw_value):

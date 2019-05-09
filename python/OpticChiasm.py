@@ -348,12 +348,18 @@ ImageFilter(FILTER_NAME_IMAGE,
 			Flags=[FLAG_ISBASE])
 
 ImageFilter(FILTER_NAME_COLORMASK_MULTI,
-			'{x_output_im} = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={huerange}, threshold={threshold}),\n' \
-				+ '	colorcode=oc.IM_GRAY)',
-                        [vdata.DataAttribInt('huerange', '25', min_value=0, max_value=127, use_slider=True),
-				vdata.DataAttribInt('threshold', '50', min_value=0, max_value=127, use_slider=True),
-				vdata.DataAttribInt('wthreshold', '50', min_value=0, max_value=127, use_slider=True),
-                                vdata.DataAttribStr('colors', 'oc.HSV_WHITE, oc.HSV_RED')],
+			'{x_output_im} = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={hueRange},' \
+				+ ' saturation={saturation}, saturationrange={saturationRange},' \
+				+ ' value={value}, valuerange={valueRange})',
+                       [ 
+                                vdata.DataAttribIntList('colors', 'oc.HSV_WHITE, oc.HSV_RED'),
+                        	vdata.DataAttribInt('hueRange', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
+                        	vdata.DataAttribInt('saturation', '205', min_value=0, max_value=255, use_slider=True),
+                        	vdata.DataAttribInt('saturationRange', '50', min_value=0, max_value=255, use_slider=True),
+                        	vdata.DataAttribInt('value', '205', min_value=0, max_value=255, use_slider=True),
+				vdata.DataAttribInt('valueRange', '50', min_value=0, max_value=255, use_slider=True),
+				vdata.DataAttribStr('colorcode', IM_HSV)
+			],
                         Flags=[])
 
 ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
@@ -363,7 +369,8 @@ ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
 				+ ' value={value}, valuerange={valueRange})\n' \
 			'{x_output_im} = oc.Image(oc.ColorMaskOneHue(im_in.ImAsAny("{colorcode}"), {x_output_hsvspec}),' \
 				+ '	colorcode=oc.IM_GRAY)',
-                        [vdata.DataAttribInt('hue', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
+                        [vdata.DataAttribInt(
+				'hue', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
                         	vdata.DataAttribInt('hueRange', '25', min_value=0, max_value=HSV_MAX_HUE, use_slider=True),
                         	vdata.DataAttribInt('saturation', '205', min_value=0, max_value=255, use_slider=True),
                         	vdata.DataAttribInt('saturationRange', '50', min_value=0, max_value=255, use_slider=True),
