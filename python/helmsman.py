@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 
-from pyfirmata import Arduino, util
+#from pyfirmata import Arduino, util
 
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
