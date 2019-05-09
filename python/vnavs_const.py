@@ -112,8 +112,22 @@ ini_specs = {
 
 	'MissionControl': {
 		'Scripts':	'~/vnavs/scripts'
+		},
+
+	'Navigator': {
+		'missiondir':	'~/vnavs/missions'
 		}
+
 }
+
+def CheckDirectory(dir_name, source, IsWriteable=True):
+    expanded_dir_name = os.path.expanduser(dir_name)               # this expands tilde in path
+    if not os.path.isdir(expanded_dir_name):
+        raise ValueError("Invalid directory path '{}' in {}".format(expanded_dir_name, source))
+    if IsWriteable:
+        if not os.access(expanded_dir_name, os.W_OK):
+            raise ValueError("Directory path '{}' in {} is not writeable".format(expanded_dir_name, source))
+    return expanded_dir_name
 
 def UpdateIni(IniPath=config_file_path):
         config = configparser.ConfigParser()
