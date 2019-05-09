@@ -992,7 +992,7 @@ class navigator(vmqtt.mqtt_node):
 						vmqtt.Subscription(vconst.data_get_topic, async_delivery=True, handler=self.OnDataGet)
 					],
 					SingleThreaded=False, BrokerType='F', Streamer=False, Verbose=Verbose)
-        self.missionDir = self.config.get("Pilot", "MissionDir")
+        self.missionDir = self.GetIniDirectory("Navigator", "MissionDir", IsWriteable=True)
         self.gps_data = engineer_1.GpsDataRecord()
         self.imu_data = engineer_1.ImuDataRecord()
         self.imageFn = None

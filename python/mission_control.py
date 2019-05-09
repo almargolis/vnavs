@@ -700,15 +700,29 @@ def DistanceGps():
             dw = new_position.DistanceToWaypoint(goal_position)
             print(new_position.DMS(), dw.distance_to_waypoint)
 
-def NewSave():
+def CopyLocalDataToNavigator():
     data = navigator.PersistentData()
-    for wp_name in ['sc_start', 'sc_w1', 'sc_goal']:
-        wp = data.Get(wp_name)
-        payload = {}
-        payload['key'] = wp_name
-        payload['value'] = engineer_1.PositionString(wp['latitude'], wp['longitude'])
-        vmqtt.Publish(vconst.data_save_topic, payload)
+    key = sys.argv[2]
+    value = data.Get(key)
+    payload = {}
+    payload['key'] = key
+    payload['value'] = value
+    vmqtt.Publish(vconst.data_save_topic, payload)
+
+def CopyLocalGpsPositionToNavigator():
+    data = navigator.PersistentData()
+    key = sys.argv[2]
+    value = data.Get(key)
+    payload = {}
+    payload['key'] = key
+    payload['value'] = engineer_1.PositionString(wp['latitude'], wp['longitude'])
+    vmqtt.Publish(vconst.data_save_topic, payload)
         
+def SaveLocalData():
+    data = navigator.PersistentData()
+    key = sys.argv[2]
+    value = sys.argv[3]
+    data.Put(key, value)
 
 def SaveGps(waypoint):
     gps_device = engineer_1.GpsDevice()
@@ -739,3 +753,9 @@ if __name__ == '__main__':
     elif sys.argv[1] == 'save':
         waypoint = sys.argv[2]
         SaveGps(waypoint)
+    elif sys.argv[1] == 'copy_local_data_to_navigator':
+        CopyLocalDataToNavigator()
+    elif sys.argv[1] == 'copy_local_gps_position_to_navigator':
+        CopyLocalGpsPositionToNavigator()
+    elif sys.argv[1] == 'save_local_data':
+        SaveLocalData()

@@ -25,8 +25,6 @@ else:
 ARG_HOST = 'host'
 ARG_PORT = 'port'
 ARG_LOCAL = 'local'
-ARG_IMAGE_DIR = 'imagedir'
-ARG_IMAGE_GET = 'imageget'
 ARG_TRUE = 'true'
 ARG_FALSE = 'false'
 ARG_CWD = 'cwd'
@@ -394,7 +392,7 @@ class ConfirmationRequest(object):
 class mqtt_node(object):
     __slots__ = ('args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'confirmation_pending', 'debug', 'exception_ct', 'exception_last_time',
-					'imageDir', 'lastSocketError', 'loop_sleep',
+					'lastSocketError', 'loop_sleep',
 					'mqttc', 'node_name',
 					'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
 					'verbose', 'vnavs_mid', 'vnavs_pid', 'wildcard_handler')
@@ -415,12 +413,6 @@ class mqtt_node(object):
                 val = this[eq_pos+1:]
                 if (key == ARG_HOST) and (val == ARG_LOCAL):
                     val = HOST_LOCAL
-                elif (key == ARG_IMAGE_DIR) and (val == ARG_CWD):
-                    val = os.getcwd()
-                elif (key == ARG_IMAGE_GET) and (val == ARG_FALSE):
-                    val = False
-                elif (key == ARG_IMAGE_GET) and (val == ARG_TRUE):
-                    val = True
                 self.args[key] = val
             else:
                 self.args[this] = True
@@ -437,15 +429,6 @@ class mqtt_node(object):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(vconst.config_file_path))
         self.automatically_connect = AutomaticallyConnect
-        if ARG_IMAGE_DIR in self.args:
-            self.imageDir = self.args[ARG_IMAGE_DIR]
-        else:
-            self.imageDir = self.config.get("Cameraman", "ImageDir")
-        self.imageDir = os.path.expanduser(self.imageDir)		# this expands tilde in path
-        if not os.path.isdir(self.imageDir):
-            raise ValueError("Invalid Cameraman.ImageDir '{}' in vnavs.ini".format(self.imageDir))
-        if not os.access(self.imageDir, os.W_OK):
-            raise ValueError("Cameraman.ImageDir '{}' in vnavs.ini is not writeable".format(self.imageDir))
         self.single_threaded = SingleThreaded
         self.select_timeout = SelectTimeoutSecs
         self.subscriptions = {}
@@ -549,6 +532,12 @@ class mqtt_node(object):
         if not self.single_threaded:
             self.mqttc.loop_stop(force=False)
         self.mqttc.disconnect()
+
+    def GetIniDirectory(self, section, attribute, IsWriteable=True):
+        source = "vnavs.ini [{}] {}".format(section, attribute)
+        dir_name = self.config.get(section, attribute)
+        dir_name = vconst.CheckDirectory(dir_name, source, IsWriteable=IsWriteable)
+        return dir_name
 
     def Loop(self):
         while True:
