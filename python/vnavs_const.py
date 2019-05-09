@@ -43,6 +43,7 @@ cameraman_process_topic = 'cameraman/process'
 
 engineer_1_gps_topic = 'engineer_1/gps'
 engineer_1_imu_topic = 'engineer_1/imu'
+engineer_1_settings_topic = 'engineer_1/settings'
 
 helmsman_controls_topic = 'helmsman/controls'
 helmsman_orders_topic = 'helmsman/orders'
@@ -66,8 +67,11 @@ dtype_field_name = '_dtype_'
 config_file_path = os.path.expanduser("~/vnavs.ini")
 FAST_MQTT_PORT = 4000
 FILE_TRANSFER_PORT = 4010
+ANY_HOST = ''				# for server, bind to all networks
 DEFAULT_PORT = 3000
 STANDARD_MQTT_PORT = 1883
+VNAVS_IMAGES = '/exports/vnavs_images'
+VNAVS_LOGS = '/exports/vnavs_logs'
 
 HOST_LOCAL = '127.0.0.1'
 GLOBAL_IP = '8.8.8.8'			# Google DNS resolver
@@ -75,7 +79,7 @@ NON_ROUTABLE_IP = '192.168.0.1'
 
 ini_specs = {
 	'Cameraman': {
-		'ImageDir':	'~/vnavs/BotImages'
+		'ImageDir':	VNAVS_IMAGES
 		},
 
 	'FileClient': {
@@ -85,7 +89,10 @@ ini_specs = {
 		},
 
 	'FileServer': {
-		'Port':		FILE_TRANSFER_PORT
+		'Host':		ANY_HOST,
+		'Port':		FILE_TRANSFER_PORT,
+		'xi':		VNAVS_IMAGES,
+		'xl':		VNAVS_LOGS
 		},
 
 	'MqttBroker': {
@@ -96,6 +103,11 @@ ini_specs = {
 	'MqttFast': {
 		'Host':		HOST_LOCAL,
 		'Port':		FAST_MQTT_PORT
+		},
+	'MqttFastServer': {
+		'Host':		ANY_HOST,
+		'Port':		FAST_MQTT_PORT,
+		'ArchiveDir':	VNAVS_LOGS
 		},
 
 	'MissionControl': {

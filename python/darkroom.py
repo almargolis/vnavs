@@ -440,7 +440,8 @@ class Darkroom(vmqtt.mqtt_node):
     __slots__ = (
 				'camera_iso', 'camera_last_filename', 'camera_shutter_speed',
 				'delete_process_step_ix', 'downloadDir', 'file_client', 'image',
-				'last_pic_payload', 'load_filter_name', 'load_new_filter_ct', 'load_parms', 'load_process_file_name',
+				'last_pic_payload', 'last_pic_time',
+				'load_filter_name', 'load_new_filter_ct', 'load_parms', 'load_process_file_name',
 				'loading', 'local_cam',
 				'new_step', 'notebook', 'notebook_add_id',
 				'pic_continuous', 'pic_fn', 'pic_needed', 'pic_source',
@@ -487,6 +488,7 @@ class Darkroom(vmqtt.mqtt_node):
         self.camera_shutter_speed = self.statusFrame.AddEntryField('Shutter Speed', value=10000, row=SAME_ROW, col=NEXT_COL)
         self.camera_last_filename = ''
         self.last_pic_payload = None
+        self.last_pic_time = 0
         self.local_cam = None
         self.pic_needed = False
         self.pic_continuous = True
@@ -660,7 +662,7 @@ class Darkroom(vmqtt.mqtt_node):
     def DoCameramanPicReady(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
-        print("rmsg_cameraman_pic_ready()", payload)
+        #print("rmsg_cameraman_pic_ready()", payload)
         self.last_pic_payload = payload
 
     def DeleteProcessStep(self, ix):
@@ -717,7 +719,7 @@ class Darkroom(vmqtt.mqtt_node):
                 shutter_speed = self.local_cam.shutter_speed
                 colorcode = self.local_cam.colorcode
             elif self.pic_source == SRC_BOT_CAMERA:
-                if self.last_pic_payload is not None:
+                if (self.last_pic_payload is not None) and ((time.time() - self.last_pic_time) > 1.0):
                     self.pic_needed = False			# if single frame mode, mark done
                     payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
                     self.pic_fn = payload['filename']
@@ -726,6 +728,7 @@ class Darkroom(vmqtt.mqtt_node):
                     if not self.file_client.GetFile('i', self.pic_fn, path=path):
                         print("Unable to fetch PIC", self.pic_fn)
                         return
+                    self.last_pic_time = time.time()
                     iso = payload['iso']
                     shutter_speed = payload['shutter_speed']
                     print("CAM", iso, shutter_speed)

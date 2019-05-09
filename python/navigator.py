@@ -356,16 +356,23 @@ class StepFollowLineTrace(MissionStep):
         return False
 
 class StepGpsWaypoint(MissionStep):
-    __slots__ = ('next_time', 'speed', 'waypoint')
+    __slots__ = ('next_time', 'speed', 'waypoint', 'differential_base_position')
     def __init__(self, stage):
         super().__init__(stage)
         self.waypoint = None
+        self.differential_base_position = "clear"
         self.next_time = None
 
     def DoStageStepInit(self):
         key = self.parm_pos[0]
         value = self.navigator.persistent_data.Get(key)
         self.waypoint = engineer_1.PositionStringToPosition(value)
+        if 'differential_base_position' in self.parm_kword:
+            self.differential_base_position = self.parm_kword['differential_base_position']
+        # Always publish differntial_base_position, either to set or clear
+        payload = {}
+        payload['differential_base_position'] = self.differential_base_position
+        self.navigator.Publish(vconst.engineer_1_settings_topic, payload)
         self.speed = int(self.parm_pos[1])
         self.next_time = time.time()
 

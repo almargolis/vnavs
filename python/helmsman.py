@@ -7,7 +7,8 @@ import sys
 import threading
 import time
 
-#from pyfirmata import Arduino, util
+Arduino = None
+util = None
 
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
@@ -39,6 +40,9 @@ class vehicle(object):
         control values are needed for the vehicle.
     """
     def __init__(self):
+        global Arduino
+        global util
+        from pyfirmata import Arduino, util
         self.board = Arduino('/dev/ttyUSB0')
         self.motor = self.board.get_pin('d:9:s')
         self.governor = 0
@@ -406,6 +410,8 @@ class helmsman(vmqtt.mqtt_node):
             speed_raw = int(payload[HELMSMAN_SPEED])
             speed_scale_min = int(payload[HELMSMAN_SPEED_SCALE_MIN])
             speed_scale_max = int(payload[HELMSMAN_SPEED_SCALE_MAX])
+            #speed_scale_min =128
+            #speed_scale_max = 0
             speed_request = self.ScaleRequest(speed_raw, -speed_scale_min, -speed_scale_max, -self.v.speed_max, self.v.speed_max)
         else:
             speed_request = payload[HELMSMAN_SPEED]	# Note: alphanumeric
@@ -461,6 +467,7 @@ class helmsman(vmqtt.mqtt_node):
             # linear scaling
             target_range = float(target_max - target_min)
             request_value = ((target_range * raw_range_pct) + float(target_min)) * raw_inversion
+            print("SCALE", raw_value, request_value)
         else:
             # parabolic scaling
             # This assumes target range is symetrial around zero.
@@ -474,7 +481,7 @@ class helmsman(vmqtt.mqtt_node):
         return int(request_value)
 
     def DoLoop(self):
-        print("STATE", self.state, "Governor", self.v.governor)
+        #print("STATE", self.state, "Governor", self.v.governor)
         if not self.mqttc.connected:
             self.v.Estop()
             return

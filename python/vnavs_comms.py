@@ -783,6 +783,7 @@ class FastMqttServer(SocketWrapperServer):
                 for this in self.subscriptions[topic].values():
                     if this.s in self.inputSockets:
                         # we get here for subscription by still-connected sockets
+                        #print("FastMqttServer.ProcesMessage() Queue {} for ?".format(topic))
                         if this.mode == SUBSCRIPTION_MODE_LATEST:
                             queue_class = QueueOne
                         else:
