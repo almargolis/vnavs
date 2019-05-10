@@ -167,6 +167,14 @@ class HelmOrder(object):
         self.heading_to_waypoint = heading_to_waypoint
         self.distance_to_waypoint = distance_to_waypoint
 
+def PositionFactory(payload):
+    latitude = payload.get('latitude', None)
+    longitude = payload.get('longitude', None)
+    heading = payload.get('heading, None)
+    speed = payload.get('speed', None)
+    p = Position(latitude, longitude, heading=heading, speed=speed)
+    return p
+
 class Position(object):
     __slots__ = ('heading', 'latitude', 'longitude', 'raw_latitude', 'raw_longitude', 'speed')
 

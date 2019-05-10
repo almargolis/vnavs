@@ -188,7 +188,16 @@ def PrimitivePayload(ddata):
     payload[dprimitive_field_name] = ddata
     return payload
 
-RegisterClass(PersistentClass(str, StringFactory, PrimitivePayload))
+def SlotsPayload(ddata):
+    payload = {}
+    for this in ddata.__slots__:
+        payload[this] = getattr(ddata, this)
+    return payload
+
+def MakeRegistrations():
+    import engineer_1
+    RegisterClass(PersistentClass(str, StringFactory, PrimitivePayload))
+    RegisterClass(PersistentClass(engineer_1.Position, engineer_1.PositionFactory, SlotsPayload))
 
 class PersistentData(object):
     def __init__(self):
