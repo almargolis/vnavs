@@ -61,9 +61,6 @@ process_result_topic = 'process/result'
 stage_init = 'init'
 stage_finis = 'finis'
 
-dname_field_name = '_dname_'
-dtype_field_name = '_dtype_'
-
 config_file_path = os.path.expanduser("~/vnavs.ini")
 FAST_MQTT_PORT = 4000
 FILE_TRANSFER_PORT = 4010
