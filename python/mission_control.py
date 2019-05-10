@@ -1,7 +1,3 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-                      zip, round, input, int, pow, object)
-
 import json
 import sys
 import os
@@ -33,6 +29,7 @@ import navigator
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
 import vnavs_comms as vcomms
+import vnavs_data as vdata
 import paho.mqtt.client as mqtt
 
 if sys.version_info[0] < 3:
@@ -630,7 +627,7 @@ def LocateGps():
         stop_time = time.time() + (int(sys.argv[2]) * 60)			# survey for this many minutes
     if len(sys.argv) > 3:
         location_name = sys.argv[3]
-    data = navigator.PersistentData()
+    data = vdata.PersistentData()
     survey_map = navigator.MissionMap()
     survey_map.InitSurvey()
     gps_samples = []
@@ -666,7 +663,7 @@ def LocateGps():
         data.Put(location_name, center_position)
 
 def DistanceGps():
-    data = navigator.PersistentData()
+    data = vdata.PersistentData()
     goal_name = sys.argv[2]
     if len(sys.argv) > 3:
         start_name = sys.argv[3]
@@ -701,7 +698,7 @@ def DistanceGps():
             print(new_position.DMS(), dw.distance_to_waypoint)
 
 def CopyLocalDataToNavigator():
-    data = navigator.PersistentData()
+    data = vdata.PersistentData()
     key = sys.argv[2]
     value = data.Get(key)
     payload = {}
@@ -710,7 +707,7 @@ def CopyLocalDataToNavigator():
     vmqtt.Publish(vconst.data_save_topic, payload)
 
 def CopyLocalGpsPositionToNavigator():
-    data = navigator.PersistentData()
+    data = vdata.PersistentData()
     key = sys.argv[2]
     value = data.Get(key)
     payload = {}
@@ -719,10 +716,18 @@ def CopyLocalGpsPositionToNavigator():
     vmqtt.Publish(vconst.data_save_topic, payload)
         
 def SaveLocalData():
-    data = navigator.PersistentData()
-    key = sys.argv[2]
-    value = sys.argv[3]
-    data.Put(key, value)
+    data = vdata.PersistentData()
+    key_group = sys.argv[2]
+    key = sys.argv[3]
+    value = sys.argv[4]
+    data.Put(key, value, key_group=key_group)
+
+def ShowLocalData():
+    data = vdata.PersistentData()
+    key_group = sys.argv[2]
+    key = sys.argv[3]
+    value = data.Get(key, key_group=key_group)
+    print(value.__class__.__name__, value)
 
 def SaveGps(waypoint):
     gps_device = engineer_1.GpsDevice()
@@ -759,3 +764,5 @@ if __name__ == '__main__':
         CopyLocalGpsPositionToNavigator()
     elif sys.argv[1] == 'save_local_data':
         SaveLocalData()
+    elif sys.argv[1] == 'show_local_data':
+        ShowLocalData()

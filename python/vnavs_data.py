@@ -1,3 +1,5 @@
+import json
+import os
 
 #
 # This is a standarrdarized data diction for vnavs.
@@ -161,3 +163,120 @@ class DataAttribPointSym(DataAttrib):
         if y == '':
             y = 'e'
         return "('{}','{}')".format(x, y)
+
+dname_field_name = '_dname_'
+dclass_field_name = '_class_'
+dpayload_field_name = '_payload_'
+dprimitive_field_name = '_v_'
+
+class PersistentClass(object):
+    def __init__(self, class_object, factory_function, payload_function=None):
+        self.class_object = class_object
+        self.factory_function = factory_function
+        self.payload_function = payload_function
+
+KnownClasses = {}
+
+def RegisterClass(registration):
+    KnownClasses[registration.class_object.__name__] = registration
+
+def StringFactory(payload):
+    return str(payload[dprimitive_field_name])
+
+def PrimitivePayload(ddata):
+    payload = {}
+    payload[dprimitive_field_name] = ddata
+    return payload
+
+RegisterClass(PersistentClass(str, StringFactory, PrimitivePayload))
+
+class PersistentData(object):
+    def __init__(self):
+        self.persistent_data = None
+        self.key_group = None
+
+    def Save(self):
+        if self.persistent_data is None:
+            return					# its was never loaded
+
+        path = os.path.expanduser('~/vnavs.data')
+        d = json.dumps(self.persistent_data)
+        f = open(path, 'w')
+        #f.write(d.decode("utf-8"))
+        f.write(d)
+        f.close()
+
+    def Load(self):
+        if self.persistent_data is not None:
+            return					# its already loaded
+        path = os.path.expanduser('~/vnavs.data')
+        try:
+            f = open(path, 'r')
+        except IOError as e:
+            # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
+            if e.errno == 2:
+                self.persistent_data = {}
+                return
+            else:
+                raise
+
+        d = f.read()
+        f.close()
+        if d == "":
+            self.persistent_data = {}
+        else:
+            self.persistent_data = json.loads(d)
+
+    def MakeFqnKey(self, key, key_group=None):
+        if key_group is None:
+            key_group = self.key_group
+        if (key_group is None) or (key_group == '/'):
+            fqn_key = key
+        else:
+            fqn_key = key_group + '.' + key
+        return fqn_key
+
+    def Get(self, key, key_group=None):
+        self.Load()
+        fqn_key = self.MakeFqnKey(key, key_group=key_group)
+        saved_data = self.persistent_data.get(fqn_key, None)
+        if saved_data is None:
+            return None
+        payload = saved_data[dpayload_field_name]
+        class_name = saved_data[dclass_field_name]
+        class_registration = KnownClasses[class_name]
+        data = class_registration.factory_function(payload)
+        return data
+
+    def GetTransformed(self, key):
+        return self.Transform(self.Get(key))
+
+    def PutPayload(self, key, class_name, payload, key_group=None):
+        fqn_key = self.MakeFqnKey(key, key_group=key_group)
+        data = {}
+        data[dname_field_name] = fqn_key
+        data[dclass_field_name] = class_name
+        data[dpayload_field_name] = payload
+        self.persistent_data[fqn_key] = data
+        self.Save()
+
+    def Put(self, key, value, key_group=None):
+        # value must be register in KnownClasses
+        self.Load()
+        class_name = value.__class__.__name__
+        class_registration = KnownClasses[class_name]
+        payload = class_registration.payload_function(value)
+           # raise TypeError('Object of type % is not JSON serialiazable.'.format(value.__class__.__name__))
+        self.PutPayload(key, class_name, payload, key_group=key_group)
+
+    def Transform(self, payload):
+        if (payload is None) or (not (vconst.dtype_field_name in payload)):
+            return payload
+        dtype = payload[vconst.dtype_field_name]
+        if dtype == 'object':
+            transform = object()
+            for key, value in payload.items():
+                setattr(transform, key, value)
+            return transform
+        return payload
+

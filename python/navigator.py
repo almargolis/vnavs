@@ -7,7 +7,6 @@ except ImportError:
     np = None
     OpticChiasm = None
 
-import json
 import math
 import os
 from geopy.distance import great_circle
@@ -18,6 +17,7 @@ import time
 import vnavs_comms as vcomms
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
+import vnavs_data as vdata
 import engineer_1
 import helmsman
 
@@ -284,8 +284,7 @@ class StepData(MissionStep):
         self.dtype = self.parm_pos[1]
 
     def DoStageStepRun(self, loop_ct):
-        self.parm_kword[vconst.dtype_field_name] = self.dtype		# save the data type with the data
-        self.navigator.persistent_data.Put(self.dname, self.parm_kword)
+        self.navigator.persistent_data.PutPayload(self.dname, self.dtype, self.parm_kword)
         return True
 
 class StepFollowLinePid(MissionStep):
@@ -910,74 +909,6 @@ class NavStep(object):
         self.i_accumulator = 0
         self.derivative = 0
 
-class PersistentData(object):
-    def __init__(self):
-        self.persistent_data = None
-
-    def Save(self):
-        if self.persistent_data is None:
-            return					# its was never loaded
-
-        path = os.path.expanduser('~/vnavs.data')
-        d = json.dumps(self.persistent_data)
-        f = open(path, 'w')
-        #f.write(d.decode("utf-8"))
-        f.write(d)
-        f.close()
-
-    def Load(self):
-        if self.persistent_data is not None:
-            return					# its already loaded
-        path = os.path.expanduser('~/vnavs.data')
-        try:
-            f = open(path, 'r')
-        except IOError as e:
-            # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
-            if e.errno == 2:
-                self.persistent_data = {}
-                return
-            else:
-                raise
-
-        d = f.read()
-        f.close()
-        if d == "":
-            self.persistent_data = {}
-        else:
-            self.persistent_data = json.loads(d)
-
-    def Get(self, key):
-        self.Load()
-        return self.persistent_data.get(key, None)
-
-    def GetTransformed(self, key):
-        return self.Transform(self.Get(key))
-
-    def Put(self, key, value):
-        # value should be a dict-like, JSON serializable object
-        self.Load()
-        if isinstance(value, dict):
-            v = value
-        elif hasattr(value, '__slots__'):
-            v = {}
-            for this in value.__slots__:
-                v[this] = getattr(value, this)
-        else:
-            raise TypeError('Object of type % is not JSON serialiazable.'.format(value.__class__.__name__))
-        self.persistent_data[key] = v
-        self.Save()
-
-    def Transform(self, payload):
-        if (payload is None) or (not (vconst.dtype_field_name in payload)):
-            return payload
-        dtype = payload[vconst.dtype_field_name]
-        if dtype == 'object':
-            transform = object()
-            for key, value in payload.items():
-                setattr(transform, key, value)
-            return transform
-        return payload
-
 class navigator(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
         super().__init__(Subscriptions=[
@@ -1007,7 +938,7 @@ class navigator(vmqtt.mqtt_node):
         self.serviceNames = ['ClearWaypoints', 'MarkWaypoint', 'SaveWaypoints', 'MakeWaypointMap']
         self.serviceRequests = []
         self.gpsReadyForNavigation = False
-        self.persistent_data = PersistentData()
+        self.persistent_data = vdata.PersistentData()
 
 
     def OnDataSave(self, payload):
