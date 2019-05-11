@@ -272,19 +272,35 @@ class MissionStep(object):
         #print("PublishNavigation", payload)
 
 class StepData(MissionStep):
-    slots = ('dname', 'dtype')
+    __slots__ = ('dname', 'dtype', 'dkeygroup')
 
     def __init__(self, stage):
         super().__init__(stage)
         self.dname = None
         self.dtype = None
+        self.dkeygroup = None
 
     def DoStageStepInit(self):
         self.dname = self.parm_pos[0]
         self.dtype = self.parm_pos[1]
+        if len(self.parm_pos) > 2:
+            self.dkeygroup = self.parm_pos[2]
 
     def DoStageStepRun(self, loop_ct):
-        self.navigator.persistent_data.PutPayload(self.dname, self.dtype, self.parm_kword)
+        self.navigator.persistent_data.PutPayload(self.dname, self.dtype, self.parm_kword, key_group=dkeygroup)
+        return True
+
+class StepKeyGroup(MissionStep):
+    __slots__ = ('dkeygroup',)
+
+    def __init__(self, stage):
+        self.dkeygroup = None
+
+    def DoStageStepInit(self):
+        self.dkeygroup = self.parm_pos[0]
+
+    def DoStageStepRun(self, loop_ct):
+        self.navigator.persistent_data.SetDefaultKeyGroup(dkeygroup)
         return True
 
 class StepFollowLinePid(MissionStep):
@@ -641,6 +657,7 @@ class Mission(object):
 
         step_defs = {}
         MissionStepDef('data',			sclass=StepData, defs=step_defs)
+        MissionStepDef('key_group',		sclass=StepKeyGroup, defs=step_defs)
         MissionStepDef('gps',			sclass=StepGpsWaypoint, defs=step_defs)
         MissionStepDef('follow_line_pid',	sclass=StepFollowLinePid, defs=step_defs)
         MissionStepDef('follow_line_trace',	sclass=StepFollowLineTrace, defs=step_defs)
@@ -942,23 +959,19 @@ class navigator(vmqtt.mqtt_node):
 
 
     def OnDataSave(self, payload):
+        # The payload is in the format of a PersistentData entry
         print("OnDataSave()", payload)
-        if vconst.dname_field_name in payload:
-            key = payload[vconst.dname_field_name]
-            value = payload
-        else:
-            key = payload['key']
-            value = payload['value']
-        self.persistent_data.Put(key, value)
+        pdata = payload['pdata']
+        self.persistent_data.PutPdata(pdata)
 
     def OnDataGet(self, payload):
         print("OnDataGet()", payload)
-        key = payload['key']
-        value = self.persistent_data.Get(key)
-        data_payload = vcomms.PrepareResponse(payload, ConfResponse=True)
-        data_payload['key'] = key
-        data_payload['value'] = value
-        self.Publish('data/value', data_payload)
+        key = payload[vdata.dkey_field_name]
+        key_group = payload[vdata.dgroup_field_name]
+        pdata = self.persistent_data.GetPdata(key, key_group=key_group)
+        response_payload = vcomms.PrepareResponse(payload, ConfResponse=True)
+        response_payload['pdata'] = pdata
+        self.Publish(vconst.data_put_topic, response_payload)
 
     def rmsg_navigator_service(self, payload):
         request = payload['request']

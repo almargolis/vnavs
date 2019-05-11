@@ -164,8 +164,10 @@ class DataAttribPointSym(DataAttrib):
             y = 'e'
         return "('{}','{}')".format(x, y)
 
-dname_field_name = '_dname_'
+dkey_field_name = '_dkey_'
+dgroup_field_name = '_dgrp_'
 dclass_field_name = '_class_'
+dfqn_field_name = '_dfqn_'
 dpayload_field_name = '_payload_'
 dprimitive_field_name = '_v_'
 
@@ -203,6 +205,9 @@ class PersistentData(object):
     def __init__(self):
         self.persistent_data = None
         self.key_group = None
+
+    def SetDefaultKeyGroup(self, key_group):
+        self.key_group = key_group
 
     def Save(self):
         if self.persistent_data is None:
@@ -248,25 +253,38 @@ class PersistentData(object):
     def Get(self, key, key_group=None):
         self.Load()
         fqn_key = self.MakeFqnKey(key, key_group=key_group)
-        saved_data = self.persistent_data.get(fqn_key, None)
-        if saved_data is None:
+        pdata = self.persistent_data.get(fqn_key, None)
+        if pdata is None:
             return None
         payload = saved_data[dpayload_field_name]
         class_name = saved_data[dclass_field_name]
         class_registration = KnownClasses[class_name]
-        data = class_registration.factory_function(payload)
-        return data
+        object_instance = class_registration.factory_function(payload)
+        return object_instance
 
-    def GetTransformed(self, key):
-        return self.Transform(self.Get(key))
+    def GetPdata(self, key, key_group=None):
+        self.Load()
+        fqn_key = self.MakeFqnKey(key, key_group=key_group)
+        pdata = self.persistent_data.get(fqn_key, None)
+        return pdata
 
     def PutPayload(self, key, class_name, payload, key_group=None):
+        self.Load()
         fqn_key = self.MakeFqnKey(key, key_group=key_group)
-        data = {}
-        data[dname_field_name] = fqn_key
-        data[dclass_field_name] = class_name
-        data[dpayload_field_name] = payload
-        self.persistent_data[fqn_key] = data
+        pdata = {}
+        pdata[dkey_field_name] = key
+        pdata[dgroup_field_name] = key_group
+        pdata[dfqn_field_name] = fqn_key
+        pdata[dclass_field_name] = class_name
+        pdata[dpayload_field_name] = payload
+        self.persistent_data[fqn_key] = pdata
+        self.Save()
+
+    def PutPdata(self, pdata):
+        # assume pdata is properly formatted ready to store
+        self.Load()
+        fqn_key = pdata[dfqn_field_name]
+        self.persistent_data[fqn_key] = pdata
         self.Save()
 
     def Put(self, key, value, key_group=None):

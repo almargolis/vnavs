@@ -15,6 +15,7 @@ import sys
 
 data_save_topic = 'data/save'
 data_get_topic = 'data/get'
+data_put_topic = 'data/put'
 
 mission_async_event_topic = 'mission/async_event'
 mission_load_topic = 'mission/load'
