@@ -492,7 +492,7 @@ class MissionControl(vmqtt.mqtt_node):
         self.pic_fn = payload['filename']
         self.pic_path = os.path.join(image_dir, self.pic_fn)
         self.pic_payload = payload
-        print("ConfigureImageLocation()", self.pic_fn, self.pic_path, TransferNeeded)
+        #print("ConfigureImageLocation()", self.pic_fn, self.pic_path, TransferNeeded)
 
     def UpdateLocalMissionList(self):
         mission_id_list = []
@@ -589,7 +589,7 @@ class MissionControl(vmqtt.mqtt_node):
                     transfer_fn = self.pic_fn
                     transfer_path = self.pic_path
                 self.file_client.StartTransfer(self.transfer_type, transfer_fn, path=transfer_path)
-                print("DoLoop() Start Transfer", self.transfer_type, transfer_fn)
+                #print("DoLoop() Start Transfer", self.transfer_type, transfer_fn)
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 
