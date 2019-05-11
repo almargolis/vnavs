@@ -657,8 +657,8 @@ def LocateGps():
                 print("{:f} {:f}".format(distance_from_last_position, accumulated_movement))
             previous_center_position = center_position
             previous_position = new_position
-            # print("CENTER:", center_position.DMS(), distance_from_previous_center, survey_map.survey_hypotenuse,
-	#		"LOCATION:", distance_from_last_position, new_position.DMS())
+            print("CENTER:", center_position.DMS(), distance_from_previous_center, survey_map.survey_hypotenuse,
+			"LOCATION:", distance_from_last_position, new_position.DMS())
     if location_name is not None:
         data.Put(location_name, center_position)
 
