@@ -170,7 +170,7 @@ class HelmOrder(object):
 def PositionFactory(payload):
     latitude = payload.get('latitude', None)
     longitude = payload.get('longitude', None)
-    heading = payload.get('heading, None)
+    heading = payload.get('heading', None)
     speed = payload.get('speed', None)
     p = Position(latitude, longitude, heading=heading, speed=speed)
     return p
