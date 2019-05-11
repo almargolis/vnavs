@@ -626,7 +626,8 @@ def LocateGps():
     if len(sys.argv) > 2:
         stop_time = time.time() + (int(sys.argv[2]) * 60)			# survey for this many minutes
     if len(sys.argv) > 3:
-        location_name = sys.argv[3]
+        key_group = sys.argv[3]
+        location_name = sys.argv[4]
     data = vdata.PersistentData()
     survey_map = navigator.MissionMap()
     survey_map.InitSurvey()
@@ -660,17 +661,19 @@ def LocateGps():
             print("CENTER:", center_position.DMS(), distance_from_previous_center, survey_map.survey_hypotenuse,
 			"LOCATION:", distance_from_last_position, new_position.DMS())
     if location_name is not None:
-        data.Put(location_name, center_position)
+        data.Put(location_name, center_position, key_group=key_group)
 
 def DistanceGps():
     data = vdata.PersistentData()
-    goal_name = sys.argv[2]
-    if len(sys.argv) > 3:
-        start_name = sys.argv[3]
+    goal_key_group = sys.argv[2]
+    goal_name = sys.argv[3]
+    if len(sys.argv) > 4:
+        start_key_group = sys.argv[4]
+        start_name = sys.argv[5]
     else:
+        start_key_group = None
         start_name = None
-    goal_location = data.Get(goal_name)
-    goal_position = engineer_1.Position(latitude=goal_location['latitude'], longitude=goal_location['longitude'])
+    goal_location = data.Get(goal_name, key_group=goal_key_group)
     gps_device = engineer_1.GpsDevice()
     while True:
         have_new_position_data = gps_device.UpdateGpsInfo()
@@ -681,8 +684,7 @@ def DistanceGps():
     dw = new_position.DistanceToWaypoint(goal_position)
     print("Current GPS {}, distance to goal {:f}".format(new_position.DMS(), dw.distance_to_waypoint))
     if start_name is not None:
-        start_location = data.Get(start_name)
-        start_position = engineer_1.Position(latitude=start_location['latitude'], longitude=start_location['longitude'])
+        start_location = data.Get(start_name, key_group=start_key_group)
         dw = start_position.DistanceToWaypoint(goal_position)
         dw2 = start_position.DistanceToWaypoint(new_position)
         print("Relative GPS {}, distance to goal {:f}, distance to relative start {:f}".format(start_position.DMS(),
@@ -699,20 +701,20 @@ def DistanceGps():
 
 def CopyLocalDataToNavigator():
     data = vdata.PersistentData()
-    key = sys.argv[2]
-    value = data.Get(key)
+    key_group = sys.argv[2]
+    key = sys.argv[3]
+    pdata = data.GetPdata(key, key_group=key_group)
     payload = {}
-    payload['key'] = key
-    payload['value'] = value
+    payload['pdata'] = pdata
     vmqtt.Publish(vconst.data_save_topic, payload)
 
 def CopyLocalGpsPositionToNavigator():
     data = vdata.PersistentData()
-    key = sys.argv[2]
-    value = data.Get(key)
+    key_group = sys.argv[2]
+    key = sys.argv[3]
+    pdata = data.GetPdata(key, key_group=key_group)
     payload = {}
-    payload['key'] = key
-    payload['value'] = engineer_1.PositionString(wp['latitude'], wp['longitude'])
+    payload['pdata'] = pdata
     vmqtt.Publish(vconst.data_save_topic, payload)
         
 def SaveLocalData():

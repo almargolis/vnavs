@@ -180,6 +180,7 @@ class PersistentClass(object):
 KnownClasses = {}
 
 def RegisterClass(registration):
+    global KnownClasses
     KnownClasses[registration.class_object.__name__] = registration
 
 def StringFactory(payload):
@@ -197,9 +198,12 @@ def SlotsPayload(ddata):
     return payload
 
 def MakeRegistrations():
+    # This is a function instead of in-line so it has its own address space for imports.
+    # Otherwise we get import cycles since most modules use this.
     import engineer_1
     RegisterClass(PersistentClass(str, StringFactory, PrimitivePayload))
     RegisterClass(PersistentClass(engineer_1.Position, engineer_1.PositionFactory, SlotsPayload))
+MakeRegistrations()
 
 class PersistentData(object):
     def __init__(self):
