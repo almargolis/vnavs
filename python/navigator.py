@@ -380,8 +380,8 @@ class StepGpsWaypoint(MissionStep):
 
     def DoStageStepInit(self):
         key = self.parm_pos[0]
-        value = self.navigator.persistent_data.Get(key)
-        self.waypoint = engineer_1.PositionStringToPosition(value)
+        self.waypoint = self.navigator.persistent_data.Get(key)
+        print("StepGpsWaypoint", self.waypoint)
         if 'differential_base_position' in self.parm_kword:
             self.differential_base_position = self.parm_kword['differential_base_position']
         # Always publish differntial_base_position, either to set or clear
