@@ -139,7 +139,7 @@ class cameraman(vmqtt.mqtt_node):
 			'camera', 'camera_resolution', 'camera_type',
 			'capture_format', 'capture_publish',
 			'do_auto_iso',
-			'image_ct', 'iso', 'idle_image_max',
+			'image_ct', 'image_dir', 'iso', 'idle_image_max',
 			'last_fn', 'last_format', 'loop_format', 'loop_mode', 'loop_publish',
 			'mark_hsv_spec', 'mark_payload', 'mark_rect',
 			'mission_id', 'mission_logging',
@@ -161,6 +161,8 @@ class cameraman(vmqtt.mqtt_node):
         self.burst_fps_rate = 0			# capture speed of last burst
         self.burst_fps_ct = 0
         self.burst_fps_start_time = time.time()
+        self.image_ct = 0			# ct of images captured since __init__
+        self.image_dir = self.GetIniDirectory('Cameraman', 'imageDir', IsWriteable=True)
         self.iso = 100
         self.shutter_speed = 0
         self.camera_resolution = (640, 480)
@@ -206,7 +208,6 @@ class cameraman(vmqtt.mqtt_node):
         self.orders_dict = CameramanOrdersDict()
         self.orders_payload = None
         self.post_processes = []
-        self.image_ct = 0			# ct of images captured since __init__
         time.sleep(2)				# camera setling time, needed?
         self.last_fn = ''
         self.last_format = ''
@@ -283,10 +284,10 @@ class cameraman(vmqtt.mqtt_node):
         return
         fpx = im_fn[:-4]
         im_fn = fpx + '-A.jpeg'
-        im_path = os.path.join(self.imageDir, im_fn)
+        im_path = os.path.join(self.image_dir, im_fn)
         cv2.imwrite(im_path , d.original)
         annotated_fn = fpx + '-B.jpeg'
-        annotated_path = os.path.join(self.imageDir, annotated_fn)
+        annotated_path = os.path.join(self.image_dir, annotated_fn)
         cv2.imwrite(annotated_path , d.annotated)
         directions = {}
         directions['timeout'] = 3
@@ -369,7 +370,7 @@ class cameraman(vmqtt.mqtt_node):
         else:
             image_file_name_format = "Idle_{counter}." + self.loop_format
         if self.loop_publish == 'file':
-            burst_dest = os.path.join(self.imageDir, image_file_name_format)
+            burst_dest = os.path.join(self.image_dir, image_file_name_format)
         else:
             # streams can be jpeg, rgb, bgr, or yuv
             if self.loop_format == 'yuv':
@@ -395,8 +396,8 @@ class cameraman(vmqtt.mqtt_node):
             else:
                 # capture_continuous returns burst_dest if it is a buffer
                 image_fn = image_file_name_format.format(counter=burst_image_ct, timestamp=burst_timestamp)
-                #print("CAPT", image_fn, self.imageDir)
-                image_path = os.path.join(self.imageDir, image_fn)
+                #print("CAPT", image_fn, self.image_dir)
+                image_path = os.path.join(self.image_dir, image_fn)
                 this_image = OpticChiasm.ImageFromPicamera(burst_dest, self.loop_format, file_path=image_path)
                 if self.capture_publish == 'file':
                     this_image.Write()
@@ -447,7 +448,7 @@ class cameraman(vmqtt.mqtt_node):
                     self.PostProcess(this, Im=img, An=annotated)
                 pos = image_fn.rfind('.')
                 an_fn = image_fn[:pos] + '-A' + im_fn[pos:]
-                an_path = os.path.join(self.imageDir, an_fn)
+                an_path = os.path.join(self.image_dir, an_fn)
                 cv2.imwrite(an_path, annotated)
             else:
                 rect_list = self.MakerFaire2018(this_image)
