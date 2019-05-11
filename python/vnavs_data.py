@@ -260,8 +260,8 @@ class PersistentData(object):
         pdata = self.persistent_data.get(fqn_key, None)
         if pdata is None:
             return None
-        payload = saved_data[dpayload_field_name]
-        class_name = saved_data[dclass_field_name]
+        payload = pdata[dpayload_field_name]
+        class_name = pdata[dclass_field_name]
         class_registration = KnownClasses[class_name]
         object_instance = class_registration.factory_function(payload)
         return object_instance

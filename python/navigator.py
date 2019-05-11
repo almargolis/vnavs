@@ -248,8 +248,9 @@ class MissionStep(object):
         self.parm_mission = parm_mission
 
     def PublishNavigation(self, timer=6):
-        mission_specs = self.navigator.persistent_data.Get('mission_specs')
-        speed_method = mission_specs.get('speed_method', 'automatic')
+        #mission_specs = self.navigator.persistent_data.Get('mission_specs', key_group='/')
+        #speed_method = mission_specs.get('speed_method', 'automatic')
+        speed_method = 'manual'
 
         payload = {}
         payload[helmsman.HELMSMAN_HEADING] = self.nav.steering
@@ -291,16 +292,17 @@ class StepData(MissionStep):
         return True
 
 class StepKeyGroup(MissionStep):
-    __slots__ = ('dkeygroup',)
+    __slots__ = ('dkeygroup', )
 
     def __init__(self, stage):
+        super().__init__(stage)
         self.dkeygroup = None
 
     def DoStageStepInit(self):
         self.dkeygroup = self.parm_pos[0]
 
     def DoStageStepRun(self, loop_ct):
-        self.navigator.persistent_data.SetDefaultKeyGroup(dkeygroup)
+        self.navigator.persistent_data.SetDefaultKeyGroup(self.dkeygroup)
         return True
 
 class StepFollowLinePid(MissionStep):
@@ -376,24 +378,29 @@ class StepGpsWaypoint(MissionStep):
         super().__init__(stage)
         self.waypoint = None
         self.differential_base_position = "clear"
+        self.speed = 0
         self.next_time = None
 
     def DoStageStepInit(self):
         key = self.parm_pos[0]
-        value = self.navigator.persistent_data.Get(key)
-        self.waypoint = engineer_1.PositionStringToPosition(value)
+        print("StepGpsWaypoint()", key, self.navigator.persistent_data.key_group)
+        self.waypoint = self.navigator.persistent_data.Get(key)
+        print("StepGpsWaypoint", self.waypoint)
         if 'differential_base_position' in self.parm_kword:
             self.differential_base_position = self.parm_kword['differential_base_position']
         # Always publish differntial_base_position, either to set or clear
         payload = {}
         payload['differential_base_position'] = self.differential_base_position
         self.navigator.Publish(vconst.engineer_1_settings_topic, payload)
-        self.speed = int(self.parm_pos[1])
+        if len(self.parm_pos) > 1:
+            self.speed = int(self.parm_pos[1])
         self.next_time = time.time()
+        print("StepGpsWaypoint.DoStageStepInit()")
 
     def DoStageStepRun(self, loop_ct):
         # should check freshness of GPS and IMU data
         current_position = self.navigator.gps_data.Position()
+        print("StepGpsWaypoint.DoStageStepRun()", current_position, self.waypoint)
         delta = current_position.DistanceToWaypoint(self.waypoint)
         if delta.distance_to_waypoint <= WAYPOINT_WINDOW_METERS:
             print("StepGpsWaypoint.DoStageStepRun() reached waypoint", delta.distance_to_waypoint)
@@ -651,7 +658,7 @@ class Mission(object):
             return StepMessage(stage)
         def StopLog(stage, parm_pos):
             while len(parm_pos) < 1:
-                parm_pos.append('')
+               parm_pos.append('')
             parm_pos[0] = vconst.mission_log_stop_topic
             return StepMessage(stage)
 
@@ -692,7 +699,7 @@ class Mission(object):
                 # This is a new mission command
                 parts = line.split(':')
                 # parse command
-                cparts = [string.strip(p) for p in parts[0].split(' ')]
+                cparts = [p.strip() for p in parts[0].split(' ')]
                 step_type = cparts[0]
                 step_name = None
                 if len(cparts) > 1:
@@ -786,6 +793,7 @@ class Mission(object):
             return
         self.stage_step_loop_ct += 1
         step = self.active_stage.steps[self.stage_step_ix]
+        print("Mission.DoMission() loop_ct", self.stage_step_loop_ct)
         if self.stage_step_loop_ct == 1:
             print("DoMission() Start Stage Step", self.active_stage.name, len(self.active_stage.steps), step.__class__.__name__, self.mission_state)
             print("DoMission() Step", step.parm_pos, step.parm_kword, step.parm_mission)
@@ -817,7 +825,7 @@ class Mission(object):
             init_payload['mission_name'] = self.mission_name
             init_payload['mission_stage'] = stage_name
             self.navigator.Publish(vconst.mission_init_topic, init_payload)
-            self.state = MISSION_STATE_STARTED
+            self.mission_state = MISSION_STATE_STARTED
         elif stage_name == vconst.stage_init:
             self.mission_state = MISSION_STATE_WRAPUP
         # Start this stage
