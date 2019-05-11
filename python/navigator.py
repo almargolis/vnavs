@@ -692,7 +692,7 @@ class Mission(object):
                 # This is a new mission command
                 parts = line.split(':')
                 # parse command
-                cparts = [string.strip(p) for p in parts[0].split(' ')]
+                cparts = [p.strip() for p in parts[0].split(' ')]
                 step_type = cparts[0]
                 step_name = None
                 if len(cparts) > 1:
