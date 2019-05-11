@@ -122,7 +122,7 @@ class MissionControl(vmqtt.mqtt_node):
         nother_frame.AddButton('Download', command=self.OnReplayDownload, row=SAME_ROW, col=NEXT_COL)
 
         mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        self.mission_name_entry = mission_frame.AddEntryField('Mission', width=15, value='table')
+        self.mission_name_entry = mission_frame.AddEntryField('Mission', width=15, value='gps2')
         mission_frame.AddButton('Load', command=self.OnMissionLoad, row=SAME_ROW, col=NEXT_COL)
         self.mission_stage_entry = mission_frame.AddDropdown(caption='Stage', row=SAME_ROW, col=NEXT_COL)
         mission_frame.AddButton('Execute', command=self.OnStageExecute, row=SAME_ROW, col=NEXT_COL)
@@ -272,7 +272,7 @@ class MissionControl(vmqtt.mqtt_node):
         # This is an error checking step. It does not execute mission.
         # This needs to be enhanced to do and display mission syntax checking.
         mission_name = self.mission_name_entry.Value()
-        fp = mission_name + '.mis'
+        fp = os.path.join(self.scriptsDir, mission_name + '.mis')
         f = open(fp, 'r')
         mission_script = f.read()
         f.close()
