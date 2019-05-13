@@ -62,6 +62,8 @@ process_result_topic = 'process/result'
 stage_init = 'init'
 stage_finis = 'finis'
 
+DifferentialGpsClear = 'clear'
+
 config_file_path = os.path.expanduser("~/vnavs.ini")
 FAST_MQTT_PORT = 4000
 FILE_TRANSFER_PORT = 4010

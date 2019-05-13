@@ -687,8 +687,6 @@ class Darkroom(vmqtt.mqtt_node):
             # we get here during that process.
             return
 
-        self.HandleAllSynchronousPayloads()
-
         if self.delete_process_step_ix is not None:
             self.DeleteProcessStep(self.delete_process_step_ix)
         self.delete_process_step_ix = None

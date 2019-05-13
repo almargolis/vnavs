@@ -352,9 +352,6 @@ def find_server(port=vconst.FAST_MQTT_PORT, Verbose=False):
             return scan_ip
     return None
     
-#
-# Streamer() is the socket_xfer writer function which runs in its own process.
-# It empties the FIFO system queue as quickly as it can and converts that to a
 class Subscription(object):
     __slots__ = ('async_delivery', 'handler_method', 'handler_needs_topic', 'last_payload', 'queue', 'request_only', 'topic')
 
@@ -390,8 +387,9 @@ class ConfirmationRequest(object):
         return "( CONF {} - {} - {} )".format(self.conf_id, conf, chk)
 
 class mqtt_node(object):
-    __slots__ = ('args', 'automatically_connect', 'block_if_not_connected', 'broker_timeout', 'broker_type',
+    __slots__ = ('args', 'automatically_connect', 'automatically_handle_synchronous_messages', 'block_if_not_connected', 'broker_timeout', 'broker_type',
 					'config', 'confirmation_pending', 'debug', 'exception_ct', 'exception_last_time',
+					'has_synchronous_message_subscriptions',
 					'lastSocketError', 'loop_sleep',
 					'mqttc', 'node_name',
 					'select_timeout', 'single_threaded', 'socket_host', 'socket_port', 'stats', 'streamer', 'subscriptions',
@@ -399,7 +397,8 @@ class mqtt_node(object):
 
     def __init__(self, node_name=None, Subscriptions=[], AckTopic=None,
 				LoopSleep=0.01,
-				AutomaticallyConnect=True, BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0,
+				AutomaticallyConnect=True, AutomaticallyHandleSynchronousMessages=True,
+				BlockIfNotConnected=True, SingleThreaded=False, SelectTimeoutSecs=1.0,
 				BrokerType='F', host=None, port=None, Streamer=False, Verbose=True):
         # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         #	switch between cameras / bots manually.
@@ -429,10 +428,14 @@ class mqtt_node(object):
         self.config = ConfigParser.SafeConfigParser()
         self.config.readfp(open(vconst.config_file_path))
         self.automatically_connect = AutomaticallyConnect
+        self.automatically_handle_synchronous_messages = AutomaticallyHandleSynchronousMessages
         self.single_threaded = SingleThreaded
         self.select_timeout = SelectTimeoutSecs
+        self.has_synchronous_message_subscriptions = False
         self.subscriptions = {}
         for this in Subscriptions:
+            if not this.async_delivery:
+                self.has_synchronous_message_subscriptions = True
             self.subscriptions[this.topic] = this
         self.wildcard_handler = None
         self.broker_type = BrokerType
@@ -564,8 +567,12 @@ class mqtt_node(object):
                 if self.mqttc.connected:
                     if self.single_threaded:
                         self.CheckMqttPendingActivity()
+                    if self.has_synchronous_message_subscriptions and self.automatically_handle_synchronous_messages:
+                        self.HandleAllSynchronousMessages()
                     self.DoLoop()
                 elif not self.block_if_not_connected:
+                    if self.has_synchronous_message_subscriptions and self.automatically_handle_synchronous_messages:
+                        self.HandleAllSynchronousMessages()
                     self.DoLoop()
                 if self.CheckExceptions():
                     sys.exit(0)
@@ -622,7 +629,7 @@ class mqtt_node(object):
             return s
         return s[:max_chars] + ' [...]'
 
-    def GetLatestPayload(self, topic):
+    def GetLatestMessage(self, topic):
         # This methodology risks loosing a latest message that arrives between the line
         # where the payload is copied and the line where the subscription object payload is cleared.
         # This should be extremely rare and is not completely inconsistent with the expectation that
@@ -630,21 +637,21 @@ class mqtt_node(object):
         # As currenty written, using a single swap statement, this should be completely thread safe.
         #
         if topic not in self.subscriptions:
-            raise Exception("GetLatestPayload() unknown topic '{}'".format(topic))
+            raise Exception("GetLatestMessage() unknown topic '{}'".format(topic))
         subscription = self.subscriptions[topic]
         if subscription.last_payload is None:
             return None					# avoids tiny chance of clearing payload that arrives mid-method
         payload, subscription.last_payload = subscription.last_payload, None
         return payload
 
-    def HandleAllSynchronousPayloads(self):
+    def HandleAllSynchronousMessages(self):
         for this in self.subscriptions.values():
             if this.handler_method is None:
                 continue
             if this.async_delivery:
                 # messages was handled as soon as it arrived
                 continue
-            payload = self.GetLatestPayload(this.topic)
+            payload = self.GetLatestMessage(this.topic)
             if payload is not None:
                 if this.handler_needs_topic:
                     this.handler_method(this.topic, payload)

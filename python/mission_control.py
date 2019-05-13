@@ -544,7 +544,6 @@ class MissionControl(vmqtt.mqtt_node):
                 else:				# TRANSFER_TYPE_IMAGE
                     self.ProcessImage()
                 self.transfer_type = TRANSFER_TYPE_NONE
-        self.HandleAllSynchronousPayloads()
         if self.transfer_type == TRANSFER_TYPE_NONE:
             # No transfer in progress, see if one is ready to start
             if self.replay_log_transfer_wanted:
@@ -643,7 +642,10 @@ def LocateGps():
             break
         have_new_position_data = gps_device.UpdateGpsInfo()
         if have_new_position_data:
+            if len(gps_samples) == 3:
+                gps_device.StartRelativeGpsPositioning(xPosition)
             new_position = gps_device.PositionObject()
+            xPosition = new_position
             gps_samples.append(new_position)
             survey_map.AppendSurveyPosition(new_position)
             center_position = engineer_1.find_center_of_gps_samples(gps_samples)
@@ -673,7 +675,7 @@ def DistanceGps():
     else:
         start_key_group = None
         start_name = None
-    goal_location = data.Get(goal_name, key_group=goal_key_group)
+    goal_position = data.Get(goal_name, key_group=goal_key_group)
     gps_device = engineer_1.GpsDevice()
     while True:
         have_new_position_data = gps_device.UpdateGpsInfo()
@@ -684,7 +686,7 @@ def DistanceGps():
     dw = new_position.DistanceToWaypoint(goal_position)
     print("Current GPS {}, distance to goal {:f}".format(new_position.DMS(), dw.distance_to_waypoint))
     if start_name is not None:
-        start_location = data.Get(start_name, key_group=start_key_group)
+        start_position = data.Get(start_name, key_group=start_key_group)
         dw = start_position.DistanceToWaypoint(goal_position)
         dw2 = start_position.DistanceToWaypoint(new_position)
         print("Relative GPS {}, distance to goal {:f}, distance to relative start {:f}".format(start_position.DMS(),

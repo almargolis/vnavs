@@ -151,10 +151,10 @@ class ImuDataRecord(VnavsDataRecord):
     __slots__ = ImuDataDict.Slots()
     _dict = ImuDataDict
 
-def PositionStringToPosition(position):
-    parts = position.split(',')
-    Position(float(parts[0]), float(parts[1]))
-    return Position
+def PositionStringToPosition(position_str):
+    parts = position_str.split(',')
+    position = Position(float(parts[0]), float(parts[1]))
+    return position
 
 def PositionString(latitude, longitude):
     position = "{},{}".format(latitude, longitude)
@@ -173,6 +173,7 @@ def PositionFactory(payload):
     heading = payload.get('heading', None)
     speed = payload.get('speed', None)
     p = Position(latitude, longitude, heading=heading, speed=speed)
+    print("PositionFactory()", p)
     return p
 
 class Position(object):
@@ -270,6 +271,9 @@ class Position(object):
         longitude_dms = str(abs(degrees_x)) + u"\u00b0 " + str(minutes_x) + "' " + str(seconds_x) + "\" " + EorW
         latitude_dms = str(abs(degrees_y)) + u"\u00b0 " + str(minutes_y) + "' " + str(seconds_y) + "\" " + NorS
         return (latitude_dms, longitude_dms)
+
+    def PositionString(self):
+        return PositionString(self.latitude, self.longitude)
 
 #
 # Find the center / average of a series of gps samples
@@ -418,7 +422,9 @@ class GpsDevice(object):
         self.data.gps_mode = mode2
 
     def StartRelativeGpsPositioning(self, position):
+        assert isinstance(position, Position), "invalid position class " + position.__class__.__name__
         # Start moving as soon and fast as possible, need to exceed randomness of movement
+        print("StartRelativeGpsPositioning()", position)
         if position is None:
             # clear relative gps
             self.relative_known_start_position = None
@@ -430,6 +436,8 @@ class GpsDevice(object):
             self.data.raw_gps_latitude = None
 
     def UpdateRmcSentence(self, parsed_sentence):
+        #print("UpdateRmcSentence()", parsed_sentence.data)
+        #print(parsed_sentence.latitude.__class__.__name__, dir(parsed_sentence.latitude))
         speedRaw = parsed_sentence.data[6].strip()
         if speedRaw == '':
             return False		# on my sparkfun sensor, rest is also bad
@@ -437,6 +445,7 @@ class GpsDevice(object):
             # return sensor reading
             self.data.gps_longitude = parsed_sentence.longitude
             self.data.gps_latitude = parsed_sentence.latitude
+            print("UpdateRmcSentence()", self.data.gps_latitude.__class__.__name__,  self.data.gps_latitude, self.data.gps_longitude.__class__.__name__, self.data.gps_longitude)
             self.data.raw_gps_longitude = None
             self.data.raw_gps_latitude = None
         else:
@@ -444,8 +453,11 @@ class GpsDevice(object):
             if self.data.raw_gps_longitude is None:
                 self.data.raw_gps_longitude = parsed_sentence.longitude
                 self.data.raw_gps_latitude = parsed_sentence.latitude
-            self.data.gps_longitude += (parsed_sentence.longitude - self.data.raw_gps_longitude)
-            self.data.gps_latitude += (parsed_sentence.latitude - self.data.raw_gps_latitude)
+            print("UpdateRmcSentence()", self.data.gps_latitude.__class__.__name__,  self.data.gps_latitude, self.data.gps_longitude.__class__.__name__, self.data.gps_longitude)
+            delta_longitude = parsed_sentence.longitude - self.data.raw_gps_longitude
+            delta_latitude = parsed_sentence.latitude - self.data.raw_gps_latitude
+            self.data.gps_longitude += delta_longitude
+            self.data.gps_latitude += delta_latitude
             self.data.raw_gps_longitude = parsed_sentence.longitude
             self.data.raw_gps_latitude = parsed_sentence.latitude
         try:
@@ -530,7 +542,8 @@ class engineer_1(vmqtt.mqtt_node):
 
     def OnSettings(self, payload):
         differential_base_position = payload['differential_base_position']
-        if differential_base_position == 'clear':
+        print("engineer_1.OnSettings()", differential_base_position)
+        if differential_base_position == vconst.DifferentialGpsClear:
             start_position = None
         else:
             start_position = PositionStringToPosition(differential_base_position)
@@ -543,7 +556,7 @@ class engineer_1(vmqtt.mqtt_node):
         have_new_gps_data = self.gps_device.UpdateGpsInfo()
         if have_new_gps_data:
             payload = self.gps_device.data.CreatePayload()
-            print("Engineeer_1.DoLoop() GPS Payload", payload)
+            #print("Engineeer_1.DoLoop() GPS Payload", payload)
             self.Publish(vconst.engineer_1_gps_topic, payload)
             self.stats.Count('GpsMsg')
 
@@ -558,7 +571,7 @@ class engineer_1(vmqtt.mqtt_node):
             self.last_acceleromter_timestamp = time.time()
             self.stats.Count('ImuMsg')
             #print("ACCC %+8.4f %+8.4f GPS: %+8.4f" % (self.acc_speed_forward, self.acc_speed_sideways, self.gps_speed))
-            self.stats.Print('MSGS')
+            #self.stats.Print('MSGS')
 
 def TestImu():
     sense = SenseHat()

@@ -225,7 +225,7 @@ def NavigateTowardWaypoint(current_yaw, current_position, waypoint, nav, navigat
     payload[NAVIGATOR_WAYPOINT_DISTANCE] = delta.distance_to_waypoint
     navigator.Publish(vconst.navigator_plot_topic, payload)
 
-    print("NavigateTowardWaypoint()", current_yaw, delta.heading_to_waypoint, deltaHeading, nav.steering, nav.speed)
+    #print("NavigateTowardWaypoint()", current_yaw, delta.heading_to_waypoint, deltaHeading, nav.steering, nav.speed)
     return delta.distance_to_waypoint
 
 
@@ -377,7 +377,7 @@ class StepGpsWaypoint(MissionStep):
     def __init__(self, stage):
         super().__init__(stage)
         self.waypoint = None
-        self.differential_base_position = "clear"
+        self.differential_base_position = vconst.DifferentialGpsClear
         self.speed = 0
         self.next_time = None
 
@@ -387,7 +387,9 @@ class StepGpsWaypoint(MissionStep):
         self.waypoint = self.navigator.persistent_data.Get(key)
         print("StepGpsWaypoint", self.waypoint)
         if 'differential_base_position' in self.parm_kword:
-            self.differential_base_position = self.parm_kword['differential_base_position']
+            differential_gps_key = self.parm_kword['differential_base_position']
+            start_position = self.navigator.persistent_data.Get(differential_gps_key)
+            self.differential_base_position  = start_position.PositionString()
         # Always publish differntial_base_position, either to set or clear
         payload = {}
         payload['differential_base_position'] = self.differential_base_position
@@ -400,15 +402,18 @@ class StepGpsWaypoint(MissionStep):
     def DoStageStepRun(self, loop_ct):
         # should check freshness of GPS and IMU data
         current_position = self.navigator.gps_data.Position()
-        print("StepGpsWaypoint.DoStageStepRun()", current_position, self.waypoint)
+        #print("StepGpsWaypoint.DoStageStepRun()", current_position, self.waypoint)
         delta = current_position.DistanceToWaypoint(self.waypoint)
         if delta.distance_to_waypoint <= WAYPOINT_WINDOW_METERS:
             print("StepGpsWaypoint.DoStageStepRun() reached waypoint", delta.distance_to_waypoint)
             self.nav.Init()
             self.PublishNavigation()
+            payload = {}
+            payload['differential_base_position'] = vconst.DifferentialGpsClear
+            self.navigator.Publish(vconst.engineer_1_settings_topic, payload)
             return True
         if time.time() > self.next_time:
-            print("StepGpsWaypoint.DoStageStepRun() navigate", delta.distance_to_waypoint)
+            #print("StepGpsWaypoint.DoStageStepRun() navigate", delta.distance_to_waypoint)
             NavigateTowardWaypoint(self.navigator.imu_data.imu_yaw, current_position, self.waypoint, self.nav, navigator=self.navigator)
             self.PublishNavigation()
             self.next_time = time.time() + 1.0
@@ -793,7 +798,7 @@ class Mission(object):
             return
         self.stage_step_loop_ct += 1
         step = self.active_stage.steps[self.stage_step_ix]
-        print("Mission.DoMission() loop_ct", self.stage_step_loop_ct)
+        #print("Mission.DoMission() loop_ct", self.stage_step_loop_ct)
         if self.stage_step_loop_ct == 1:
             print("DoMission() Start Stage Step", self.active_stage.name, len(self.active_stage.steps), step.__class__.__name__, self.mission_state)
             print("DoMission() Step", step.parm_pos, step.parm_kword, step.parm_mission)
@@ -1057,8 +1062,6 @@ class navigator(vmqtt.mqtt_node):
         self.mission_sync_event_payload = None
 
     def DoLoop(self):
-        self.HandleAllSynchronousPayloads()
-
         if self.mission is None:
             if self.mission_load_payload is not None:
                 mission_payload = self.mission_load_payload
