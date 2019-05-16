@@ -4,6 +4,7 @@
 #                      zip, round, input, int, pow, object)
 
 import io
+import importlib
 import os, cv2, numpy as np
 import math
 import time
@@ -129,7 +130,7 @@ class Image(object):
         return self.ImAsAny(IM_GRAY)
 
     def ImAsAny(self, colorcode):
-        print("ImAsAny()", self.colorcode, colorcode, self._im.__class__.__name__)
+        #print("ImAsAny()", self.colorcode, colorcode, self._im.__class__.__name__)
         if self._im is None:
             return None
         colorcode = colorcode.upper()
@@ -408,6 +409,14 @@ ImageFilter('Blur',
 			[vdata.DataAttribPoint('ksize', '3,3')],
 			Flags=[])
 
+ImageFilter('Cameraman',
+			'{x_output_im} = oc.Cameraman(im_in, "{path}", "{fn}")',
+			[
+				vdata.DataAttribStr('path', '/Users/almargolis/projects/vnavs/scripts'),
+				vdata.DataAttribStr('fn', 'test.cam')
+			],
+			Flags=[])
+
 ImageFilter('BlurBilateralFilter',
 			'{x_output_im} = oc.Image(im=cv2.bilateralFilter(im_in.im, {diameter}, {sigmaColor}, {sigmaSpace}), colorcode=im_in.colorcode)',
 			[vdata.DataAttribInt('diameter', '5'), vdata.DataAttribInt('sigmaColor', '17'), vdata.DataAttribInt('sigmaSpace', '17')],
@@ -601,6 +610,19 @@ def apply_threshold(channel, low_value, high_value):
     channel = apply_mask(channel, high_mask, high_value)
 
     return channel
+
+def Cameraman(im, path, fn):
+    exfn = os.path.join(path, fn)
+    with open(exfn, 'r') as f:
+        src = f.read()
+    c = compile(src, 'cvcode.py', 'exec', dont_inherit=True)
+    glb = {}
+    glb['cv2'] = cv2
+    glb['oc'] = importlib.import_module('OpticChiasm')
+    loc = {}
+    loc['im_base'] = im
+    exec(c, glb, loc)
+    return loc['display_image']
 
 def Histogram_CB(img):
     channels = cv2.split(img)
@@ -1517,7 +1539,7 @@ class ReflexEntities(object):
 #   ext: (extent) maximum index value for that axis (integer)
 def ResolveSymbolicIndex(c, ext, p1=None):
     def Raw_ResolveSymbolicIndex(c, ext, p1=None):
-        print('Raw_ResolveSymbolicIndex', repr(c), ext, p1)
+        #print('Raw_ResolveSymbolicIndex', repr(c), ext, p1)
         if isinstance(c, str):
             if c[0] == 'm':
                 if c == 'm':

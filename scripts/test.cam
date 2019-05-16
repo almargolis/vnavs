@@ -1,0 +1,3 @@
+im_in = im_base.copy()
+im_in = im_in.CopyAsGray()
+display_image = im_in

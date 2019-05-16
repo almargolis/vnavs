@@ -52,6 +52,10 @@ class ProcessStep(object):
     steps = []
     process_file_extension = 'drk'
     process_file_types = (('Darkroom Process', '*.'+process_file_extension), )
+    python_file_extension = 'py'
+    python_file_types = (('Darkroom Python', '*.'+python_file_extension), )
+    cameraman_file_extension = 'cam'
+    cameraman_file_types = (('Darkroom Python', '*.'+python_file_extension), )
     imports = []                   # imports for exec or script
     # imports.append(('__builtins__', __builtins__, None))
     imports.append(('cv2', cv2, None))
@@ -258,8 +262,8 @@ class ProcessStep(object):
                 this_widget[0].parm_id = parm_name
 
     @classmethod
-    def WriteScript(cls):
-        f = codecs.open('python/darkroom_script.py', 'w', encoding='utf-8')
+    def WriteProgram(cls, py_fn):
+        f = codecs.open(py_fn, 'w', encoding='utf-8')
         f.write('\n')
 
 
@@ -298,6 +302,31 @@ class ProcessStep(object):
         f.write('cv2.imshow("im_in", {display}.im)\n'.format(display=display_image))
         f.write('cv2.waitKey(0)\n')
         f.write('cv2.destroyAllWindows()\n')
+        f.close()
+
+    @classmethod
+    def WriteCameraman(cls, cam_fn):
+        # Writes a snipet of code that will be used for compile/exec in cameraman
+        # All imports will be provided via the global parameter:
+        #	cv2, oc (OpticChiasm)
+        # The source image object will be provided in the exec locals object:
+        #	im_base
+        # The output image in the exec locals object is:
+        #	display_image
+
+        f = codecs.open(cam_fn, 'w', encoding='utf-8')
+
+        f.write('im_in = im_base.copy()\n')
+
+        for ix, this in enumerate(cls.steps[1:]):
+            code_str = this.GetCodeStr(Script=True)
+            f.write(code_str)
+
+        if cls.steps[-1].cv_specs.annotate_code is None:
+            f.write("display_image = im_in\n")
+        else:
+            f.write("display_image = annotated\n")
+
         f.close()
 
     def GetCodeStr(self, Script=True):
@@ -400,12 +429,12 @@ class ProcessStep(object):
         self.deposition.ReplaceValue(deposition)
         exec_code_str = self.GetCodeStr(Script=False)
         if exec_code_str != '':
-            print("EXEC", exec_code_str)
+            #print("EXEC", exec_code_str)
             if 'im_in' in exec_global_vars:
-                print("XXXX-vv", exec_global_vars['im_in'].__class__.__name__)
+                #print("XXXX-vv", exec_global_vars['im_in'].__class__.__name__)
                 ximin = exec_global_vars['im_in']
-                if isinstance(ximin, OpticChiasm.Image):
-                    print("XXXX-im", ximin._im.__class__.__name__)
+                #if isinstance(ximin, OpticChiasm.Image):
+                #    print("XXXX-im", ximin._im.__class__.__name__)
             try:
                 exec(exec_code_str, exec_global_vars)
             except:
@@ -440,7 +469,7 @@ class Darkroom(vmqtt.mqtt_node):
     __slots__ = (
 				'camera_iso', 'camera_last_filename', 'camera_shutter_speed',
 				'delete_process_step_ix', 'downloadDir', 'file_client', 'image',
-				'last_pic_payload', 'last_pic_time',
+				'last_pic_payload', 'last_pic_time', 'last_process_time',
 				'load_filter_name', 'load_new_filter_ct', 'load_parms', 'load_process_file_name',
 				'loading', 'local_cam',
 				'new_step', 'notebook', 'notebook_add_id',
@@ -489,6 +518,7 @@ class Darkroom(vmqtt.mqtt_node):
         self.camera_last_filename = ''
         self.last_pic_payload = None
         self.last_pic_time = 0
+        self.last_process_time = time.time()
         self.local_cam = None
         self.pic_needed = False
         self.pic_continuous = True
@@ -501,7 +531,6 @@ class Darkroom(vmqtt.mqtt_node):
         self.statusFrame.AddButton('Open File', command=self.OnOpenImageFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Open Process', command=self.OpenProcessFile, row=SAME_ROW, col=NEXT_COL)
         self.statusFrame.AddButton('Save Process', command=self.SaveProcessFile, row=SAME_ROW, col=NEXT_COL)
-        self.statusFrame.AddButton('Script', command=ProcessStep.WriteScript, row=SAME_ROW, col=NEXT_COL)
 
         ProcessStep.app = self
         self.new_step = None
@@ -545,7 +574,7 @@ class Darkroom(vmqtt.mqtt_node):
         self.load_process_file_name = self.statusFrame.DoFileNameDialog(Dir=self.scriptsDir, FileTypes=ProcessStep.process_file_types)
 
     # While interacting with the process the parms dictionary can get
-    # cluttered with values that are not needed for hte current filter. This
+    # cluttered with values that are not needed for the current filter. This
     # is intentional because it lets you go back to previous filter with the
     # parms you had set. Save/LoadProcessFile keep thse dirty values. There
     # is something to be said to filter the parts based on the current step.
@@ -600,15 +629,20 @@ class Darkroom(vmqtt.mqtt_node):
         self.loading = False
 
     def SaveProcessFile(self):
-        fn = self.statusFrame.DoFileSaveAsNameDialog(Dir=self.scriptsDir,
-							FileName=self.load_process_file_name,
-							FileTypes=ProcessStep.process_file_types)
-        f = open(fn, 'w')
+        drk_fn = self.statusFrame.DoFileSaveAsNameDialog(Dir=self.scriptsDir,
+                                                        FileName=self.load_process_file_name,
+                                                        FileTypes=ProcessStep.process_file_types)
+        fn_root, fn_ext = os.path.splitext(drk_fn)
+        drk_f = open(drk_fn, 'w')
         for this_step in ProcessStep.steps:
-            f.write(u'/{}\n'.format(this_step.cv_filter_name))
+            drk_f.write(u'/{}\n'.format(this_step.cv_filter_name))
             for this_key, this_value in this_step.parm_values.items():
-                f.write(u'parm.{}={}\n'.format(this_key, this_value))
-        f.close()
+                drk_f.write(u'parm.{}={}\n'.format(this_key, this_value))
+        drk_f.close()
+        cam_fn = fn_root + '.' + ProcessStep.cameraman_file_extension
+        py_fn = fn_root + '.' + ProcessStep.python_file_extension
+        ProcessStep.WriteCameraman(cam_fn)
+        ProcessStep.WriteProgram(py_fn)
 
     def OnCaptureImage(self):
         print("OnCaptureImage()")
@@ -692,7 +726,7 @@ class Darkroom(vmqtt.mqtt_node):
         self.delete_process_step_ix = None
 
         if self.load_process_file_name is not None:
-            print("LOAD PROCESS", len(ProcessStep.steps))
+            #print("LOAD PROCESS", len(ProcessStep.steps))
             self.LoadProcessFile(self.load_process_file_name)
         self.load_process_file_name = None
 
@@ -722,23 +756,30 @@ class Darkroom(vmqtt.mqtt_node):
                     payload = self.last_pic_payload			# capture payload because self.last_pic_payload is updated asynchronously
                     self.pic_fn = payload['filename']
                     path = os.path.join(self.downloadDir, self.pic_fn)
-                    print("DoLoop() GetFile: ", path)
+                    #print("DoLoop() GetFile: ", path)
                     if not self.file_client.GetFile('i', self.pic_fn, path=path):
                         print("Unable to fetch PIC", self.pic_fn)
                         return
                     self.last_pic_time = time.time()
                     iso = payload['iso']
                     shutter_speed = payload['shutter_speed']
-                    print("CAM", iso, shutter_speed)
+                    #print("CAM", iso, shutter_speed)
             if (new_image is not None) or (path is not None):
                 # We have a new image. We might not. We don't get a picture if Capture hasn't been
                 # clicked or if this loop is running faster than new images are published in
                 # continuous SRC_BOT_CAMERA mode.
-                print("DoLoop() process image ", path, new_image is not None)
+                #print("DoLoop() process image ", path, new_image is not None)
                 self.ConfigureImageSource(path=path, new_image=new_image, iso=iso, shutter_speed=shutter_speed, colorcode=colorcode)
+        if (not self.pic_continuous) and ((time.time() - self.last_process_time) > 0.1):
+            # We don't want to process the image on every pass of the loop because that can use too many CPU
+            # cycles and make the system laggy. In continuous mode, we update frequently with each new image.
+            # When in single capture mode, we need to update periodically so reflect the user updating
+            # controls. Especially sliders.
+            self.step_execution_needed = True
         if self.step_execution_needed:
             ProcessStep.ExecuteAllSteps()
             self.step_execution_needed = False
+            self.last_process_time = time.time()
         self.tk.Update()
         # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
 

@@ -465,9 +465,9 @@ class TkWidgetDef(object):
 					row=NEXT_ROW, col=SAME_COL):
         if self.debug_this:
           print("AddSliderField", row, col, caption)
-        print('Slider', row, col, self.last_used_row, self.last_used_col)
+        #print('Slider', row, col, self.last_used_row, self.last_used_col)
         row, col = self._Position(row=row, col=col)
-        print('Slider', row, col, self.last_used_row, self.last_used_col)
+        #print('Slider', row, col, self.last_used_row, self.last_used_col)
         if caption is None:
             refname = "Slider"
             tk_caption = None
@@ -738,7 +738,8 @@ class TkWidgetDef(object):
             if pctHeight > 1.0:
                 pctHeight = 1.0
             self.vbar.set(0.0, pctHeight)
-            print("UpdateImage()", self.canvas_width, self.canvas_height, width, height, pctWidth, pctHeight, opencv_fn)
+            if self.debug_this:
+                print("UpdateImage()", self.canvas_width, self.canvas_height, width, height, pctWidth, pctHeight, opencv_fn)
         else:
             raise TypeError("Unsupported image widget: " + self.tkw.__class__.__name__)
         if self.thumbnail:
