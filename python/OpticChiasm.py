@@ -44,6 +44,7 @@ DRAW_BGR_CYAN = (255, 255, 0)
 DRAW_BGR_BLACK = (0, 0, 0)
 DRAW_BGR_WHITE = (255, 255, 255)
 DRAW_COLORS = (DRAW_BGR_GREEN, DRAW_BGR_RED, DRAW_BGR_BLUE, DRAW_BGR_YELLOW, DRAW_BGR_MAGENTA, DRAW_BGR_CYAN)
+color_ix = -1
 
 RACE_BLUR = False
 RACE_CANNY = False
@@ -191,7 +192,7 @@ class Image(object):
         return new_image
 
     def DrawLinePoints(self, linepoints, color=DRAW_BGR_GREEN, thickness=2):
-        # Annotates an array of OpenCvRect from ChaseLine() or elsewhere
+        # Annotates an array of RightRect or RotatedRect from ChaseLine() or elsewhere
         if linepoints is not None:
             for this in linepoints:
                 cv2.rectangle(self._im, this.p1, this.p2, color, thickness)
@@ -199,11 +200,11 @@ class Image(object):
     def DrawRectangle(self, rect, color=DRAW_BGR_GREEN, thickness=2):
         cv2.rectangle(self._im, rect.p1, rect.p2, color, thickness)
 
-    def RectFromSymbolicYX(self, y_range, x_range):
-        return RectFromSymbolicYX(self._im, y_range, x_range)
+    def RightRectFromSymbolicYX(self, y_range, x_range):
+        return RightRectFromSymbolicYX(self._im, y_range, x_range)
 
-    def RectFromSymbolicPP(self, p1, p2):
-        return RectFromSymbolicPP(self._im, p1, p2)
+    def RightRectFromSymbolicPP(self, p1, p2):
+        return RightRectFromSymbolicPP(self._im, p1, p2)
 
     def ChaseLine(self, hsvspec, rect,
 			end_y=0,
@@ -285,17 +286,17 @@ class Image(object):
         kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
         im_dilated = cv2.dilate(im_masked, kernel, iterations=iterations)
         cont2, contours, hierarchy = cv2.findContours(im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        rect_list = ContoursExtract(contours, hierarchy, MinimumArea=MinimumBlobArea, MaximumCtOfRectsWanted=MaximumCtOfRectsWanted)
+        rotated_rect_list = ContoursExtract(contours, hierarchy, MinimumArea=MinimumBlobArea, MaximumCtOfRectsWanted=MaximumCtOfRectsWanted)
         next_hsv_spec = None
-        if (rect_list is not None) and (len(rect_list) > 0):
+        if (rotated_rect_list is not None) and (len(rotated_rect_list) > 0):
             # use im_masked because im_dilated includes out of range hsv values
-            next_hsv_spec = NextHsvSpec(im_hsv, mask=im_masked, rect=rect_list[0])
+            next_hsv_spec = NextHsvSpec(im_hsv, mask=im_masked, rect=rotated_rect_list[0])
             if rect is not None:
-                for this in rect_list:              # adjust to original image coordinates
+                for this in rotatated_rect_list:              # adjust to original image coordinates
                     this.center_x += rect.x_min
                     this.center_y += rect.y_min
-        print("FindColorBlobs()", rect_list)
-        return rect_list, next_hsv_spec
+        print("FindColorBlobs()", rotated_rect_list)
+        return rotated_rect_list, next_hsv_spec
 
 def ImageFromPicamera(picam_image, format, file_path=None):
     # format is picamera style format
@@ -385,7 +386,7 @@ ImageFilter(FILTER_NAME_COLORMASK_SINGLE,
                         Flags=[FLAG_SLIDERS])
 
 image_filter = ImageFilter(FILTER_NAME_CROPPP,
-			'{x_output_rect} = im_in.RectFromSymbolicPP({p1}, {p2})\n'
+			'{x_output_rect} = im_in.RightRectFromSymbolicPP({p1}, {p2})\n'
 				+ '{x_output_im} = im_in.Crop({x_output_rect})\n'
 				+ 'print(im_in.shape, {x_output_rect})\n',
 			[vdata.DataAttribPointSym('p1', 'm-50,m+50'), vdata.DataAttribPointSym('p2', '-100,e')],
@@ -394,7 +395,7 @@ image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 image_filter = ImageFilter('CropYX',
-			'{x_output_rect} = im_in.RectFromSymbolicYX({y_range}, {x_range})\n'
+			'{x_output_rect} = im_in.RightRectFromSymbolicYX({y_range}, {x_range})\n'
 				+ '{x_output_im} = im_in.Crop({x_output_rect})\n'
 				+ 'print(im_in.shape, {x_output_rect})\n',
 			[vdata.DataAttribPointSym('y_range', '-100,'), vdata.DataAttribPointSym('x_range', 'm-50,m+50')],
@@ -550,7 +551,7 @@ ImageFilter('HistogramCB',
 			Flags=[])
 
 image_filter = ImageFilter(FILTER_NAME_ANALYZER,
-			'r = im_base.RectFromSymbolicPP({p1}, {p2})\n',
+			'r = im_base.RightRectFromSymbolicPP({p1}, {p2})\n',
 			[vdata.DataAttribPointSym('p1', 'm-3,m-3'), vdata.DataAttribPointSym('p2', 'p+3,p+3')],
 			Flags=[])
 image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
@@ -558,18 +559,14 @@ image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
 				+ 'xstep.SetInfo(0, "Hue", im_base.Crop(r).AverageHue())\n'
 
 image_filter = ImageFilter('HoughLinesP',
-			'{x_output_lines} = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
+			'{x_output_objects} = HoughLinesP(im_in, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
 			[vdata.DataAttribInt('MinLineLength', '30'), vdata.DataAttribInt('MaxLineGap', 10)],
 			Flags=[''])
 image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
-				+ 'print({x_output_lines})\n' \
-				+ 'color_ix = -1\n' \
-				+ 'if ({x_output_lines} is not None) and (len({x_output_lines}) > 0):\n' \
-				+ '    for line  in {x_output_lines}:\n' \
-				+ '        for x1,y1,x2,y2 in line:\n' \
-				+ '            color_ix = oc.NextColorIx(color_ix)\n' \
-				+ '            color = oc.DRAW_COLORS[color_ix]\n' \
-				+ '            cv2.line({x_output_annotated}.im, (x1,y1), (x2,y2), color, 1)\n'
+				+ 'print({x_output_objects})\n' \
+				+ 'oc.InitColor()\n' \
+				+ 'for this in {x_output_objects}:\n' \
+				+ '    this.Annotate({x_output_annotated})\n'
 
 ImageFilter('Map',
 			'cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))',
@@ -689,31 +686,36 @@ def simplest_cb(img, percentile):
 
     return cv2.merge(out_channels)
 
-def NextColorIx(c):
-    c += 1
-    if c >= len(DRAW_COLORS):
-        c = 0
-    return c
+def InitColor():
+    global color_ix
+    color_ix = -1
 
-def ListOfOpenCvRectAsListOfDicts(in_list):
-    # Takes list of OpenCvRect and converts to a JSON serializable
+def NextColor():
+    global color_ix
+    color_ix += 1
+    if color_ix >= len(DRAW_COLORS):
+        color_ix = 0
+    return DRAW_COLORS[color_ix]
+
+def ListOfRotatedRectAsListOfDicts(in_list):
+    # Takes list of RotatedRect and converts to a JSON serializable
     # list of dicts. The list is from Image.ChaseLine() or similar.
     res = []
     for this in in_list:
         res.append(ObjectAsDict(this))
     return res
 
-def ListOfOpenCvRectFromListofDicts(in_list):
+def ListOfRotatedRectFromListofDicts(in_list):
     # Takes a list of dicts and convert to a list
-    # of OpenCvRect
+    # of RotatedRect
     if in_list is None:
         return []
     res = []
     for this in in_list:
-        res.append(OpenCvRectFromDict(this))
+        res.append(RotatedRectFromDict(this))
     return res
 
-def SlopeOfListOfOpenCvRect(list_of_rects):
+def SlopeOfListOfRotatedRect(list_of_rects):
     [vx,vy,x,y] =  cv2.fitLine(points, cv2.DIST_L1, 0, 0.01, 0.01)
     print("slope", float(vy / vx))
     left_y = int((-x*vy/vx) + y)
@@ -722,9 +724,9 @@ def SlopeOfListOfOpenCvRect(list_of_rects):
     if (left_y >= 0) and (left_y <= height) and (right_y >= 0) and (right_y <= height):
         vert_line = ((width-1,right_y), (0,left_y))
 
-def OpenCvRectFromDict(d):
-    #print("OpenCvRectFromDict()", d)
-    return OpenCvRect(((d['center_x'], d['center_y']),
+def RotatedRectFromDict(d):
+    #print("RotatedRectFromDict()", d)
+    return RotatedRect(((d['center_x'], d['center_y']),
                         (d['width'], d['height']),
                         d['angle']))
 
@@ -734,7 +736,7 @@ def ObjectAsDict(src):
         res[this] = getattr(src, this)
     return res
 
-class OpenCvRect(object):
+class RotatedRect(object):
     __slots__ = ('angle', 'center_x', 'center_y', 'height', 'width')
 
     def __init__(self, rect):		# rect from cv2.minAreaRect() ((x, y), (w, h), angle)
@@ -753,9 +755,9 @@ class OpenCvRect(object):
 				angle=self.angle)
 
     def BoxPointsList(self):
-        return cv2.boxPoints(self.AsOpenCvRect()).tolist()	# returns array of 4 [x, y]
+        return cv2.boxPoints(self.AsRotatedRect()).tolist()	# returns array of 4 [x, y]
 
-    def AsOpenCvRect(self):
+    def AsRotatedRect(self):
         return [[self.center_x, self.center_y], [self.width, self.height], angle]
 
     def TopY(self, x):
@@ -784,16 +786,16 @@ class OpenCvRect(object):
         half_height = self.height / 2
         return (int(self.center_x + half_width), int(self.center_y + half_width))
 
-def OpenCvRectFromOpenCvImage(im):
+def RotatedRectFromOpenCvImage(im):
     shape = im.shape
     height = shape[0]
     width = shape[1]
     center = (float(width / 2.0), float(height / 2.0))
     dims = (width, height)
-    return OpenCvRect((center, dims, 0.0))
+    return RotatedRect((center, dims, 0.0))
 
 def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3):
-    # returns a list of the largest contours as minimum sized rectangles
+    # returns a list of the largest contours as minimum sized RotatedRect
     if hierarchy is None:
         return None
     # Scan contours, discarding small ones
@@ -812,16 +814,14 @@ def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3
             discarded_contour_count = 0
         h_ix = h[0]
     areas.sort(reverse=True)				# sort from largest to smallest)
-    rect_list = []
+    rotated_rect_list = []
     for this in areas[:MaximumCtOfRectsWanted+1]:
         h_ix = this[1]
         cnt = contours[h_ix]
-        rect = OpenCvRect(cv2.minAreaRect(cnt))		# ((x, y), (w, h), angle)
-        rect_list.append(rect)
-    print("ContoursExtract()", rect_list)
-    return rect_list
-
-
+        rect = RotatedRect(cv2.minAreaRect(cnt))		# ((x, y), (w, h), angle)
+        rotated_rect_list.append(rect)
+    print("ContoursExtract()", rotated_rect_list)
+    return rotated_rect_list
 
 def ContoursToLineVectors(img, contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3):
     # This only looks at top level of hierarchy.
@@ -1064,8 +1064,8 @@ def HsvSpecFromPayload(payload):
                             saturation=saturation, saturationrange=saturationrange,
                             value=value, valuerange=valuerange)
 
-def NextHsvSpec(hsvImage, mask=None, rect=None, minrange=20):
-    # hsvImage is an OpenCvImage. rect is an OpenCvRect.
+def NextHsvSpec(hsvImage, mask=None, rotated_rect=None, minrange=20):
+    # hsvImage is an OpenCvImage. rotated_rect is an RotatedRect.
     # Creates an HsvSpec based on the upper part of this image.
     # It considers only the center x and y from center to top.
     # Optionally considers only image pixels hilighted (>0) by mask.
@@ -1078,17 +1078,17 @@ def NextHsvSpec(hsvImage, mask=None, rect=None, minrange=20):
         if rng < minrange:
             rng = minrange
         return avg, rng
-    #print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(mask), rect)
+    #print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(mask), rotated_rect)
     value_ct = 0
     values = []
     values.append([0, 255, 0])		# sum, min value, max value)
     values.append([0, 255, 0])		# sum, min value, max value)
     values.append([0, 255, 0])		# sum, min value, max value)
-    if rect is None:
-        rect = OpenCvRectFromOpenCvImage(hsvImage)
-    x = int(rect.center_x)
-    y = int(rect.center_y)
-    top_y = int(rect.TopY(x))
+    if rotated_rect is None:
+        rotated_rect = RotatedRectFromOpenCvImage(hsvImage)
+    x = int(rotated_rect.center_x)
+    y = int(rotated_rect.center_y)
+    top_y = int(rotated_rect.TopY(x))
     for this_y in range(y, top_y, -1):
         #print("NextHsvSpec() Loop", this_y, x, hueMask[this_y, x], hsvImage[this_y, x])
         if (mask is None) or (mask[this_y, x] > 0):
@@ -1213,32 +1213,6 @@ def thinning_example(src):
         cv2.imshow("src", bw)
         cv2.imshow("thinning", bw2)
         cv2.waitKey()
-
-def HoughLines(img, gray):
-  contoured_image = img.copy()
-  #edges = cv2.Canny(gray.copy() ,100,200,apertureSize = 3)	# app size is 3, 5 or 7
-  edges = AutoCanny(gray.copy(), 0.33)
-
-  minLineLength = 30
-  maxLineGap = 5
-  maxLineGap = 1
-  maxLineGap = 30
-  rho = 30
-  rho = 90
-  rho = 1
-  theta = np.pi / 180
-  threshold = 1
-  threshold = 15
-  #lines = cv2.HoughLinesP(edges, rho, theta, threshold, minLineLength,maxLineGap)
-  lines = cv2.HoughLinesP(edges, 1, np.pi/180, 15, minLineLength=50, maxLineGap=10)
-  if lines is None:
-      print("NO LINES")
-  if lines is not None:
-    print("lineCt:", len(lines))
-    for x in range(0, len(lines)):
-      for x1,y1,x2,y2 in lines[x]:
-        cv2.line(contoured_image,(x1,y1),(x2,y2),(0,255,0),2)
-  return edges, contoured_image
 
 def DrawContourLines(img, contours, color):
   h, w, channels = img.shape
@@ -1590,8 +1564,37 @@ def ResolveSymbolicIndex(c, ext, p1=None):
         return ext
     return res
 
-class Rect(object):
-    # This is a right rectangle. See OpenCvRect for rotated rectangle.
+def HoughLinesP(im, minLineLength=30, maxLineGap=10):
+    cv_lines = cv2.HoughLinesP(im.im, 1, np.pi/180, 15, minLineLength=minLineLength, maxLineGap=maxLineGap)
+    object_list = []
+    for this in cv_lines:
+        for x1, y1, x2, y2 in this:
+            object_list.append(LineObject(x1, y1, x2, y2))
+    return object_list
+
+class LineObject(object):
+    __slots__ = ('x1', 'y1', 'x2', 'y2')
+    def __init__(self, x1, y1, x2, y2):
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = y2
+        self.y2 = y2
+
+    def Annotate(self, im, color=None, width=1):
+        if color is None:
+            color = NextColor()
+        cv2.line(im.im, self.P1, self.P2, color, width)
+
+    @property
+    def p1(self):
+        return(self.x1, self.y1)
+
+    @property
+    def p2(self):
+        return(self.x2, self.y2)
+
+class RightRect(object):
+    # This is a right rectangle. See RotatedRect for rotated rectangle.
     __slots__ = ('y_min', 'y_max', 'x_min', 'x_max')
     def __init__(self, y_min, y_max, x_min, x_max):
         #assert y_min < y_max		# maybe just reorder instead. If we do that,
@@ -1605,7 +1608,7 @@ class Rect(object):
         return '[({0}, {1}), ({2}, {3})]'.format(self.x_min, self.y_min, self.x_max, self.y_max)
 
     def copy(self):
-        res = Rect(self.y_min, self.y_max, self.x_min, self.x_max)
+        res = RightRect(self.y_min, self.y_max, self.x_min, self.x_max)
         return res
 
     def AsPayload(self):
@@ -1641,11 +1644,11 @@ class Rect(object):
     def TopY(self, x=None):
         return self.y_min
 
-def RectFromOpenCvImage(im):
+def RightRectFromOpenCvImage(im):
     shape = im.shape
-    return Rect(0, shape[0], 0, shape[1])
+    return RightRect(0, shape[0], 0, shape[1])
 
-def RectFromPayload(payload):
+def RightFromPayload(payload):
     if 'y_min' in payload:
         y_min = int(payload['y_min'])
         y_max = int(payload['y_max'])
@@ -1658,9 +1661,9 @@ def RectFromPayload(payload):
         h = int(payload['h'])
         x_max = x_min + w
         y_max = y_min + h
-    return Rect(y_min, y_max, x_min, x_max)
+    return RightRect(y_min, y_max, x_min, x_max)
 
-def RectFromSymbolicYX(im, y_range, x_range):
+def RightRectFromSymbolicYX(im, y_range, x_range):
     height, width, channels = im.shape
     y_min = ResolveSymbolicIndex(y_range[0], height)
     y_max = ResolveSymbolicIndex(y_range[1], height)
@@ -1670,9 +1673,9 @@ def RectFromSymbolicYX(im, y_range, x_range):
         x_min, x_max = x_max, x_min
     if y_min > y_max:
         y_min, y_max = y_max, y_min
-    return Rect(y_min, y_max, x_min, x_max)
+    return RightRect(y_min, y_max, x_min, x_max)
 
-def RectFromSymbolicPP(im, p1, p2):
+def RightRectFromSymbolicPP(im, p1, p2):
     if im is None:
         return None
     if len(im.shape) > 2:
@@ -1688,7 +1691,7 @@ def RectFromSymbolicPP(im, p1, p2):
         x_min, x_max = x_max, x_min
     if y_min > y_max:
         y_min, y_max = y_max, y_min
-    return Rect(y_min, y_max, x_min, x_max)
+    return RightRect(y_min, y_max, x_min, x_max)
 
 class Robogames(object):
     def __init__(self, image, colors):

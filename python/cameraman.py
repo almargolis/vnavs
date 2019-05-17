@@ -136,6 +136,7 @@ class CameramanOrdersDict(vdata.Dict):
 
 class cameraman(vmqtt.mqtt_node):
     __slots__ = ('burst_fps_ct', 'burst_fps_rate', 'burst_fps_start_time',
+			'cam_compiled', 'cam_script',
 			'camera', 'camera_resolution', 'camera_type',
 			'capture_format', 'capture_publish',
 			'do_auto_iso',
@@ -146,6 +147,9 @@ class cameraman(vmqtt.mqtt_node):
 			'orders_dict', 'orders_payload', 'post_processes',
 			'shutter_speed',
                     )
+
+    # ### PostProcess() and post_processes are deprecated?
+    # ### self.MakerFaire2018 deprecated
 
     def __init__(self, Verbose=True):
         global picamera
@@ -215,8 +219,13 @@ class cameraman(vmqtt.mqtt_node):
     def OnCameramanProcess(self, payload):
         if payload['Type'] == 'clear':
             self.post_processes = []
+            self.cam_compiled = None
+            self.cam_script = None
         else:
             self.post_processes.append(payload)
+            self.cam_script = payload['cam_script']
+            self.cam_compiled = compile(self.cam_script, 'cvcode.py', 'exec', dont_inherit=True)
+
 
     def OnCameramanMark(self, payload):
         print(payload)
@@ -245,7 +254,17 @@ class cameraman(vmqtt.mqtt_node):
             self.orders_dict.ValidatePayload(payload, self)
         self.ImageBurst()
 
-    def PostProcess(self, process, Im=None, An=None):
+    #def PostProcess(self, process, Im=None, An=None):
+    def PostProcess(self, im):
+        glb = {}
+        glb['cv2'] = cv2
+        glb['oc'] = oc
+        glb['np'] = np
+        loc = {}
+        loc['im_base'] = im
+        exec(c, glb, loc)
+        return loc['display_image']
+
         green = (0, 255, 0)
         blue = (0, 0, 255)
         r = Im.shape[0]
@@ -442,6 +461,9 @@ class cameraman(vmqtt.mqtt_node):
                     hsv_payload[vconst.dname_field_name]  = self.mark_payload['save']
                     self.Publish(vconst.data_save_topic, hsv_payload)
                 self.mark_payload = None		# only do the HSV processing once
+            """
+            if self.cam_compiled is not None:
+                self.PostProcess(img)
             if len(self.post_processes) > 0:
                 annotated = img.copy()
                 for this in self.post_processes:
@@ -453,6 +475,7 @@ class cameraman(vmqtt.mqtt_node):
             else:
                 rect_list = self.MakerFaire2018(this_image)
                 annotated = None
+            """
             #
             # Imsge process, now publish
             #
