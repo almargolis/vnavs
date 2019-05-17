@@ -34,8 +34,8 @@ COL_SPAN_ALL = -1
 class Notebook(tkinter.Frame):
     def __init__(self, master):
         tkinter.Frame.__init__(self, master)
-        self.tabs_frame = tkinter.Frame(self)
-        self.tabs_frame.grid(column=0, row=0)
+        self.content_tabs_frame = tkinter.Frame(self)
+        self.content_tabs_frame.grid(column=0, row=0)
         self.tab_labels_text = []
         self.tab_labels_widget = []
         self.tab_labels_tk = []
@@ -49,7 +49,7 @@ class Notebook(tkinter.Frame):
         ix = len(self.tab_labels_text)
         if text is None:
             text = 'Tab {}'.format(ix+1)
-        label = tkinter.Label(self.tabs_frame, text=text)
+        label = tkinter.Label(self.content_tabs_frame, text=text)
         label.bind('<Button-1>', self.OnTabClick)
         if Where is None:
             self.tab_labels_text.append(text)
@@ -80,6 +80,34 @@ class Notebook(tkinter.Frame):
     def enable_traversal(self):
         pass
 
+    def forget(self, tabid):
+        ix = self.tab_ix(tabid)
+        print("Notebook.forget() BEGIN", tabid, ix)
+        #
+        # Select another tab before deleting this
+        #
+        if ix == (len(self.tab_frames) - 1):
+            select_ix = ix - 1				# this is last, so select previous tab
+        else:
+            select_ix = ix + 1				# select the next tab
+        tab = self.tab_frames[select_ix]
+        tab.lift()
+        #
+        # Delete this tab
+        #
+        label = self.tab_labels_widget[ix]
+        frame = self.tab_frames[ix]
+        self.tab_labels_text.pop(ix)
+        self.tab_labels_widget.pop(ix)
+        self.tab_labels_tk.pop(ix)
+        self.tab_frames.pop(ix)
+        label.destroy()
+        frame.destroy()
+        # The event must be generated last because the handler get executed immediately.
+        # Before the method completes execution.
+        self.event_generate('<<NotebookTabChanged>>')
+        print("Notebook.forget() END")
+
     def insert(self, Where, frame, text=None):
         self.add(frame, text=text, Where=Where)
 
@@ -96,6 +124,12 @@ class Notebook(tkinter.Frame):
         self.event_generate('<<NotebookTabChanged>>')
         return tab
 
+    def tab(self, tabid, **kw):
+        ix = self.tab_ix(tabid)
+        for key, new_value in kw.items():
+            if key == 'text':
+                self.tab_labels_widget[ix].config(text=new_value)        
+
     def tab_ix(self, tabid):
         #
         # Not all these matches are used
@@ -110,6 +144,9 @@ class Notebook(tkinter.Frame):
         # The above were in use by darkroom and mission_control using
         # ttk.Notebook. This works identically.
         #
+        if isinstance(tabid, int):
+            if (tabid >= 0) and (tabid < len(self.tab_frames)):
+                return tabid
         try:
             return self.tab_frames.index(tabid)
         except ValueError:
@@ -179,9 +216,9 @@ class TkWidgetDef(object):
 		'file_opt', 'hbar', 'is_container', 'is_initializing',
 		'last_used_col', 'last_used_colspan', 'last_used_row', 'last_used_rowspan',
 		'list_items',
-		'opencv_im', 'parm_id', 'pil_im', 'pil_resize_ratio', 'rgb_im', 'right_col', 'row', 'row_span',
+		'opencv_im', 'parent', 'parm_id', 'pil_im', 'pil_resize_ratio', 'rgb_im', 'right_col', 'row', 'row_span',
 		'scroll_container', 'scrollable_image',
-		'table', 'thumbnail', 'thumbnail_width', 'tkd', 'tkw', 'tkw_label',
+		'table', 'thumbnail', 'thumbnail_of', 'thumbnail_width', 'tkd', 'tkw', 'tkw_label',
 		'vbar', 'wname'
     )
 
@@ -208,7 +245,9 @@ class TkWidgetDef(object):
         self.col_span = 0		# width of this TkWidgetDef object (# of columns)
         self.table = None		# table for scrollable table widget.
         self.thumbnail = None		# update this thumbnail if image is changed
+        self.thumbnail_of = None	# this is a thumbnail of that image
         self.thumbnail_width = 0	# width of thumbnail
+        self.parent = None
         self.children = []
         self.canvas_width = 400
         self.canvas_height = 200
@@ -261,8 +300,12 @@ class TkWidgetDef(object):
         frame = TkWidgetDef(refname, tkinter.Button(self.tkw, **options))
         frame.tkw.grid(row=row, column=col)
         self._RememberPosition(frame, row, col)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
+
+    def AppendChild(self, frame):
+        self.children.append(frame)
+        frame.parent = self
 
     def AddCanvas(self, pil_fn=None, rgb_im=None, opencv_fn=None,
 				OnClick=None,
@@ -284,6 +327,7 @@ class TkWidgetDef(object):
                 frame.UpdateImage(rgb_im=self.MakeThumbnail(thumbnailof.rgb_im, thumbnailwidth))
                 thumbnailof.thumbnail = frame
                 thumbnailof.thumbnail_width = thumbnailwidth
+                self.thumbnail_of = thumbnailof
         return frame
 
     def AddDropdown(self, caption=None, s_items=['None'], Selection=None, row=NEXT_ROW, col=SAME_COL, command=None):
@@ -321,7 +365,7 @@ class TkWidgetDef(object):
         tk_entry.grid(column=entry_col, row=row, sticky=(tkinter.W, tkinter.E))
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
         self._RememberPosition(frame, row, col, colspan=remember_colspan)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def AddEntryField(self, caption=None, width=10, value='', row=NEXT_ROW, col=SAME_COL, OnDoubleClick=None):
@@ -346,7 +390,7 @@ class TkWidgetDef(object):
             tk_entry.bind('<Double-Button-1>', OnDoubleClick)
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
         self._RememberPosition(frame, row, col, colspan=col_span)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def AddFrame(self, row=NEXT_ROW, col=SAME_COL, colspan=1):
@@ -359,7 +403,7 @@ class TkWidgetDef(object):
             colspan = self.right_col - col + 1
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=tkinter.W)
         self._RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def AddLabel(self, text='', width=10, row=NEXT_ROW, col=SAME_COL):
@@ -373,7 +417,7 @@ class TkWidgetDef(object):
         tk_caption.grid(column=col, row=row, sticky=tkinter.W)
         frame = TkWidgetDef(refname, tk_caption)
         self._RememberPosition(frame, row, col)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def AddLabelFrame(self, caption, row=NEXT_ROW, col=SAME_COL, colspan=1):
@@ -382,7 +426,7 @@ class TkWidgetDef(object):
         frame = TkWidgetDef(refname, tkinter.LabelFrame(self.tkw, text=caption), IsContainer=True)
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=tkinter.W)
         self._RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def AddLabelImage(self, pil_fn=None, opencv_im=None, opencv_fn=None,
@@ -400,8 +444,37 @@ class TkWidgetDef(object):
 
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=tkinter.W)
         self._RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
+
+    def Destroy(self):
+        # Clear both sides of thumbnail links to avoid refencing stale references
+        if self.thumbnail is not None:
+            self.thumbnail.thumbnail_of = None
+            self.thumbnail = None
+        if self.thumbnail_of is not None:
+            self.thumbnail_of.thumbnail = None
+            self.thumbnail = None
+        for this_child in self.children:
+            this_child.Destroy()
+        if self.parent is not None:
+            try:
+                self.parent.children.remove(self)
+            except:
+                print("Destroy() child ", self.tkw.__class__.__name__, "not in parent", self.parent.tkw.__class__.__name__)
+                raise
+        if self.tkw_label is not None:
+            self.tkw_label.destroy()
+        if self.tkd is not None:
+            if isinstance(self.tkd, ImageTk.PhotoImage):
+                self.tkd = None
+            else:
+                self.tkd.destroy()
+        if self.hbar is not None:
+            self.hbar.destroy()
+        if self.vbar is not None:
+            self.vbar.destroy()
+        self.tkw.destroy()
 
     def AddLabelInfo(self, caption, value='', width=10, row=NEXT_ROW, col=SAME_COL):
         # This is much like AddEntryField() but the field is another lable so it is
@@ -422,7 +495,7 @@ class TkWidgetDef(object):
         tk_info.grid(column=col+1, row=row, sticky=(tkinter.W, tkinter.E))
         frame = TkWidgetDef(refname, tk_info, tkw_label=tk_caption, Data=tk_data)
         self._RememberPosition(frame, row, col, colspan=col_span)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def AddListbox(self, caption, s_items, Selection=None, row=NEXT_ROW, col=SAME_COL, rowspan=5, command=None, XSCROLL=False):
@@ -458,7 +531,7 @@ class TkWidgetDef(object):
         tk_entry.grid(column=col+1, row=row, sticky=(tkinter.W, tkinter.E))
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption, Data=tk_data)
         self._RememberPosition(frame, row, col, colspan=2, rowspan=height)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def AddSliderField(self, caption=None, width=10, value=None, MinValue=0, MaxValue=100, orient=tkinter.HORIZONTAL,
@@ -484,7 +557,7 @@ class TkWidgetDef(object):
         tk_entry.grid(column=col+1, row=row, sticky=(tkinter.W, tkinter.E))
         frame = TkWidgetDef(refname, tk_entry, tkw_label=tk_caption)
         self._RememberPosition(frame, row, col, colspan=2)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def XMakePopupWindow(self, title):
@@ -544,7 +617,7 @@ class TkWidgetDef(object):
             colspan = self.right_col - col + 1
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=tkinter.W)
         self._RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
+        self.AppendChild(frame)
         self.is_container = False
         return frame
 
@@ -553,7 +626,7 @@ class TkWidgetDef(object):
 #
     def AddNotebook(self, OnTabSelected=None, row=NEXT_ROW, col=SAME_COL, colspan=1):
         row, col = self._Position(row=row, col=col)
-        nb_class = tkinter.ttk.Notebook
+        #nb_class = tkinter.ttk.Notebook
         nb_class = Notebook
         frame = TkWidgetDef('', nb_class(self.tkw), IsContainer=True)
         frame.tkw.grid(column=col, columnspan=colspan, row=row, sticky=tkinter.W)
@@ -561,11 +634,10 @@ class TkWidgetDef(object):
         if OnTabSelected is not None:
             frame.tkw.bind('<<NotebookTabChanged>>', OnTabSelected)
         self._RememberPosition(frame, row, col, colspan=colspan)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def DeleteTab(self, ix):
-        #print("TAB CT", self.tkw.index('end'))		# index is documented, but not visible
         print("TAB CT", len(self.tkw.tabs()))
         self.tkw.forget(ix)
         self.children.pop(ix)
@@ -581,7 +653,7 @@ class TkWidgetDef(object):
             self.tkw.insert(Where, frame.tkw, text=caption)
         if OnClick is not None:
             frame.tkw.bind('<Button-1>', OnClick)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     #
@@ -811,7 +883,7 @@ class TkWidgetDef(object):
         if OnClick is not None:
             frame.tkw.bind("<Button-1>", OnClick)
         self._RememberPosition(frame, row, col, rowspan=rowspan, colspan=2)
-        self.children.append(frame)
+        self.AppendChild(frame)
         return frame
 
     def _Position(self, row=NEXT_ROW, col=-SAME_COL):

@@ -78,7 +78,9 @@ class ProcessStep(object):
         #
         # input_panel
         #
-        self.filter_selection = self.input_panel.AddListbox('Filters', OpticChiasm.ImageFilterCollection.image_filter_names, Selection=FilterName, command=self.NewFilter, rowspan=4)
+        self.filter_selection = self.input_panel.AddListbox('Filters',
+					OpticChiasm.ImageFilterCollection.image_filter_names,
+					Selection=FilterName, command=self.NewFilter, rowspan=4)
         self.info_data = []
         self.info_widgets = []
         for ix in range(6):
@@ -411,8 +413,13 @@ class ProcessStep(object):
 
         for ix, this in enumerate(self.info_widgets):
             if ix < len(self.info_data):
-                this[0].ReplaceValue(self.info_data[ix][0])
-                this[1].ReplaceValue(self.info_data[ix][1])
+                try:
+                    this[0].ReplaceValue(self.info_data[ix][0])
+                    this[1].ReplaceValue(self.info_data[ix][1])
+                except:
+                    # tried to execute deleted step
+                    print("ExecuteStep()", self.ix, self.tab_title)
+                    #raise
             else:
                 this[0].ReplaceValue('')
                 this[1].ReplaceValue('')
@@ -468,7 +475,8 @@ class ProcessStep(object):
 class Darkroom(vmqtt.mqtt_node):
     __slots__ = (
 				'camera_iso', 'camera_last_filename', 'camera_shutter_speed',
-				'delete_process_step_ix', 'downloadDir', 'file_client', 'image',
+				'delete_process_step_ix', 'downloadDir', 'file_client',
+				'gui_update_mode', 'image',
 				'last_pic_payload', 'last_pic_time', 'last_process_time',
 				'load_filter_name', 'load_new_filter_ct', 'load_parms', 'load_process_file_name',
 				'loading', 'local_cam',
@@ -506,6 +514,7 @@ class Darkroom(vmqtt.mqtt_node):
         self.image.img_source_dir = '/volumes/pi/projects/vnavs/temp'
         self.image.img_fname_suffix = ''
 
+        self.gui_update_mode = True
         self.tk = easytk.EasyTk()
         self.tk.tkw.title("VNAVS OpenCV Visualizer")
         self.statusFrame = self.tk.AddLabelFrame('Status', row=1)
@@ -534,6 +543,7 @@ class Darkroom(vmqtt.mqtt_node):
 
         ProcessStep.app = self
         self.new_step = None
+        self.gui_update_mode = False
 
     def ConfigureCamera(self):
         print("ConfigureCamera", self.pic_source, SRC_BOT_CAMERA)
@@ -683,6 +693,13 @@ class Darkroom(vmqtt.mqtt_node):
         # one is deleted, the plus tab is selected and we end up here, creating a default
         # filter. Again not expected, but not a serious usability issue.
         #
+        # self.gui_update_mode added because deleting the last tab caused a similar
+        # problem to above by making the plus tab active for a moment while re-aranging
+        # the notebook. It turns out that select() gets flashed a lot while updating
+        # the gui and TK delivers events very quickly. 
+        #
+        if self.gui_update_mode:
+            return
         tabid = self.notebook.tkw.select()
         print("Darkroom.OnTabSelected()", tabid, self.notebook_add_id)
         if tabid == self.notebook_add_id:
@@ -700,14 +717,24 @@ class Darkroom(vmqtt.mqtt_node):
         self.last_pic_payload = payload
 
     def DeleteProcessStep(self, ix):
+        # Don't forget that there is one more tab than there
+        # are processing steps because of the add tab (self.notebook_add_id)
+        #
+        target_step = ProcessStep.steps[ix]
+        print("darkroom.DeleteProcessStep() BEGIN", ix)
+        self.gui_update_mode = True
         self.notebook.DeleteTab(ix)
+        target_step.thumbnail.Destroy()
         ProcessStep.steps.pop(ix)
         for adjust_ix, this_step in enumerate(ProcessStep.steps[ix:]):
             this_step.ix = ix + adjust_ix
             this_step.tab_title = "Step %d" % (this_step.ix)
-            self.notebook.tkw.tab(ix, text=this_step.tab_title)
-        ProcessStep.steps[ix-1].SelectTab(None)
+            print("darkroom.DeleteProcessStep() rename tab", ix, this_step.tab_title)
+            self.notebook.tkw.tab(this_step.ix, text=this_step.tab_title)
         self.step_execution_needed = True
+        self.gui_update_mode = False
+        ProcessStep.steps[ix-1].SelectTab(None)
+        print("darkroom.DeleteProcessStep() END", len(ProcessStep.steps))
 
     #
     # All work gets done here in DoLoop() in the main thread.

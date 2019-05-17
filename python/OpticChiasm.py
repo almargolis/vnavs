@@ -90,7 +90,7 @@ class Image(object):
     def __repr__(self):
         return "Image {}x{}x{} {}".format(self.width, self.height, self.colordepth, self.colorcode)
 
-    def copy(self):
+    def Copy(self):
         if self._im is None:
             return Image(im=None, colorcode=self.colorcode)
         else:
@@ -98,13 +98,13 @@ class Image(object):
 
     def CopyAsBGR(self):
         if self.colorcode == IM_BGR:
-            return self.copy()
+            return self.Copy()
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_BGR))
         return Image(im=cv2.cvtColor(self._im, transform), colorcode=IM_BGR)
 
     def CopyAsGray(self):
         if self.colorcode == IM_GRAY:
-            return self.copy()
+            return self.Copy()
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_GRAY))
         return Image(im=cv2.cvtColor(self._im, transform), colorcode=IM_GRAY)
 
@@ -129,7 +129,7 @@ class Image(object):
                 return self._im
         return self.ImAsAny(IM_GRAY)
 
-    def ImAsAny(self, colorcode):
+    def ImAsAny(self, colorcode, Copy=False):
         #print("ImAsAny()", self.colorcode, colorcode, self._im.__class__.__name__)
         if self._im is None:
             return None
@@ -137,7 +137,10 @@ class Image(object):
         if not colorcode in IM_COLORCODES:
             return None
         if self.colorcode == colorcode:
-            return self._im
+            if Copy:
+                return self._im.copy()
+            else:
+                return self._im
         transform = getattr(cv2, 'COLOR_{}2{}'.format(self.colorcode, IM_HSV), None)
         if transform is None:
             return None
@@ -179,7 +182,7 @@ class Image(object):
     def Crop(self, rect, Isolate=False):
         #print("Crop()", rect)
         if rect is None:
-            return self.copy()
+            return self.Copy()
         new_image = Image(im=self._im[rect.y_min:rect.y_max+1, rect.x_min:rect.x_max+1].copy(), colorcode=self.colorcode)
         if not Isolate:
             new_image.crop_source = self
@@ -344,7 +347,7 @@ class ImageFilter(object):
 #	xstep is the current ProcessStep() with exec_im set to None.
 #
 ImageFilter(FILTER_NAME_IMAGE,
-			'{x_output_im} = xstep.source_im.copy()',
+			'{x_output_im} = xstep.source_im.Copy()',
 			[],
 			Flags=[FLAG_ISBASE])
 
@@ -387,7 +390,7 @@ image_filter = ImageFilter(FILTER_NAME_CROPPP,
 				+ 'print(im_in.shape, {x_output_rect})\n',
 			[vdata.DataAttribPointSym('p1', 'm-50,m+50'), vdata.DataAttribPointSym('p2', '-100,e')],
 			Flags=[])
-image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 image_filter = ImageFilter('CropYX',
@@ -396,7 +399,7 @@ image_filter = ImageFilter('CropYX',
 				+ 'print(im_in.shape, {x_output_rect})\n',
 			[vdata.DataAttribPointSym('y_range', '-100,'), vdata.DataAttribPointSym('x_range', 'm-50,m+50')],
 			Flags=[])
-image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 ImageFilter('Gray',
@@ -451,7 +454,7 @@ image_filter = ImageFilter('ChaseLine',
                         # ChaseLine depends on previous rect and hsvspec. These probably changed im_in to a
 			# black and while image from HueMaskSingle or similar. This therefore uses
                         # im_base to reset to the original color image
-image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
 				+ '{x_output_annotated}.DrawLinePoints(line_points, color=oc.DRAW_BGR_GREEN, thickness=2)\n'
 
 
@@ -513,22 +516,28 @@ ImageFilter('MorphOpen',
 # Contour Filters
 #
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
+# somewhere along line cont2 eliminated
+#'cont2, {x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
 image_filter = ImageFilter('ContoursFind',
-			'cont2, {x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
+			'{x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
 			[vdata.DataAttribInt('MaxLevel', '-1')],
 			Flags=[])
-image_filter.annotate_code = '{x_output_annotated} = im_base.CopyAsGray().CopyAsBGR()\n' \
-				+ 'oc.CrayolaContours({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy}, MaxLevel={MaxLevel})\n' \
-				+ 'oc.ContoursToLineVectors({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy})\n'
-		#		+ 'cv2.drawContours({x_output_annotated}.im, {x_output_contours}, -1, oc.DRAW_BGR_RED, 1)\n'
-		#		+ 'for i in xrange(0, len({x_output_contours})):\n'
-		#		+ '    color = (np.random.uniform(0, 255), np.random.uniform(0, 255), np.random.uniform(0, 255))\n'
-		#		+ '    cv2.drawContours({x_output_im}, {x_output_contours}, 1, color, 1)\n',
+#image_filter.annotate_code = '{x_output_annotated} = im_base.CopyAsGray().CopyAsBGR()\n' \
+#				+ 'print("Contour", len({x_output_contours}))\n' \
+#				+ 'for i in range(0, len({x_output_contours})):\n' \
+#				+ '    color = (np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255))\n' \
+#				+ '    cv2.drawContours({x_output_annotated}._im, {x_output_contours}, i, color, 3)\n' \
+ #                               + 'print("Contour", color)\n'
+	#			+ 'oc.ContoursToLineVectors({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy})\n' \
+	#			+ 'oc.CrayolaContours({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy}, MaxLevel={MaxLevel})\n' \
+	#			+ 'cv2.drawContours({x_output_annotated}.im, {x_output_contours}, -1, oc.DRAW_BGR_RED, 1)\n' \
 
-ImageFilter('ContoursDraw',
-			'{x_output_annotated} = oc.Image(im=cv2.drawContours(im_in.im, contours_in, -1, (0, 0, 255)), colorcode=im_in.colorcode)',
+image_filter = ImageFilter('ContoursDraw', '',
 			[],
 			Flags=['incont'])
+image_filter.annotate_code = '{x_output_annotated} = im_in.CopyAsBGR()\n' \
+				+ 'cv2.drawContours({x_output_annotated}._im, contours_in, -1, (0, 0, 255), 3)\n'
+	#			+ 'print("Contour", len(contours_in))\n' \
 
 ImageFilter('EqualizeHistogram',
 			'{x_output_im} = oc.Image(im=cv2.equalizeHist(im_in.ImAsGray()), colorcode=oc.IM_GRAY)',
@@ -541,18 +550,18 @@ ImageFilter('HistogramCB',
 			Flags=[])
 
 image_filter = ImageFilter(FILTER_NAME_ANALYZER,
-			'r = im_in.RectFromSymbolicPP({p1}, {p2})\n',
+			'r = im_base.RectFromSymbolicPP({p1}, {p2})\n',
 			[vdata.DataAttribPointSym('p1', 'm-3,m-3'), vdata.DataAttribPointSym('p2', 'p+3,p+3')],
 			Flags=[])
-image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
 				+ '{x_output_annotated}.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n' \
-				+ 'xstep.SetInfo(0, "Hue", im_in.Crop(r).AverageHue())\n'
+				+ 'xstep.SetInfo(0, "Hue", im_base.Crop(r).AverageHue())\n'
 
 image_filter = ImageFilter('HoughLinesP',
 			'{x_output_lines} = cv2.HoughLinesP(im_in.im, 1, np.pi/180, 15, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
 			[vdata.DataAttribInt('MinLineLength', '30'), vdata.DataAttribInt('MaxLineGap', 10)],
 			Flags=[''])
-image_filter.annotate_code = '{x_output_annotated} = im_base.copy()\n' \
+image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
 				+ 'print({x_output_lines})\n' \
 				+ 'color_ix = -1\n' \
 				+ 'if ({x_output_lines} is not None) and (len({x_output_lines}) > 0):\n' \
@@ -578,7 +587,7 @@ def AutoCanny(grayscale_im, AutoCanny_sigma):
     grayscale_im_median = np.median(grayscale_im)
     lower_canny_thresh = int(max(0, (1 - AutoCanny_sigma) * grayscale_im_median ))
     upper_canny_thresh = int(min(255, (1 + AutoCanny_sigma) * grayscale_im_median ))
-    print("AutoCanny()", grayscale_im_median, lower_canny_thresh, upper_canny_thresh)
+    #print("AutoCanny()", grayscale_im_median, lower_canny_thresh, upper_canny_thresh)
     #lower_canny_thresh = 100
     #upper_canny_thresh = 130
     return cv2.Canny(grayscale_im, lower_canny_thresh, upper_canny_thresh)
