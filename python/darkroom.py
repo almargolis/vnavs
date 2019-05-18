@@ -23,6 +23,7 @@ from easytk import FIRST_ROW, SAME_ROW, NEXT_ROW, OVERLAY_ROW, SAME_COL, NEXT_CO
 import OpticChiasm
 import vnavs_mqtt as vmqtt
 import vnavs_const as vconst
+import vnavs_data as vdata
 
 BOT_1_MAP_TRANSPOSE = [
 
@@ -35,18 +36,19 @@ BOT_1_H = np.array(BOT_1_MAP_TRANSPOSE, dtype="float32")
 
 SRC_LOCAL_CAMERA = 'local'
 SRC_BOT_CAMERA = 'bot'
+SHOW_ANNOTATION = 'ShowAnnotation'
 
 class ProcessStep(object):
     __slots__ = ('cv_filter_name', 'cv_specs',
 			'deposition',
-			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_hsvspec', 'exec_im', 'exec_lines', 'exec_rect',
+			'exec_annotated', 'exec_contours', 'exec_hierarchy', 'exec_hsvspec', 'exec_im', 'exec_objects', 'exec_rect',
 			'execution_time',
 			'filter_selection',
 			'image_widget', 'info_data', 'info_widgets', 'input_panel', 'ix', 'output_panel',
 			'parm_widgets', 'parm_values', 'parms_specs', 'point_target',
 			'source_im', 'source_path',
 			'tab', 'tab_title', 'thumbnail',
-			'zoom_popup'
+			'use_annotation', 'use_objects', 'zoom_popup'
 		)
     app = None
     steps = []
@@ -99,7 +101,8 @@ class ProcessStep(object):
             entry_label = self.input_panel.AddLabel(parm_caption, row=parm_row, col=parm_col)
             entry_box = self.input_panel.AddEntryField(row=SAME_ROW, col=NEXT_COL, OnDoubleClick=self.OnPickPoint)
             entry_slider = self.input_panel.AddSliderField(col=OVERLAY_COL)
-            self.parm_widgets.append([entry_box, entry_label, entry_box, entry_slider])
+            entry_checkbox = self.input_panel.AddCheckbox(col=OVERLAY_COL)
+            self.parm_widgets.append([entry_box, entry_label, entry_box, entry_slider, entry_checkbox])
         self.input_panel.AddButton('Run', command=self.OnExecuteStep, col=parm_col)
         self.input_panel.AddButton('Delete Step', command=self.OnDeleteStep, row=SAME_ROW, col=NEXT_COL)
         #
@@ -233,32 +236,47 @@ class ProcessStep(object):
             self.cv_filter_name = new_filter_name
             self.cv_specs = OpticChiasm.ImageFilterCollection.image_filters[self.cv_filter_name]
             self.parms_specs = self.cv_specs.parms
+            if self.cv_specs.annotate_code is not None:
+                annotation_control = False
+                for this in self.parms_specs:
+                    if this.name == SHOW_ANNOTATION:
+                        annotation_control = True
+                        break
+                if not annotation_control:
+                    self.parms_specs.append(vdata.DataAttribBoolean(SHOW_ANNOTATION, 'False'))
             for ix, this_widget in enumerate(self.parm_widgets):
+                print(this_widget[0].col, this_widget[1].col, this_widget[2].col, this_widget[3].col, this_widget[4].col)
                 if ix < len(self.parms_specs):
-                    parm_name = self.cv_filter_name + '_' + self.parms_specs[ix].name
-                    parm_caption = self.parms_specs[ix].caption
-                    parm_default_value = self.parms_specs[ix].default
+                    parms_specs = self.parms_specs[ix]
+                    parm_name = self.cv_filter_name + '_' + parms_specs.name
+                    parm_caption = parms_specs.caption
+                    parm_default_value = parms_specs.default
                     if parm_name not in self.parm_values:
                         self.parm_values[parm_name] = parm_default_value
                     parm_value = self.parm_values[parm_name]
-                    if self.parms_specs[ix].use_slider:
+                    if parms_specs.use_slider:
                         slider = this_widget[3]
                         this_widget[0] = slider				# use slider widget
-                        min_value = self.parms_specs[ix].min_value
+                        min_value = parms_specs.min_value
                         if min_value is None:
                             min_value = 0
-                        max_value = self.parms_specs[ix].max_value
+                        max_value = parms_specs.max_value
                         if max_value is None:
                             max_value = 0
                         slider.tkw.config(from_=min_value, to=max_value)
+                    elif isinstance(parms_specs, vdata.DataAttribBoolean):
+                        this_widget[0] = this_widget[4]			# use checkbox widget
                     else:
                         this_widget[0] = this_widget[2]			# use entry box widget
                 else:
+                    # Unused parameter widgets -- clear to generic value
+                    parms_specs = None
                     parm_name = None
                     parm_caption = "Parm" + str(ix+1)
                     parm_value = ""
                     this_widget[0] = this_widget[2]			# use entry box widget
-                this_widget[1].ReplaceValue(parm_caption)
+                print("SetFilter() parm", ix, parm_caption, parms_specs) 
+                this_widget[1].ReplaceValue(parm_caption)		# parameter label
                 this_widget[0].tkw.lift()				# make active control visible (top of stack)
                 this_widget[0].ReplaceValue(parm_value)
                 this_widget[0].parm_id = parm_name
@@ -334,16 +352,21 @@ class ProcessStep(object):
     def GetCodeStr(self, Script=True):
         self.SaveParameters()
         code_substitutions = {}
+        show_annotation = False
         for this_parm in self.parms_specs:
             raw_value = self.parm_values[self.cv_filter_name + '_' + this_parm.name]
-            code_substitutions[this_parm.name] = this_parm.GetValue(raw_value)
+            translated_value = this_parm.GetValue(raw_value)
+            code_substitutions[this_parm.name] = translated_value
+            print("GetCodeStr() parms", this_parm.name, raw_value, translated_value)
+            if this_parm.name == SHOW_ANNOTATION:
+                show_annotation = translated_value
         if Script:
             code_substitutions['x_output_annotated'] = 'annotated'
             code_substitutions['x_output_contours'] = 'contours_in'
             code_substitutions['x_output_hierarchy'] = 'hierarchy_in'
             code_substitutions['x_output_hsvspec'] = 'hsvspec_in'
             code_substitutions['x_output_im'] = 'im_in'
-            code_substitutions['x_output_lines'] = 'lines_in'
+            code_substitutions['x_output_objects'] = 'objects_in'
             code_substitutions['x_output_rect'] = 'rect_in'
         else:
             code_substitutions['x_output_annotated'] = 'xstep.exec_annotated'
@@ -351,7 +374,7 @@ class ProcessStep(object):
             code_substitutions['x_output_hierarchy'] = 'xstep.exec_hierarchy'
             code_substitutions['x_output_hsvspec'] = 'xstep.exec_hsvspec'
             code_substitutions['x_output_im'] = 'xstep.exec_im'
-            code_substitutions['x_output_lines'] = 'xstep.exec_lines'
+            code_substitutions['x_output_objects'] = 'xstep.exec_objects'
             code_substitutions['x_output_rect'] = 'xstep.exec_rect'
         code = self.cv_specs.code
         if code[-1:] != '\n':
@@ -359,7 +382,8 @@ class ProcessStep(object):
         if Script and (OpticChiasm.FLAG_ISBASE in self.cv_specs.flags):
             code += 'im_base = im_in\n'
         if self.cv_specs.annotate_code is not None:
-            code += '\n' + self.cv_specs.annotate_code
+            if show_annotation:
+                code += '\n' + self.cv_specs.annotate_code
         if code != '':
             exec_code_str = code.format(**code_substitutions)
             return exec_code_str
@@ -375,7 +399,7 @@ class ProcessStep(object):
         latest_contours = None
         latest_hierarchy = None
         latest_hsvspec = None
-        latest_lines = None
+        latest_objects = None			# output of object identification filters
         latest_rect = None
         for ix, this in enumerate(self.steps):
             if ix >= self.ix:
@@ -390,8 +414,8 @@ class ProcessStep(object):
                 latest_hierarchy = this.exec_hierarchy
             if this.exec_hsvspec is not None:
                 latest_hsvspec = this.exec_hsvspec
-            if this.exec_lines is not None:
-                latest_lines = this.exec_lines
+            if this.exec_objects is not None:
+                latest_objects = this.exec_objects
             if this.exec_rect is not None:
                 latest_rect = this.exec_rect
 
@@ -408,7 +432,7 @@ class ProcessStep(object):
         exec_global_vars['contours_in'] = latest_contours
         exec_global_vars['hierarchy_in'] = latest_hierarchy
         exec_global_vars['hsvspec_in'] = latest_hsvspec
-        exec_global_vars['lines_in'] = latest_lines
+        exec_global_vars['objects_in'] = latest_objects
         exec_global_vars['rect_in'] = latest_rect
 
         for ix, this in enumerate(self.info_widgets):
@@ -430,7 +454,7 @@ class ProcessStep(object):
         self.exec_hierarchy = None
         self.exec_hsvspec = None
         self.exec_im = None
-        self.exec_lines = None
+        self.exec_objects = None
         self.exec_rect = None
         deposition = ''
         self.deposition.ReplaceValue(deposition)

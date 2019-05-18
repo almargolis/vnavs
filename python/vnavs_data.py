@@ -98,6 +98,21 @@ class DataAttribFloat(DataAttrib):
         return str(float(raw_value))
 
     def Transform(self, value):
+        return bool(value)
+
+class DataAttribBoolean(DataAttrib):
+    def GetValue(self, raw_value):
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, str):
+            raw_value = raw_value.strip().lower()
+            if raw_value in ['t', 'true']:
+                return True
+            else:
+                return False
+        return str(raw_value)
+
+    def Transform(self, value):
         return float(value)
 
 class DataAttribInt(DataAttrib):

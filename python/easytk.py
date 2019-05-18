@@ -393,6 +393,27 @@ class TkWidgetDef(object):
         self.AppendChild(frame)
         return frame
 
+    def AddCheckbox(self, caption=None, value=False, row=NEXT_ROW, col=SAME_COL):
+        if self.debug_this:
+            print("AddCheckbox", row, col, caption)
+        row, col = self._Position(row=row, col=col)
+
+        tk_data = tkinter.IntVar()
+        if value:
+            tk_data.set(1)
+        else:
+            tk_data.set(0)
+        if caption is None:
+            refname = "Checkbox"
+        else:
+            refname = caption.lower().replace(' ', '_')
+        tk_entry = tkinter.Checkbutton(self.tkw, text=caption, variable=tk_data)
+        tk_entry.grid(column=col, row=row, sticky=(tkinter.W, tkinter.E))
+        frame = TkWidgetDef(refname, tk_entry, Data=tk_data)
+        self._RememberPosition(frame, row, col, colspan=1)
+        self.AppendChild(frame)
+        return frame
+
     def AddFrame(self, row=NEXT_ROW, col=SAME_COL, colspan=1):
         if self.debug_this:
             print("AddFrame", row, col, colspan)
@@ -727,6 +748,11 @@ class TkWidgetDef(object):
             self.tkw.see(ix)
         elif isinstance(self.tkw, tkinter.Scale):
             self.tkw.set(new_value)
+        elif isinstance(self.tkw, tkinter.Checkbutton):
+            if new_value:
+                self.tkd.set(1)
+            else:
+                self.tkd.set(0)
         else:
             # For many/most widgets, the value is in the self.tkd StringVar
             if isinstance(self.tkd, tkinter.StringVar):
@@ -830,6 +856,12 @@ class TkWidgetDef(object):
             return self.tkw.get(ix)
         if isinstance(self.tkw, tkinter.Scale):
             return self.tkw.get()
+        if isinstance(self.tkw, tkinter.Checkbutton):
+            v = self.tkd.get()
+            if v:
+                return True
+            else:
+                return False
         # For many/most widgets, the value is in the self.tkd StringVar
         if isinstance(self.tkd, tkinter.StringVar):
             v = self.tkd.get()

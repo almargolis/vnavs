@@ -521,7 +521,9 @@ ImageFilter('MorphOpen',
 #'cont2, {x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
 image_filter = ImageFilter('ContoursFind',
 			'{x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
-			[vdata.DataAttribInt('MaxLevel', '-1')],
+			[
+				vdata.DataAttribInt('MaxLevel', '-1'),
+			],
 			Flags=[])
 #image_filter.annotate_code = '{x_output_annotated} = im_base.CopyAsGray().CopyAsBGR()\n' \
 #				+ 'print("Contour", len({x_output_contours}))\n' \
@@ -533,9 +535,6 @@ image_filter = ImageFilter('ContoursFind',
 	#			+ 'oc.CrayolaContours({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy}, MaxLevel={MaxLevel})\n' \
 	#			+ 'cv2.drawContours({x_output_annotated}.im, {x_output_contours}, -1, oc.DRAW_BGR_RED, 1)\n' \
 
-image_filter = ImageFilter('ContoursDraw', '',
-			[],
-			Flags=['incont'])
 image_filter.annotate_code = '{x_output_annotated} = im_in.CopyAsBGR()\n' \
 				+ 'cv2.drawContours({x_output_annotated}._im, contours_in, -1, (0, 0, 255), 3)\n'
 	#			+ 'print("Contour", len(contours_in))\n' \
@@ -559,7 +558,7 @@ image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
 				+ 'xstep.SetInfo(0, "Hue", im_base.Crop(r).AverageHue())\n'
 
 image_filter = ImageFilter('HoughLinesP',
-			'{x_output_objects} = HoughLinesP(im_in, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
+			'{x_output_objects} = oc.HoughLinesP(im_in, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})',
 			[vdata.DataAttribInt('MinLineLength', '30'), vdata.DataAttribInt('MaxLineGap', 10)],
 			Flags=[''])
 image_filter.annotate_code = '{x_output_annotated} = im_base.Copy()\n' \
