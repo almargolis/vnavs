@@ -474,9 +474,9 @@ class MissionControl(vmqtt.mqtt_node):
         im = OpticChiasm.Image(opencv_fn=self.pic_path)
         if 'center_line' in self.pic_payload:
             line_at = self.pic_payload['center_line']
-            list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
-            #print("ProcessImage() center_line ", list_of_OpenCvRect)
-            im.DrawLinePoints(list_of_OpenCvRect)
+            list_of_RotatedRect = OpticChiasm.ListOfRotatedRectFromListofDicts(line_at)
+            #print("ProcessImage() center_line ", list_of_RotatedRect)
+            im.DrawLinePoints(list_of_RotatedRect)
         if self.line_rect is not None:
             cv2.line(im._im, self.line_rect.p1, self.line_rect.p2, OpticChiasm.DRAW_BGR_BLACK, 5)
             ctr = self.line_rect.center
