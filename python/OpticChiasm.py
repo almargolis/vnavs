@@ -536,7 +536,7 @@ image_filter = ImageFilter('ContoursFind',
 	#			+ 'cv2.drawContours({x_output_annotated}.im, {x_output_contours}, -1, oc.DRAW_BGR_RED, 1)\n' \
 
 image_filter.annotate_code = '{x_output_annotated} = im_in.CopyAsBGR()\n' \
-				+ 'cv2.drawContours({x_output_annotated}._im, contours_in, -1, (0, 0, 255), 3)\n'
+				+ 'cv2.drawContours({x_output_annotated}._im, {x_output_contours}, -1, (0, 0, 255), 3)\n'
 	#			+ 'print("Contour", len(contours_in))\n' \
 
 ImageFilter('EqualizeHistogram',
