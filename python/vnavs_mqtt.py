@@ -586,7 +586,7 @@ class mqtt_node(object):
                 self.CleanupLoop()
                 sys.exit(0)
             except:
-                exception_time = time.clock()
+                exception_time = time.process_time()
                 payload = {}
                 payload['node_class'] = self.__class__.__name__
                 payload['node_module'] = self.__module__
