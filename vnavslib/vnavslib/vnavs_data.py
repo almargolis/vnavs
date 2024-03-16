@@ -2,11 +2,11 @@ import json
 import os
 
 #
-# This is a standarrdarized data diction for vnavs.
-# The base was developed for the filteer parms in darkroom and then
-# OpticChiasm. It was then used to replace the simple dictionary
+# This is a standardized data dictionary for vnavs.
+# The base was developed for the filter parms in darkroom and then
+# opticchiasm. It was then used to replace the simple dictionary
 # for cameraman orders and the goal is for it to eventually support
-# all vnavs messages. This will be sued for message validation and
+# all vnavs messages. This will be used for message validation and
 # to provide mission_control with click-box selection of properties
 # to display.
 #
@@ -77,7 +77,7 @@ class DataAttrib(object):
 
 class DataAttribIntList(DataAttrib):
     def GetValue(self, raw_value):
-        import OpticChiasm as oc
+        import opticchiasm as oc
         r = []
         parts = raw_value.split(',')
         for this in parts:
@@ -215,7 +215,7 @@ def SlotsPayload(ddata):
 def MakeRegistrations():
     # This is a function instead of in-line so it has its own address space for imports.
     # Otherwise we get import cycles since most modules use this.
-    import engineer_1
+    from vnavsrun import engineer_1
     RegisterClass(PersistentClass(str, StringFactory, PrimitivePayload))
     RegisterClass(PersistentClass(engineer_1.Position, engineer_1.PositionFactory, SlotsPayload))
 MakeRegistrations()

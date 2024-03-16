@@ -11,12 +11,12 @@ import threading
 import time
 import traceback
 
-import vnavs_comms as vcomms
-import vnavs_mqtt as vmqtt
-import vnavs_const as vconst
-import vnavs_data as vdata
+from vnavslib import vnavs_comms as vcomms
+from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_data as vdata
 
-import OpticChiasm
+from vnavslib import opticchiasm
 
 import signal
 print("CONFIGURING SIGNAL")
@@ -42,7 +42,7 @@ class macbook_camera(object):
                         )
     def __init__(self, device_id=0, resolution=(640,480), source_fn=None):
         # macbook default resolution was 1280x720
-        self.colorcode = OpticChiasm.IM_RGB
+        self.colorcode = opticchiasm.IM_RGB
         self._iso = 0
         self.hflip = False
         self.vflip = False
@@ -83,7 +83,7 @@ class macbook_camera(object):
         if frame is None:
             return False
         if isinstance(output, str):
-            rgb_image = OpticChiasm.BGR2RGB(frame)
+            rgb_image = opticchiasm.BGR2RGB(frame)
             cv2.imwrite(output, rgb_image)
             return True
         else:
@@ -95,7 +95,7 @@ class macbook_camera(object):
 
     def capture_image(self):
         ret, frame = self.read()
-        return OpticChiasm.Image(im=frame, colorcode=OpticChiasm.IM_BGR)
+        return opticchiasm.Image(im=frame, colorcode=opticchiasm.IM_BGR)
 
     def capture_continuous(self, output, format=None, use_video_port=False, resize=None, splitter_port=0, burst=False, bayer=False, **options):
         kwargs = options
@@ -229,7 +229,7 @@ class cameraman(vmqtt.mqtt_node):
 
     def OnCameramanMark(self, payload):
         print(payload)
-        self.mark_rect = OpticChiasm.RectFromPayload(payload)
+        self.mark_rect = opticchiasm.RectFromPayload(payload)
         self.mark_payload = payload
 
     def OnCameramanOrders(self, payload):
@@ -281,8 +281,8 @@ class cameraman(vmqtt.mqtt_node):
             x2 += c
         if y2 < 0:
             y2 += r
-        roi = OpticChiasm.ROI(Im, x1, y1, x2, y2)
-        d = OpticChiasm.ReflexEntities(roi, process=process['process'], colors=process['colors'])
+        roi = opticchiasm.ROI(Im, x1, y1, x2, y2)
+        d = opticchiasm.ReflexEntities(roi, process=process['process'], colors=process['colors'])
         mid_x = int((x2 - x1) / 2)
         sensor_point = d.ProcessLines()
         if sensor_point is not None:
@@ -365,7 +365,7 @@ class cameraman(vmqtt.mqtt_node):
 
         rect_list = im.ChaseLine(hsvspec=self.mark_hsv_spec, rect=self.mark_rect, end_y=end_y,
                                 kernel_dim=kernel_dim, iterations=iterations)
-        list_list = OpticChiasm.ListOfOpenCvRectAsListOfDicts(rect_list)
+        list_list = opticchiasm.ListOfOpenCvRectAsListOfDicts(rect_list)
         #print("MAKER ==>", list_list)
         return list_list
 
@@ -394,7 +394,7 @@ class cameraman(vmqtt.mqtt_node):
             # streams can be jpeg, rgb, bgr, or yuv
             if self.loop_format == 'yuv':
                 burst_dest = picamera.array.PiYUVArray(self.camera)
-            elif self.loop_format in [OpticChiasm.IM_RGB, OpticChiasm.IM_BGR]:
+            elif self.loop_format in [opticchiasm.IM_RGB, opticchiasm.IM_BGR]:
                 burst_dest = picamera.array.PiRGBArray(self.camera)
             else:				# jpeg
                 burst_dest = io.BytesIO()
@@ -417,7 +417,7 @@ class cameraman(vmqtt.mqtt_node):
                 image_fn = image_file_name_format.format(counter=burst_image_ct, timestamp=burst_timestamp)
                 #print("CAPT", image_fn, self.image_dir)
                 image_path = os.path.join(self.image_dir, image_fn)
-                this_image = OpticChiasm.ImageFromPicamera(burst_dest, self.loop_format, file_path=image_path)
+                this_image = opticchiasm.ImageFromPicamera(burst_dest, self.loop_format, file_path=image_path)
                 if self.capture_publish == 'file':
                     this_image.Write()
 
@@ -442,16 +442,16 @@ class cameraman(vmqtt.mqtt_node):
             if (len(self.post_processes) > 0) or (self.mark_payload is not None) or True:
                 # we need an OpenCv image for post processing
                 if this_image is None:
-                    this_image = OpticChiasm.Image(opencv_fn=image_path)
+                    this_image = opticchiasm.Image(opencv_fn=image_path)
             if self.mark_payload is not None:
                 # self.mark_rect was unconditionally created when the message was received.
                 # The rectangle might be used for muiltiple things.
                 # If an HsvSpec is in the payload, use that. Otherwise create an HsvSpec from
                 # the image at the rectangle.
                 # If the payload has a save parameter, save it in mission persistant data.
-                hsv_spec = OpticChiasm.HsvSpecFromPayload(self.mark_payload)
+                hsv_spec = opticchiasm.HsvSpecFromPayload(self.mark_payload)
                 if hsv_spec is None:
-                    self.mark_hsv_spec = OpticChiasm.NextHsvSpec(this_image.ImAsHSV(), rect=self.mark_rect)
+                    self.mark_hsv_spec = opticchiasm.NextHsvSpec(this_image.ImAsHSV(), rect=self.mark_rect)
                 else:
                     self.mark_hsv_spec = hsv_spec
                 if 'save' in self.mark_payload:

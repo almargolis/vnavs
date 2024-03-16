@@ -1,0 +1,13 @@
+stage : init
+#data : mission_specs : object : speed_method=automatic
+#data : mission_specs : object : speed_method=manual
+key_group : inside
+
+stage : run
+log_start
+#move : timer=2 : speed=5 : steering=0
+gps : blue : differential_base_position=start
+
+stage : finis
+log_stop
+

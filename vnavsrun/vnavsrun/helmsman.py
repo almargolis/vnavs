@@ -10,8 +10,8 @@ import time
 Arduino = None
 util = None
 
-import vnavs_mqtt as vmqtt
-import vnavs_const as vconst
+from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
 TICK_PATTERNS = [

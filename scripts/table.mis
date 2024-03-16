@@ -1,0 +1,22 @@
+stage : init
+data : start_scan : o_rect : x=125 : y=450 : w=230 : h=20 
+data : start_scan : o_rect : x=80 : y=150 : w=150 : h=10 
+data : mission_specs : object : speed_method=automatic
+data : mission_specs : object : speed_method=manual
+message : mission/mark : $start_scan
+
+stage : run
+log_start
+message name color_pic : cameraman/mark : $start_scan : $start_hsv_spec
+message : helmsman/controls : steering_control=navigator : max_speed_control=20
+#move : timer=1 : speed=5 : steering=0
+#follow_line_pid : $start_scan : Kp=1 : Ki=0 : Kd=1 : speed=6
+follow_line_trace : $start_scan : base_angle=135 : speed=6
+
+stage : finis
+message : helmsman/controls : steering_control=*
+log_stop
+
+stage : mark_capture
+message name color_pic : cameraman/mark : $start_scan : save=start_hsv_spec
+wait : color_pic

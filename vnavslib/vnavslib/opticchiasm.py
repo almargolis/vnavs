@@ -13,7 +13,7 @@ from operator import itemgetter
 import sys
 import re
 
-import vnavs_data as vdata
+from vnavslib import vnavs_data as vdata
 
 # OpenCv uses a range of 0 to HSV_MAX_HUE instead of 0 to 360.
 # old, non-working values were yellow=30, orange=12, blue=120, red=178
@@ -91,7 +91,7 @@ class Image(object):
     def __repr__(self):
         return "Image {}x{}x{} {}".format(self.width, self.height, self.colordepth, self.colorcode)
 
-    def Copy(self):
+    def copy(self):
         if self._im is None:
             return Image(im=None, colorcode=self.colorcode)
         else:

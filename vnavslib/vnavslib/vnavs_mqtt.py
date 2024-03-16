@@ -12,8 +12,8 @@ import time
 
 import paho.mqtt.client as mqtt
 
-import vnavs_const as vconst
-import vnavs_comms as vcomms
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_comms as vcomms
 
 if sys.version_info[0] < 3:
     import ConfigParser

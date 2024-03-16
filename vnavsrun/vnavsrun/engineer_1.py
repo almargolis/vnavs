@@ -9,8 +9,8 @@ import sys
 import time
 
 
-import vnavs_mqtt as vmqtt
-import vnavs_const as vconst
+from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
 dev_sense_hat = None

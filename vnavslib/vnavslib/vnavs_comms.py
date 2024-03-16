@@ -11,7 +11,7 @@ import threading
 import traceback
 import time
 
-import vnavs_const as vconst
+from vnavslib import vnavs_const as vconst
 
 stop_process = False
 
