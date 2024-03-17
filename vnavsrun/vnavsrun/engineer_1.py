@@ -509,7 +509,7 @@ class GpsDevice(object):
         msg_object = pynmea2.GGA(
             talker, msgtype, parms
         )  # this add leading $ and trailing checksum
-        msg_str = str(msg_object) + "\c\n"
+        msg_str = str(msg_object) + "\r\n"
         msg_str = "$PMTK220,200*2C" + "\r\n"
         print("SendGpsCommand", repr(msg_str))
         self.gps_port.write(msg_str.encode())  # convert to bytes and write
