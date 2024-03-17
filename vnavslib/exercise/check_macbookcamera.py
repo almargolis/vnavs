@@ -1,14 +1,9 @@
-
-from __future__ import absolute_import, division, print_function
-from builtins import (bytes, str, open, super, range,
-              zip, round, input, int, pow, object)
-
 import cv2
 import numpy as np
 from vnavslib import opticchiasm as oc
-from vnavsrun import cameraman
+from vnavslib import macbookcamera
 
-cam = cameraman.macbook_camera()
+cam = macbookcamera.MacbookCamera()
 im_in = cam.capture_image()
 im_base = im_in.copy()
 

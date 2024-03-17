@@ -15,49 +15,53 @@ from vnavslib import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
 TICK_PATTERNS = [
-	[],				# 0 tick bits
-	[],				# 1 tick bits
-	[				# 2 tick bits
-		[True, True, True, True],
-		[True, False, False, False],
-		[True, False, True, False],
-		[True, True, True, False]
-	]
+    [],  # 0 tick bits
+    [],  # 1 tick bits
+    [  # 2 tick bits
+        [True, True, True, True],
+        [True, False, False, False],
+        [True, False, True, False],
+        [True, True, True, False],
+    ],
 ]
+
 
 class SteeringPlanStep(object):
     def __init__(self, direction):
         self.direction = direction
 
+
 class vehicle(object):
     """
-        This class isolates low level hardware functions so that helmsman is vehicle
-        agnostic. Right now it is hardwired for my initial robot. Later on it will
-        either be subclassed or specilaized with a configuration file.
+    This class isolates low level hardware functions so that helmsman is vehicle
+    agnostic. Right now it is hardwired for my initial robot. Later on it will
+    either be subclassed or specilaized with a configuration file.
 
-        For now, speed variables are actual Arduino Servo values. Eventually
-        we want them to use actual speed mm/sec and map that to whatever
-        control values are needed for the vehicle.
+    For now, speed variables are actual Arduino Servo values. Eventually
+    we want them to use actual speed mm/sec and map that to whatever
+    control values are needed for the vehicle.
     """
+
     def __init__(self):
         global Arduino
         global util
         from pyfirmata import Arduino, util
-        self.board = Arduino('/dev/ttyUSB0')
-        self.motor = self.board.get_pin('d:9:s')
+
+        self.board = Arduino("/dev/ttyUSB0")
+        self.motor = self.board.get_pin("d:9:s")
         self.governor = 0
         self.tickBits = 2
-        self.tickMax = (1 << self.tickBits)
+        self.tickMax = 1 << self.tickBits
         self.tickMask = (1 << self.tickBits) - 1
         # mot_offset does not include ticks
         self.mot_offset = 90
         self.mot_tick_clock = 0
-        self.mot_pulse_dead_zone_f = 7		# Low pulse values that have no effect on motor
-        self.mot_pulse_dead_zone_r = 4		# Low pulse values that have no effect on motor
+        self.mot_pulse_dead_zone_f = 7  # Low pulse values that have no effect on motor
+        self.mot_pulse_dead_zone_r = 4  # Low pulse values that have no effect on motor
         # mot_jump_f and mot_jump_r are SPEEDS, they are an increment above the pulse dead zone
-        self.mot_jump_f = 3			# This is the minimum speed to start moving from stop
-        self.mot_jump_r = -1			# This is the minimum speed to start moving from stop
-        self.mot_ramp_increment = 0		# Current ramping increment
+        self.mot_jump_f = 3  # This is the minimum speed to start moving from stop
+        self.mot_jump_r = -1  # This is the minimum speed to start moving from stop
+        self.mot_ramp_increment = 0  # Current ramping increment
         self.mot_this_pulse = 0
         self.mot_this_tick = 0
         self.mot_last_pulse = 0
@@ -65,24 +69,24 @@ class vehicle(object):
         # speed in mm/second - depends on vehicle and battery condition
         # For now speed is just a number.
         # Zero is stopped, 1 is crawl, 2... incrementally faster (negative is reverse)
-        self.mot_speed_goal = SPEED_STOP	# we may be ramping toward this
-        self.mot_speed_ramp = SPEED_STOP	# current speed, on way to goal
-        self.speed_max = 13411			# 30mph / 13.4112 meters/second
-        self.speed_max = 40			# servo speed request
+        self.mot_speed_goal = SPEED_STOP  # we may be ramping toward this
+        self.mot_speed_ramp = SPEED_STOP  # current speed, on way to goal
+        self.speed_max = 13411  # 30mph / 13.4112 meters/second
+        self.speed_max = 40  # servo speed request
         #
-        self.steering = self.board.get_pin('d:10:s')
+        self.steering = self.board.get_pin("d:10:s")
         self.steering_offset = 90
-        self.steering_increment	= 10		# degrees of casual steering adjustment
-        self.steering_max = 30			# 60 degrees left or right
-        self.steering_max = 90			# 60 degrees left or right
-        self.steering_last = 0			# last actual steering position
-        self.steering_base = 0			# general goal, 0 for navigation, X for circles
-        self.steering_plan = None		# steering variations from base
-        self.steering_type = None		# R(elative) or A(bsolute)
-        self.steering_goal = 0			# this is absolute steering direction
-        self.steering_tick = 0			# time increment / step in plan
-        self.steering_tock = 0			# counter toward tick_width
-        self.steering_tick_width = 20 		# number off loops too maintain each plan step
+        self.steering_increment = 10  # degrees of casual steering adjustment
+        self.steering_max = 30  # 60 degrees left or right
+        self.steering_max = 90  # 60 degrees left or right
+        self.steering_last = 0  # last actual steering position
+        self.steering_base = 0  # general goal, 0 for navigation, X for circles
+        self.steering_plan = None  # steering variations from base
+        self.steering_type = None  # R(elative) or A(bsolute)
+        self.steering_goal = 0  # this is absolute steering direction
+        self.steering_tick = 0  # time increment / step in plan
+        self.steering_tock = 0  # counter toward tick_width
+        self.steering_tick_width = 20  # number off loops too maintain each plan step
         self.Estop()
 
     def ConvertSpeedToPulseParameter(self, speed):
@@ -107,9 +111,9 @@ class vehicle(object):
     def NewSpeedGoal(self, speed_goal):
         new_speed_goal = int(speed_goal)
         if self.governor > 0:
-            if  (new_speed_goal > 0) and (new_speed_goal > self.governor):
+            if (new_speed_goal > 0) and (new_speed_goal > self.governor):
                 new_speed_goal = self.governor
-            elif  (new_speed_goal < 0) and (new_speed_goal < (-self.governor)):
+            elif (new_speed_goal < 0) and (new_speed_goal < (-self.governor)):
                 new_speed_goal = -self.governor
         if new_speed_goal == self.mot_speed_goal:
             return
@@ -150,7 +154,9 @@ class vehicle(object):
 
     def RampSpeeed(self):
         self.mot_speed_ramp += self.mot_ramp_increment
-        print("Ramp:", self.mot_speed_ramp, self.mot_ramp_increment, self.mot_speed_goal)
+        print(
+            "Ramp:", self.mot_speed_ramp, self.mot_ramp_increment, self.mot_speed_goal
+        )
         if self.mot_speed_goal > SPEED_STOP:
             if self.mot_ramp_increment > RAMP_NONE:
                 if self.mot_speed_ramp >= self.mot_speed_goal:
@@ -161,7 +167,9 @@ class vehicle(object):
                     self.mot_speed_ramp = self.mot_speed_goal
                     self.mot_ramp_increment = RAMP_NONE
         else:
-            if self.mot_ramp_increment > RAMP_NONE:		# positive ramp, slowing down toward zero
+            if (
+                self.mot_ramp_increment > RAMP_NONE
+            ):  # positive ramp, slowing down toward zero
                 if self.mot_speed_ramp >= self.mot_speed_goal:
                     self.mot_speed_ramp = self.mot_speed_goal
                     self.mot_ramp_increment = RAMP_NONE
@@ -171,7 +179,7 @@ class vehicle(object):
                     self.mot_ramp_increment = RAMP_NONE
 
     def Estop(self):
-        self.motor.write(self.mot_offset)	# Stop motor if on
+        self.motor.write(self.mot_offset)  # Stop motor if on
         self.mot_speed_goal = SPEED_STOP
         self.mot_speed_ramp = SPEED_STOP
 
@@ -191,23 +199,25 @@ class vehicle(object):
         # This is fragile. Need to soften states to avoid race conditions.
         # This must be called frequently in order to maintain control of the
         # vehicle. Maybe it should be in its own thread.
-        #print("M-Tick", self.mot_ramp_increment, self.mot_speed_goal)
+        # print("M-Tick", self.mot_ramp_increment, self.mot_speed_goal)
         #
         # self.mot_speed_goal is how fast we want to go
         # self.mot_speed_ramp is current speed setting, which ramps toward the goal
         #
         if self.mot_speed_goal == SPEED_STOP:
-            self.motor.write(self.mot_offset)	# Stop motor if on
+            self.motor.write(self.mot_offset)  # Stop motor if on
             return
         if self.mot_ramp_increment != RAMP_NONE:
             self.RampSpeeed()
-        self.mot_this_pulse, self.mot_this_tick = self.ConvertSpeedToPulseParameter(self.mot_speed_ramp)
+        self.mot_this_pulse, self.mot_this_tick = self.ConvertSpeedToPulseParameter(
+            self.mot_speed_ramp
+        )
         # we know our pulse requirement, tell the hardware
         # self.mot_this_pulse and self.mot_this_tick is how fast we are driving now.
         # self.mot_goal_pulse and self.mot_goal_tick are the speed we are ramping towards.
         # In reality, they are the same most of the time.
         tick_pattern = TICK_PATTERNS[self.tickBits][self.mot_this_tick]
-        #print("Pattern @", self.mot_tick_clock, self.tickBits, self.mot_this_tick, tick_pattern)
+        # print("Pattern @", self.mot_tick_clock, self.tickBits, self.mot_this_tick, tick_pattern)
         tick_rule = tick_pattern[self.mot_tick_clock]
         if tick_rule:
             # we want to move on this tick
@@ -223,7 +233,20 @@ class vehicle(object):
             # we want to "coast" on this tick -- maintain speed
             self.actualPulse = self.mot_offset
         self.motor.write(self.actualPulse)
-        print("Motor:", self.actualPulse, "@", self.mot_tick_clock, "(", self.mot_speed_ramp, "->", self.mot_speed_goal,"Spec:", self.mot_this_pulse, ":", self.mot_this_tick)
+        print(
+            "Motor:",
+            self.actualPulse,
+            "@",
+            self.mot_tick_clock,
+            "(",
+            self.mot_speed_ramp,
+            "->",
+            self.mot_speed_goal,
+            "Spec:",
+            self.mot_this_pulse,
+            ":",
+            self.mot_this_tick,
+        )
         self.mot_tick_clock += 1
         if self.mot_tick_clock > self.tickMask:
             self.mot_tick_clock = 0
@@ -238,13 +261,20 @@ class vehicle(object):
             print("OLD PLAN", self.steering_plan)
             # Don't start a new relative motion till previous complete
             return
-        self.steering_tick = 0			# time increment / step in plan
+        self.steering_tick = 0  # time increment / step in plan
         self.steering_tock = 0
         goal_type = steering_goal[1]
-        goal_degree = (int(steering_goal[2:]) * self.steering_increment)
-        if goal_type == 'V':
+        goal_degree = int(steering_goal[2:]) * self.steering_increment
+        if goal_type == "V":
             # veer
-            self.steering_plan = [goal_degree, goal_degree, 0, 0, -goal_degree, -goal_degree]
+            self.steering_plan = [
+                goal_degree,
+                goal_degree,
+                0,
+                0,
+                -goal_degree,
+                -goal_degree,
+            ]
         else:
             # change heading
             self.steering_plan = [goal_degree, goal_degree, goal_degree]
@@ -261,23 +291,27 @@ class vehicle(object):
         try:
             self.steering.write(self.steering_offset + direction)
         except ValueError:
-            pass				# attempt to write invalid value
+            pass  # attempt to write invalid value
         self.steering_last = direction
         return
 
         # The following is the old steering code which is a mess but may be useful when filling out the
         # above new code.
 
-        if (steering_goal is None) or (not isinstance(steering_goal, str)) or (steering_goal == ''):
+        if (
+            (steering_goal is None)
+            or (not isinstance(steering_goal, str))
+            or (steering_goal == "")
+        ):
             pass
-        elif steering_goal[0] == 'R':
-            self.steering_type = 'R'
+        elif steering_goal[0] == "R":
+            self.steering_type = "R"
             self.NewSteeringGoal(steering_goal)
-        elif steering_goal[0] == 'A':
-            self.steering_type = 'A'
+        elif steering_goal[0] == "A":
+            self.steering_type = "A"
             self.steering_goal = int(steering_goal[1:])
         if self.steering_plan is None:
-            if self.steering_type == 'A':
+            if self.steering_type == "A":
                 direction = self.steering_goal
             else:
                 direction = self.steering_base
@@ -297,57 +331,82 @@ class vehicle(object):
                 direction = self.steering_max
         else:
             if direction < (-self.steering_max):
-                direction = (-self.steering_max)
+                direction = -self.steering_max
         if direction != self.steering_last:
             print("Steer:", direction)
+
 
 RAMP_NONE = 0
 RAMP_UP = 1
 RAMP_DOWN = -1
 
-STATE_DEADMAN = 'd'			# d=deadman active
-STATE_CONTINUOUS = 'c'			# c=continuous-no timer
-STATE_TIMED_OUT = 't'			# t=time out
-STATE_ESTOPPED = 'e'			# e=e-stop
+STATE_DEADMAN = "d"  # d=deadman active
+STATE_CONTINUOUS = "c"  # c=continuous-no timer
+STATE_TIMED_OUT = "t"  # t=time out
+STATE_ESTOPPED = "e"  # e=e-stop
 STATES_MOVING = STATE_DEADMAN + STATE_CONTINUOUS
 
-SPEED_DECREASE = 'd'			# decrease spead by one step
+SPEED_DECREASE = "d"  # decrease spead by one step
 SPEED_STOP = 0
 
 STEER_STRAIGHT = 0
 
-HELMSMAN_GOVERNOR = 'governor'
-HELMSMAN_SPEED_CONTROL = 'speed_control'
-HELMSMAN_SPEED_CONTROL_DEFAULT = '*'
-HELMSMAN_MAX_SPEED_CONTROL = 'max_speed_control'
-HELMSMAN_STEERING_CONTROL = 'steering_control'
-HELMSMAN_STEERING_CONTROL_DEFAULT = '*'
+HELMSMAN_GOVERNOR = "governor"
+HELMSMAN_SPEED_CONTROL = "speed_control"
+HELMSMAN_SPEED_CONTROL_DEFAULT = "*"
+HELMSMAN_MAX_SPEED_CONTROL = "max_speed_control"
+HELMSMAN_STEERING_CONTROL = "steering_control"
+HELMSMAN_STEERING_CONTROL_DEFAULT = "*"
 
-HELMSMAN_STATE = 'state'
-HELMSMAN_SPEED = 'speed'
-HELMSMAN_SPEED_SCALE_MIN = 'speed_scale_min'
-HELMSMAN_SPEED_SCALE_MAX = 'speed_scale_max'
-HELMSMAN_HEADING = 'heading'
-HELMSMAN_HEADING_SCALE_MIN = 'heading_scale_min'
-HELMSMAN_HEADING_SCALE_MAX = 'heading_scale_max'
-HELMSMAN_TIMER = 'timer'
-HELMSMAN_P_ERROR = 'p_error'
-HELMSMAN_I_ACCUMULATOR = 'i_accumulator'
-HELMSMAN_DERIVATIVE = 'derivative'
+HELMSMAN_STATE = "state"
+HELMSMAN_SPEED = "speed"
+HELMSMAN_SPEED_SCALE_MIN = "speed_scale_min"
+HELMSMAN_SPEED_SCALE_MAX = "speed_scale_max"
+HELMSMAN_HEADING = "heading"
+HELMSMAN_HEADING_SCALE_MIN = "heading_scale_min"
+HELMSMAN_HEADING_SCALE_MAX = "heading_scale_max"
+HELMSMAN_TIMER = "timer"
+HELMSMAN_P_ERROR = "p_error"
+HELMSMAN_I_ACCUMULATOR = "i_accumulator"
+HELMSMAN_DERIVATIVE = "derivative"
+
 
 class helmsman(vmqtt.mqtt_node):
     def __init__(self):
         self.orders_q = queue.Queue(10)
-        super().__init__(Subscriptions=[
-						vmqtt.Subscription(vconst.helmsman_orders_topic, async_delivery=True, handler=self.OnHelmsmanOrders),
-						vmqtt.Subscription(vconst.helmsman_controls_topic, async_delivery=True, handler=self.OnHelmsmanControls),
-						vmqtt.Subscription(vconst.mission_log_start_topic, async_delivery=True, handler=self.OnMissionLogStart),
-                                                vmqtt.Subscription(vconst.mission_log_stop_topic, async_delivery=True, handler=self.OnMissionLogStop)
-				], SingleThreaded=False, BrokerType='F', Verbose=False)
+        super().__init__(
+            Subscriptions=[
+                vmqtt.Subscription(
+                    vconst.helmsman_orders_topic,
+                    async_delivery=True,
+                    handler=self.OnHelmsmanOrders,
+                ),
+                vmqtt.Subscription(
+                    vconst.helmsman_controls_topic,
+                    async_delivery=True,
+                    handler=self.OnHelmsmanControls,
+                ),
+                vmqtt.Subscription(
+                    vconst.mission_log_start_topic,
+                    async_delivery=True,
+                    handler=self.OnMissionLogStart,
+                ),
+                vmqtt.Subscription(
+                    vconst.mission_log_stop_topic,
+                    async_delivery=True,
+                    handler=self.OnMissionLogStop,
+                ),
+            ],
+            SingleThreaded=False,
+            BrokerType="F",
+            Verbose=False,
+        )
         self.v = vehicle()
-        self.steering_goal = 0		# (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
+        self.steering_goal = (
+            0  # (int) degrees (0 = straigh, neg is degrees left, pos is degrees right)
+        )
         self.mission_logging = False
-        self.deadman_time = 0		# E-Stop if time.time() exceeds this
+        self.deadman_time = 0  # E-Stop if time.time() exceeds this
         self.speed_control = HELMSMAN_SPEED_CONTROL_DEFAULT
         self.steering_control = HELMSMAN_STEERING_CONTROL_DEFAULT
         self.state = STATE_DEADMAN
@@ -372,7 +431,7 @@ class helmsman(vmqtt.mqtt_node):
             self.speed_control = payload[HELMSMAN_SPEED_CONTROL].strip()
 
     def OnHelmsmanOrders(self, payload):
-        #print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
+        # print("ORDERS C:", time.time(), "D:", self.deadman_time, payload)
         if HELMSMAN_STATE in payload:
             print("--------------------")
             new_state = payload[HELMSMAN_STATE]
@@ -388,8 +447,8 @@ class helmsman(vmqtt.mqtt_node):
         try:
             self.orders_q.put_nowait(payload)
         except queue.Full:
-            pass			# should log this and do something
-        return				# the rest is abandoned code
+            pass  # should log this and do something
+        return  # the rest is abandoned code
 
     def OnMissionLogStart(self, payload):
         self.mission_logging = True
@@ -401,20 +460,30 @@ class helmsman(vmqtt.mqtt_node):
         if self.speed_control == HELMSMAN_SPEED_CONTROL_DEFAULT:
             pass
         else:
-          if self.speed_control == payload['_sender']:
-              pass
-          else:
-              print("HELMSMAN - Unauthorized Speed Order from %s".format(payload['_sender']))
-              return
+            if self.speed_control == payload["_sender"]:
+                pass
+            else:
+                print(
+                    "HELMSMAN - Unauthorized Speed Order from %s".format(
+                        payload["_sender"]
+                    )
+                )
+                return
         if HELMSMAN_SPEED_SCALE_MIN in payload:
             speed_raw = int(payload[HELMSMAN_SPEED])
             speed_scale_min = int(payload[HELMSMAN_SPEED_SCALE_MIN])
             speed_scale_max = int(payload[HELMSMAN_SPEED_SCALE_MAX])
-            #speed_scale_min =128
-            #speed_scale_max = 0
-            speed_request = self.ScaleRequest(speed_raw, -speed_scale_min, -speed_scale_max, -self.v.speed_max, self.v.speed_max)
+            # speed_scale_min =128
+            # speed_scale_max = 0
+            speed_request = self.ScaleRequest(
+                speed_raw,
+                -speed_scale_min,
+                -speed_scale_max,
+                -self.v.speed_max,
+                self.v.speed_max,
+            )
         else:
-            speed_request = payload[HELMSMAN_SPEED]	# Note: alphanumeric
+            speed_request = payload[HELMSMAN_SPEED]  # Note: alphanumeric
         self.v.NewSpeedGoal(speed_request)
         print("SPEED", speed_request)
 
@@ -422,19 +491,30 @@ class helmsman(vmqtt.mqtt_node):
         if self.steering_control == HELMSMAN_STEERING_CONTROL_DEFAULT:
             pass
         else:
-          if self.steering_control == payload['_sender']:
-              pass
-          else:
-              print("HELMSMAN - Unauthorized Steering Order from %s".format(payload['_sender']))
-              return
+            if self.steering_control == payload["_sender"]:
+                pass
+            else:
+                print(
+                    "HELMSMAN - Unauthorized Steering Order from %s".format(
+                        payload["_sender"]
+                    )
+                )
+                return
         if HELMSMAN_HEADING_SCALE_MIN in payload:
             heading_raw = int(payload[HELMSMAN_HEADING])
             heading_scale_min = int(payload[HELMSMAN_HEADING_SCALE_MIN])
             heading_scale_max = int(payload[HELMSMAN_HEADING_SCALE_MAX])
-            heading_request = self.ScaleRequest(heading_raw, heading_scale_min, heading_scale_max, -self.v.steering_max, self.v.steering_max, sensitivity=None)
+            heading_request = self.ScaleRequest(
+                heading_raw,
+                heading_scale_min,
+                heading_scale_max,
+                -self.v.steering_max,
+                self.v.steering_max,
+                sensitivity=None,
+            )
         else:
             try:
-                heading_request = int(payload[HELMSMAN_HEADING])	# Note: alphanumeric
+                heading_request = int(payload[HELMSMAN_HEADING])  # Note: alphanumeric
             except TypeError:
                 heading_request = 0
         self.v.NewSteeringGoal(heading_request)
@@ -454,7 +534,9 @@ class helmsman(vmqtt.mqtt_node):
             # end timeout when new command arrives
             self.state = STATE_DEADMAN
 
-    def ScaleRequest(self, raw_value, raw_min, raw_max, target_min, target_max, sensitivity=0.05):
+    def ScaleRequest(
+        self, raw_value, raw_min, raw_max, target_min, target_max, sensitivity=0.05
+    ):
         # return an integer value within target range proportional to raw value in raw range
         if raw_max >= raw_min:
             raw_range = raw_max - raw_min
@@ -466,7 +548,9 @@ class helmsman(vmqtt.mqtt_node):
         if sensitivity is None:
             # linear scaling
             target_range = float(target_max - target_min)
-            request_value = ((target_range * raw_range_pct) + float(target_min)) * raw_inversion
+            request_value = (
+                (target_range * raw_range_pct) + float(target_min)
+            ) * raw_inversion
             print("SCALE", raw_value, request_value)
         else:
             # parabolic scaling
@@ -474,21 +558,23 @@ class helmsman(vmqtt.mqtt_node):
             assert (target_min + target_max) == 0
             target_max_x = math.sqrt(float(target_max) / sensitivity)
             target_x_value = ((target_max_x * 2) * raw_range_pct) - target_max_x
-            request_value = (sensitivity * math.pow(target_x_value, 2.0)) * raw_inversion
+            request_value = (
+                sensitivity * math.pow(target_x_value, 2.0)
+            ) * raw_inversion
             if target_x_value < 0:
                 request_value = 0 - request_value
             print("SCALE", raw_value, request_value, target_x_value)
         return int(request_value)
 
     def DoLoop(self):
-        #print("STATE", self.state, "Governor", self.v.governor)
+        # print("STATE", self.state, "Governor", self.v.governor)
         if not self.mqttc.connected:
             self.v.Estop()
             return
         if (self.state == STATE_DEADMAN) and (time.time() > self.deadman_time):
             self.v.Estop()
             self.state = STATE_TIMED_OUT
-            self.stats.Count('timeouts')
+            self.stats.Count("timeouts")
             return
         if self.state == STATE_ESTOPPED:
             self.v.Estop()
@@ -509,6 +595,8 @@ class helmsman(vmqtt.mqtt_node):
 
     def CleanupLoop(self):
         self.v.Estop()
+
+
 """
     def SpeedRequestStr(self, speed_request):
         speed_goal = None
@@ -582,6 +670,6 @@ class helmsman(vmqtt.mqtt_node):
 
 """
 
-if __name__ == '__main__':
-    if sys.argv[1] == 'node':
+if __name__ == "__main__":
+    if sys.argv[1] == "node":
         vmqtt.LaunchNode(helmsman)

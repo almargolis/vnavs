@@ -27,6 +27,7 @@ EXTEND_COL = -4
 OVERLAY_COL = -5
 COL_SPAN_ALL = -1
 
+
 #
 # Notebook - substitute for ttk.Notebook
 # 	Intended to work identically, except for styling

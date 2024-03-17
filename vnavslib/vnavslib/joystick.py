@@ -6,6 +6,7 @@ import time
 import vnavs_const as vconst
 import vnavs_mqtt as vmqtt
 
+
 def PrintCapability(gamepad):
     print(gamepad)
     print(gamepad.capabilities(absinfo=True, verbose=True))
@@ -20,22 +21,36 @@ def PrintCapability(gamepad):
         else:
             print("XXX", thisType, thisCap)
 
+
 class joystick(vmqtt.mqtt_node):
     def __init__(self, Verbose=False):
-        super().__init__(Subscriptions=[
-                                                vmqtt.Subscription(vconst.mission_log_start_topic, async_delivery=True, handler=self.OnMissionLogStart),
-                                                vmqtt.Subscription(vconst.mission_log_stop_topic, async_delivery=True, handler=self.OnMissionLogStop)
-					],
-					SingleThreaded=True, BlockIfNotConnected=False,
-					SelectTimeoutSecs=0.01,
-					BrokerType='F', Streamer=False, Verbose=Verbose)
-        self.system =  platform.system()
-        if self.system == 'Linux':
+        super().__init__(
+            Subscriptions=[
+                vmqtt.Subscription(
+                    vconst.mission_log_start_topic,
+                    async_delivery=True,
+                    handler=self.OnMissionLogStart,
+                ),
+                vmqtt.Subscription(
+                    vconst.mission_log_stop_topic,
+                    async_delivery=True,
+                    handler=self.OnMissionLogStop,
+                ),
+            ],
+            SingleThreaded=True,
+            BlockIfNotConnected=False,
+            SelectTimeoutSecs=0.01,
+            BrokerType="F",
+            Streamer=False,
+            Verbose=Verbose,
+        )
+        self.system = platform.system()
+        if self.system == "Linux":
             pass
             ## this only works under linux
-        if not self.ConfigureJoystick('/dev/input/event2'):
-            if not self.ConfigureJoystick('/dev/input/event3'):
-                if not self.ConfigureJoystick('/dev/input/event4'):
+        if not self.ConfigureJoystick("/dev/input/event2"):
+            if not self.ConfigureJoystick("/dev/input/event3"):
+                if not self.ConfigureJoystick("/dev/input/event4"):
                     raise Error("No Joystick found!")
         self.helmsmanChanged = False
         self.last_publish = 0.0
@@ -49,7 +64,7 @@ class joystick(vmqtt.mqtt_node):
             if thisType == evdev.ecodes.EV_ABS:
                 for thisAxis in thisCapability:
                     self.gamepadAxis[thisAxis[0]] = thisAxis[1]
-        self.gamepadMap = {}				# This map varies with controller type/brand
+        self.gamepadMap = {}  # This map varies with controller type/brand
         self.speedAxisCode = 1
         self.directionAxisCode = 2
         self.gamepadMap[self.speedAxisCode] = self.SaveSpeed
@@ -72,27 +87,27 @@ class joystick(vmqtt.mqtt_node):
 
     def SaveSpeed(self, event):
         if self.speedValue == event.value:
-            return					# No change in value
+            return  # No change in value
         self.speedAxis = self.gamepadAxis[event.code]
         self.speedValue = event.value
         self.helmsmanChanged = True
 
     def SaveDirection(self, event):
         if self.directionValue == event.value:
-            return					# No change in value
+            return  # No change in value
         self.speedAxis = self.gamepadAxis[event.code]
         self.directionValue = event.value
         self.helmsmanChanged = True
 
     def PublishHelmsman(self):
         payload = {}
-        payload['speed'] = self.speedValue
-        payload['speed_scale_min'] = self.speedAxis.min
-        payload['speed_scale_max'] = self.speedAxis.max
+        payload["speed"] = self.speedValue
+        payload["speed_scale_min"] = self.speedAxis.min
+        payload["speed_scale_max"] = self.speedAxis.max
         if not self.mission_logging:
-            payload['heading'] = self.directionValue
-            payload['heading_scale_min'] = self.directionAxis.min
-            payload['heading_scale_max'] = self.directionAxis.max
+            payload["heading"] = self.directionValue
+            payload["heading_scale_min"] = self.directionAxis.min
+            payload["heading_scale_max"] = self.directionAxis.max
         self.Publish(vconst.helmsman_orders_topic, payload)
         self.helmsmanChanged = False
         print(payload)
@@ -114,6 +129,7 @@ class joystick(vmqtt.mqtt_node):
             if e.errno == 11:
                 pass
 
-if __name__ == '__main__':
-    if sys.argv[1] == 'node':
+
+if __name__ == "__main__":
+    if sys.argv[1] == "node":
         vmqtt.LaunchNode(joystick)

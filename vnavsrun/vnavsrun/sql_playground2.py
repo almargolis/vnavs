@@ -5,10 +5,10 @@ import sys
 import time
 
 field_defs = (
-		['LONGITUDE', 'REAL', '-121.0 - random.random()'],
-		['HEADING', 'REAL', '360 * random.random()'],
-		['LATITUDE', 'REAL', '37.0 + random.random()']
-	)
+    ["LONGITUDE", "REAL", "-121.0 - random.random()"],
+    ["HEADING", "REAL", "360 * random.random()"],
+    ["LATITUDE", "REAL", "37.0 + random.random()"],
+)
 
 if len(sys.argv) < 3:
     print("Usage: python %s <fld ct> <record ct>" % sys.argv[0])
@@ -18,7 +18,7 @@ field_ct_parm = int(sys.argv[1])
 test_ct_parm = int(sys.argv[2])
 assert (field_ct_parm > 0) and (field_ct_parm <= len(field_defs))
 
-db_file_name = 'test.db'
+db_file_name = "test.db"
 os.remove(db_file_name)
 db = sqlite3.connect(db_file_name)
 cursor = db.cursor()
@@ -37,6 +37,7 @@ for x in xrange(test_ct_parm):
         fld_values.append(eval(field_defs[fld_ix][2]))
     cursor.execute("INSERT INTO MissionLog VALUES (?, ?);", fld_values)
 elapsed_time = time.time() - start_time
-print("Inserted %d records in %8.3f seconds. %6.1f records/second." % (test_ct_parm, elapsed_time, test_ct_parm / elapsed_time))
-
-
+print(
+    "Inserted %d records in %8.3f seconds. %6.1f records/second."
+    % (test_ct_parm, elapsed_time, test_ct_parm / elapsed_time)
+)

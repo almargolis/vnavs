@@ -793,9 +793,9 @@ class Darkroom(vmqtt.mqtt_node):
         fn_root, fn_ext = os.path.splitext(drk_fn)
         drk_f = open(drk_fn, "w")
         for this_step in ProcessStep.steps:
-            drk_f.write(u"/{}\n".format(this_step.cv_filter_name))
+            drk_f.write("/{}\n".format(this_step.cv_filter_name))
             for this_key, this_value in this_step.parm_values.items():
-                drk_f.write(u"parm.{}={}\n".format(this_key, this_value))
+                drk_f.write("parm.{}={}\n".format(this_key, this_value))
         drk_f.close()
         cam_fn = fn_root + "." + ProcessStep.cameraman_file_extension
         py_fn = fn_root + "." + ProcessStep.python_file_extension
