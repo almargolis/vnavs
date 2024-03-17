@@ -1,7 +1,5 @@
 import configparser
-import json
 import multiprocessing
-import numpy as np
 import os
 import queue
 import select
@@ -34,50 +32,6 @@ def host_primary_ip_address():
     return ip_address
 
 
-def JsonShowTypes(payload):
-    for key, value in payload.items():
-        print(key, value.__class__.__name__, value)
-
-
-class JsonNumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.int64):
-            obj_out = int(obj)
-            # print("JsonNumpyEncoder()", obj.__class__.__name__, obj_out.__class__.__name__)
-            return obj_out
-        return super().default(obj)
-
-
-def PrepareMessage(
-    sender_name, sender_pid, sender_seq, topic, payload, ConfRequest=None
-):
-    payload["_topic"] = topic
-    payload["_sender"] = sender_name
-    payload["_sendTime"] = time.time()
-    payload["_sendPid"] = sender_pid
-    payload["_sendSeq"] = sender_seq
-    if ConfRequest is not None:
-        payload["_confRequest"] = ConfRequest
-    j = json.dumps(payload, cls=JsonNumpyEncoder)
-    return j
-
-
-def PrepareResponse(payload, ConfResponse=False):
-    # Prepares payload to be used as a response.
-    # Copy identifier fields so recipients can match source message
-    # so it knows request is completed and where to continue its process.
-    # Info about original message is always there thanks to Publish()
-    new_payload = {}
-    if "_topic" in payload:
-        new_payload["_ackTopic"] = payload["_topic"]
-    if "_sendPid" in payload:
-        new_payload["_ackPid"] = payload["_sendPid"]
-    if "_sendSeq" in payload:
-        new_payload["_ackSeq"] = payload["_sendSeq"]
-    if ConfResponse:
-        if "_confRequest" in payload:
-            new_payload["_isConfirmation"] = payload["_confRequest"]
-    return new_payload
 
 
 #
@@ -195,7 +149,7 @@ class socket_xfer:
 #
 # SocketWrapperServer() SocketWrapperClient()
 #
-# These objects enccapsulates Python low level socket services with a number of idioms that
+# These objects encapsulate Python low level socket services with a number of idioms that
 # I found necessary to make typical example code run reliably for VNAVS.
 # At this point I am not positive that I wouldn't have been better off using a higher level
 # object instead of writing this.
@@ -301,7 +255,7 @@ class SocketWrapper:
                     )
                 )
 
-        # This can be a server or client. Either way self.os_socket is the primary socket
+        # This can be a server or client. Either way, self.os_socket is the primary socket
         #
         # Socket communications between OSX and RPI can be painfully slow, as in minutes.
         # TCP_NODELAY solved the problem. As a test, I commented it out and it remained
@@ -315,7 +269,7 @@ class SocketWrapper:
         # the RPI side of the communications (RPI <-> RPI) only (RPI <-> OSX).
         #
         # On Raspbian, when killing FastMqttServer
-        # with kill -HUP, it could not bes started for a while due to
+        # with kill -HUP, it could not be restarted for a while due to
         # socket.error: [Errno 98] Address already in use
         # Trying tcpSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         # per: https://stackoverflow.com/questions/19071512/socket-error-errno-48-address-already-in-use
@@ -353,7 +307,7 @@ class SocketWrapper:
     def close_client_connection(self, s):
         # This closes the connection to one of a server's clients.
         # This takes care of client clean-up for servers that are using
-        # select() and ouytput queues to handle multuple clients in one thread.
+        # select() and output queues to handle multuple clients in one thread.
         if s in self.output_sockets:
             self.output_sockets.remove(s)
         if s in self.input_sockets:
@@ -595,9 +549,9 @@ class SocketWrapperClient(SocketWrapper):
     # Operation of connect in non-blocking mode is a bit surprising:
     #
     # If the connection cannot be established immediately and O_NONBLOCK is set for the file descriptor
-    # for the socket, connect() shall fail and set errno to [EINPROGRESS], but the connection request
-    # shall not be aborted, and the connection shall be established asynchronously. Subsequent calls
-    # to connect() for the same socket, before the connection is established, shall fail and set
+    # for the socket, connect() will fail and set errno to [EINPROGRESS], but the connection request
+    # will not be aborted, and the connection will be established asynchronously. Subsequent calls
+    # to connect() for the same socket, before the connection is established, fail and set
     # errno to [EALREADY].
     #
     # The above applies to both OSX and Rapbian, but the specific error numbers are different.
@@ -768,183 +722,6 @@ class FileServer(SocketWrapperServer):
                 )  # add file size to first block
             self.queue_message(rec, s=s)
             ix += self.buffer_len
-
-
-class MessageArchiver:
-    __slots__ = ("archive_buffer", "archive_size", "archive_file")
-
-    def __init__(self):
-        self.archive_buffer = []
-        self.archive_size = 0
-        self.archive_file = None
-
-    def open(self, MissionName):
-        fp = MissionName + FMQTT_LOG_EXTENSION
-        self.archive_file = open(fp, "w")
-        self.archive_buffer = []
-        self.archive_size = 0
-
-    def close(self):
-        if self.archive_file is None:
-            return
-        self.write_buffer()
-        self.archive_file.close()
-        self.archive_file = None
-
-    def archive(self, mid, ptime, payload):
-        # message id, server publish time, json string payload
-        if self.archive_file is None:
-            return
-        self.archive_buffer.append("{}\x00{}\x00{}\x01".format(mid, ptime, payload))
-        self.archive_size += len(payload)
-        if self.archive_size >= 4096:
-            self.write_buffer()
-
-    def write_buffer(self):
-        if len(self.archive_buffer) < 1:
-            return
-        self.archive_file.write("".join(self.archive_buffer))
-        self.archive_buffer = []
-        self.archive_size = 0
-
-
-#
-# FastMqttServer is a simplified broker that is much faster thean mosquitto.
-# It supports publish/subscribe with less chance of blockage due to increased
-# speed. Use that when you need to see every message.
-# It also supports a read mode, which allows you to get the latst message
-# for a topic without, ignoring any previous messages. This is essentially
-# a LIFO. Use this for topics which generate large volumes of messages
-# that you can't process.
-#
-# There is only one queue per client, so be careful about subscribing to high
-# volume topics for time sensitive processes.
-#
-
-SUBSCRIPTION_MODE_ALL = "a"
-SUBSCRIPTION_MODE_LATEST = "l"
-
-FMQTT_INI_SECTION = "MqttFastServer"
-FMQTT_ARCHIVE_DIR = "ArchiveDir"
-FMQTT_LOG_EXTENSION = ".nav"
-
-
-class Subscription:
-    __slots__ = ("message", "mode", "s", "topic")
-
-    def __init__(self, topic, mode, s):
-        self.topic = topic
-        self.mode = mode
-        self.message = None
-        self.s = s  # socket - this is the id of the subsriber
-
-
-class FastMqttServer(SocketWrapperServer):
-    __slots__ = (
-        "archive_dir",
-        "archiver",
-        "mission_id",
-        "no_archive",
-        "topics_last_message",
-        "subscriptions",
-    )
-
-    def __init__(self, NoArchive=False, verbose=False):
-        super().__init__(
-            ini_section=FMQTT_INI_SECTION, port=vconst.FAST_MQTT_port, verbose=verbose
-        )
-        self.topics_last_message = {}
-        self.subscriptions = {}
-        self.message_in_ct = 0
-        self.message_out_ct = 0
-        self.mission_id = None
-        self.no_archive = NoArchive
-        if self.no_archive:
-            self.archiver = None
-            self.archive_dir = None
-        else:
-            self.archiver = MessageArchiver()
-            self.archive_dir = self.config.get(FMQTT_INI_SECTION, FMQTT_ARCHIVE_DIR)
-            self.archive_dir = os.path.expanduser(
-                self.archive_dir
-            )  # this expands tilde in path
-
-    def close_client_connection(self, s):
-        super().close_client_connection(s)
-
-    def process_message(self, s, message):
-        if message[0] == "":
-            return
-        action = message[0]
-        if action == "publish":
-            self.message_in_ct += 1
-            server_time = time.time()
-            topic = message[1]
-            payload = message[2]
-            self.topics_last_message[topic] = (
-                self.message_in_ct,
-                payload,
-            )  # This saves the last message of each topic
-            if self.verbose:
-                print("PUBLISH", topic, self.subscriptions)
-            if topic in self.subscriptions:
-                for this in self.subscriptions[topic].values():
-                    if this.s in self.input_sockets:
-                        # we get here for subscription by still-connected sockets
-                        # print("FastMqttServer.ProcesMessage() Queue {} for ?".format(topic))
-                        if this.mode == SUBSCRIPTION_MODE_LATEST:
-                            queue_class = QueueOne
-                        else:
-                            queue_class = queue.Queue
-                        self.queue_messageZ(
-                            ["message", topic, repr(self.message_in_ct), payload],
-                            s=this.s,
-                            QueueClass=queue_class,
-                        )
-            if topic == vconst.mission_init_topic:
-                payload_dict = json.loads(payload)
-                print("process_message()", payload_dict)
-                if "mission_id" in payload_dict:
-                    self.mission_id = payload_dict["mission_id"]
-                else:
-                    self.mission_id = "MISSION"  # this is really an error
-            elif topic == vconst.mission_log_start_topic:
-                archive_file_path = os.path.join(self.archive_dir, self.mission_id)
-                self.archiver.open(archive_file_path)
-            elif topic == vconst.mission_log_stop_topic:
-                self.archiver.close()
-            elif topic == vconst.mission_end_topic:
-                pass
-            elif topic == vconst.system_whoru:
-                # print("WHORU")
-                mid = 0
-                payload_dict = json.loads(payload)
-                payload_dict = PrepareResponse(payload_dict, ConfResponse=True)
-                j = PrepareMessage("FastMqtt", 0, 0, vconst.system_server, payload_dict)
-                self.queue_messageZ(
-                    ["message", vconst.system_server, repr(mid), j], s=s
-                )
-            if self.archiver is not None:
-                self.archiver.archive(self.message_in_ct, server_time, payload)
-        elif action == "read":
-            topic = message[1]
-            if topic in self.topics_last_message:
-                (mid, payload) = self.topics_last_message[topic]
-            else:
-                mid = 0
-                payload = "{}"
-            self.queue_messageZ(["message", topic, repr(mid), payload], s=s)
-            print("READ", topic)
-        elif action == "subscribe":
-            topic = message[1]
-            mode = message[2]
-            subscription = Subscription(topic, mode, s)
-            if not (topic in self.subscriptions):
-                self.subscriptions[topic] = {}
-            self.subscriptions[topic][
-                s
-            ] = subscription  # keep latest subscription if duplicate
-            print("SUBSCRIPTIONS", topic, len(self.subscriptions[topic]))
 
 
 def status_info():

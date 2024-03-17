@@ -1,9 +1,10 @@
+#
+# These are MQTT and FMQTT clients that handle a lot of boilerplate for
+# threading consistent API for both types of servers.
+#
+
 import datetime
 import json
-import multiprocessing
-import numpy as np
-import os
-import select
 import socket
 import sys
 import threading
@@ -30,6 +31,9 @@ ARG_FALSE = "false"
 ARG_CWD = "cwd"
 
 stop_process = False
+
+SUBSCRIPTION_MODE_ALL = "a"
+SUBSCRIPTION_MODE_LATEST = "l"
 
 
 def NowStr():
@@ -192,7 +196,7 @@ class FastMqttClient(vcomms.SocketWrapperClient):
         mid = 0  # not implemented -- message id
         return (mqtt.MQTT_ERR_SUCCESS, mid)
 
-    def subscribe(self, topic, qos, timeout=1.0, mode=vcomms.SUBSCRIPTION_MODE_ALL):
+    def subscribe(self, topic, qos, timeout=1.0, mode=SUBSCRIPTION_MODE_ALL):
         packet_sent = False
         start_time = time.time()
         while not packet_sent:
@@ -242,7 +246,7 @@ class PahoClient(mqtt.Client):
         self.connected = False
         self.connect_in_progress = False
 
-    def subscribe(self, topic, qos, timeout=1.0, mode=vcomms.SUBSCRIPTION_MODE_ALL):
+    def subscribe(self, topic, qos, timeout=1.0, mode=SUBSCRIPTION_MODE_ALL):
         super().subscribe(topic, qos)
 
 
@@ -838,9 +842,9 @@ class mqtt_node(object):
         for this_subscription in self.subscriptions.values():
             if not this_subscription.request_only:
                 if this_subscription.queue is None:
-                    mode = vcomms.SUBSCRIPTION_MODE_LATEST
+                    mode = SUBSCRIPTION_MODE_LATEST
                 else:
-                    mode = vcomms.SUBSCRIPTION_MODE_ALL
+                    mode = SUBSCRIPTION_MODE_ALL
                 self.mqttc.subscribe(this_subscription.topic, 0, mode=mode)
 
     def on_message(self, client, userdata, message):
@@ -904,7 +908,7 @@ class mqtt_node(object):
 # -- the reciver got all messages in order so it was constantly falling behind
 # -- when the sender terminated, undelivered messages were discarded,
 # 	so the reciever never got the last messages. This may be fixable
-# 	by configuration, but doesn't matter because the readding is so slow.
+# 	by configuration, but doesn't matter because the reading is so slow.
 #
 
 
