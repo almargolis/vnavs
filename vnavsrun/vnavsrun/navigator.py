@@ -1,11 +1,11 @@
 try:
     import numpy as np
     import cv2
-    import OpticChiasm
+    from vnavslib import opticchiasm as oc
 except ImportError:
     cv2 = None
     np = None
-    OpticChiasm = None
+    oc = None
 
 import math
 import os
@@ -14,12 +14,12 @@ import string
 import sys
 import time
 
-import vnavs_comms as vcomms
-import vnavs_mqtt as vmqtt
-import vnavs_const as vconst
-import vnavs_data as vdata
-import engineer_1
-import helmsman
+from vnavslib import vnavs_comms as vcomms
+from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_data as vdata
+from vnavsrun import engineer_1
+from vnavsrun import helmsman
 
 WAYPOINT_WINDOW_METERS = 4.0
 STEER_STRAIGHT_HEADING = 10.0
@@ -373,7 +373,7 @@ class StepFollowLinePid(MissionStep):
             self.pid.i_gain = float(self.parm_kword["Ki"])
         if "Kd" in self.parm_kword:
             self.pid.d_gain = float(self.parm_kword["Kd"])
-        rect = OpticChiasm.RectFromPayload(self.parm_kword)
+        rect = oc.RectFromPayload(self.parm_kword)
         self.pid.target_value = rect.center_x
         self.next_time = 0
         self.pid.Reset()
@@ -420,7 +420,7 @@ class StepFollowLineTrace(MissionStep):
             self.speed = int(self.parm_kword["speed"])
         if "base_angle" in self.parm_kword:
             self.base_angle = float(self.parm_kword["base_angle"])
-        rect = OpticChiasm.RectFromPayload(self.parm_kword)
+        rect = oc.RectFromPayload(self.parm_kword)
         self.target_x = rect.center_x
         self.next_time = 0
 
@@ -593,7 +593,7 @@ class StepMagic(MissionStep):
             im = cv2.imread(fp)
             if im is None:
                 return
-        r = OpticChiasm.Robogames(im, [25])
+        r = oc.Robogames(im, [25])
         r.ProcessLines()
         r.FilterLines()
         r.SelectLines()
@@ -1186,7 +1186,7 @@ class navigator(vmqtt.mqtt_node):
     def DoCameramanPicReady(self, payload):
         if "center_line" in payload:
             line_at = payload["center_line"]
-            list_of_OpenCvRect = OpticChiasm.ListOfOpenCvRectFromListofDicts(line_at)
+            list_of_OpenCvRect = oc.ListOfOpenCvRectFromListofDicts(line_at)
             self.line_centers = []
             if len(list_of_OpenCvRect) > 0:
                 self.line_x = list_of_OpenCvRect[0].center_x

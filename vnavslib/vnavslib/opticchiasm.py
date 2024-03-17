@@ -101,7 +101,8 @@ class Image(object):
         if opencv_fn is not None:
             im = cv2.imread(opencv_fn)
             colorcode = IM_BGR
-        colorcode = colorcode.upper()  # change picamera format to OpenCv
+        if colorcode is not None:
+            colorcode = colorcode.upper()  # change picamera format to OpenCv
         self.crop_source = None  # Image() from which this is cropped
         self.crop_x = None  # left x starting position of this crop in source image
         self.crop_y = None  # upper y` starting position of this crop in source image
@@ -169,7 +170,8 @@ class Image(object):
         return cv2.cvtColor(self._im, transform)
 
     def ReplaceImage(self, im, colorcode):
-        assert colorcode in IM_COLORCODES
+        if not colorcode in IM_COLORCODES:
+            raise ValueError(f"Invalid colorcode '{colorcode}")
         self._im = im
         self.colorcode = colorcode
         self.width = 0
@@ -2606,4 +2608,5 @@ def test_Cone():
 
 if __name__ == "__main__":
     # test_ColorMask()
-    test_Cone()
+    # test_Cone()
+    pass

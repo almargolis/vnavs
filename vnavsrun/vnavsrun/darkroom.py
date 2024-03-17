@@ -12,9 +12,9 @@ import time
 import cv2
 import numpy as np
 
-import cameraman
-import easytk
-from easytk import (
+from vnavsrun import cameraman
+from vnavslib import easytk
+from vnavslib.easytk import (
     FIRST_ROW,
     SAME_ROW,
     NEXT_ROW,
@@ -25,10 +25,10 @@ from easytk import (
     RIGHT_COL,
     OVERLAY_COL,
 )
-import OpticChiasm
-import vnavs_mqtt as vmqtt
-import vnavs_const as vconst
-import vnavs_data as vdata
+from vnavslib import opticchiasm as oc
+from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_data as vdata
 
 BOT_1_MAP_TRANSPOSE = [
     [-1.30565584e-01, -1.56472861e00, 4.58333935e02],
@@ -88,12 +88,12 @@ class ProcessStep(object):
     # imports.append(('__builtins__', __builtins__, None))
     imports.append(("cv2", cv2, None))
     imports.append(("np", np, "numpy"))
-    imports.append(("oc", OpticChiasm, "OpticChiasm"))
+    imports.append(("oc", oc, "oc"))
     imports.append(("cameraman", None, None))
 
     def __init__(self, FilterName=None, Where=None, Parms={}):
         self.ix = len(self.steps)
-        self.exec_im = None  # this is an OpticChiasm.Image produced by the filter
+        self.exec_im = None  # this is an oc.Image produced by the filter
         self.steps.append(self)
         self.cv_filter_name = None  # this gets set by NewFilter()
 
@@ -108,7 +108,7 @@ class ProcessStep(object):
         #
         self.filter_selection = self.input_panel.AddListbox(
             "Filters",
-            OpticChiasm.ImageFilterCollection.image_filter_names,
+            oc.ImageFilterCollection.image_filter_names,
             Selection=FilterName,
             command=self.NewFilter,
             rowspan=4,
@@ -275,7 +275,7 @@ class ProcessStep(object):
         if new_filter_name != self.cv_filter_name:
             self.filter_selection.ReplaceValue(new_filter_name)
             self.cv_filter_name = new_filter_name
-            self.cv_specs = OpticChiasm.ImageFilterCollection.image_filters[
+            self.cv_specs = oc.ImageFilterCollection.image_filters[
                 self.cv_filter_name
             ]
             self.parms_specs = self.cv_specs.parms
@@ -378,7 +378,7 @@ class ProcessStep(object):
     def WriteCameraman(cls, cam_fn):
         # Writes a snipet of code that will be used for compile/exec in cameraman
         # All imports will be provided via the global parameter:
-        # 	cv2, oc (OpticChiasm)
+        # 	cv2, oc (oc)
         # The source image object will be provided in the exec locals object:
         # 	im_base
         # The output image in the exec locals object is:
@@ -429,7 +429,7 @@ class ProcessStep(object):
         code = self.cv_specs.code
         if code[-1:] != "\n":
             code += "\n"
-        if Script and (OpticChiasm.FLAG_ISBASE in self.cv_specs.flags):
+        if Script and (oc.FLAG_ISBASE in self.cv_specs.flags):
             code += "im_base = im_in\n"
         if self.cv_specs.annotate_code is not None:
             if show_annotation:
@@ -456,7 +456,7 @@ class ProcessStep(object):
                 break
             if this.exec_im is not None:
                 latest_im = this.exec_im
-                if OpticChiasm.FLAG_ISBASE in this.cv_specs.flags:
+                if oc.FLAG_ISBASE in this.cv_specs.flags:
                     latest_base_image = this.exec_im
             if this.exec_contours is not None:
                 latest_contours = this.exec_contours
@@ -514,7 +514,7 @@ class ProcessStep(object):
             if "im_in" in exec_global_vars:
                 # print("XXXX-vv", exec_global_vars['im_in'].__class__.__name__)
                 ximin = exec_global_vars["im_in"]
-                # if isinstance(ximin, OpticChiasm.Image):
+                # if isinstance(ximin, oc.Image):
                 #    print("XXXX-im", ximin._im.__class__.__name__)
             try:
                 exec(exec_code_str, exec_global_vars)
@@ -527,7 +527,7 @@ class ProcessStep(object):
         if trace is not None:
             deposition = trace + "\n\n" + deposition
             self.deposition.ReplaceValue(deposition)
-        if OpticChiasm.FLAG_SLIDERS in self.cv_specs.flags:
+        if oc.FLAG_SLIDERS in self.cv_specs.flags:
             self.ClearInfo()
             self.AddInfoSliders()
         if self.exec_annotated is not None:
@@ -611,7 +611,7 @@ class Darkroom(vmqtt.mqtt_node):
         self.loading = False
         self.step_execution_needed = False
 
-        self.image = OpticChiasm.ImageAnalyzer()
+        self.image = oc.ImageAnalyzer()
         self.image.img_crop = (300, 200)
         self.image.img_crop = (250, 450)
         self.image.img_crop = (150, 550)
@@ -684,22 +684,22 @@ class Darkroom(vmqtt.mqtt_node):
         new_parms = {}
         if len(ProcessStep.steps) == 0:
             ProcessStep(
-                OpticChiasm.FILTER_NAME_IMAGE,
+                oc.FILTER_NAME_IMAGE,
                 Parms=new_parms,
                 Where=self.notebook_add_id,
             )
         else:
             ProcessStep.steps[0].SetFilter(
-                FilterName=OpticChiasm.FILTER_NAME_IMAGE, NewParms=new_parms
+                FilterName=oc.FILTER_NAME_IMAGE, NewParms=new_parms
             )
         if (new_image is None) and (path is not None):
             new_image = cv2.imread(path)
-            colorcode = OpticChiasm.IM_BGR
-        if isinstance(new_image, OpticChiasm.Image):
+            colorcode = oc.IM_BGR
+        if isinstance(new_image, oc.Image):
             ProcessStep.steps[0].source_im = new_image
             ProcessStep.steps[0].source_path = path
         else:
-            ProcessStep.steps[0].source_im = OpticChiasm.Image(
+            ProcessStep.steps[0].source_im = oc.Image(
                 im=new_image, colorcode=colorcode
             )
             ProcessStep.steps[0].source_path = path

@@ -2,7 +2,7 @@ import json
 import sys
 import os
 
-if sys.argv[1] == "gui":
+if (len(sys.argv) >= 2) and (sys.argv[1] == "gui"):
     from PIL import ImageTk, Image
     import easytk
     from easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
@@ -17,19 +17,19 @@ import time
 try:
     import numpy
     import cv2
-    import OpticChiasm
+    from vnavslib import opticchiasm as oc
 except ImportError:
     cv2 = None
     numpy = None
-    OpticChiasm = None
+    oc = None
 
-import engineer_1
-import helmsman
-import navigator
-import vnavs_mqtt as vmqtt
-import vnavs_const as vconst
-import vnavs_comms as vcomms
-import vnavs_data as vdata
+from vnavsrun import engineer_1
+from vnavsrun import helmsman
+from vnavsrun import navigator
+from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_comms as vcomms
+from vnavslib import vnavs_data as vdata
 import paho.mqtt.client as mqtt
 
 if sys.version_info[0] < 3:
@@ -153,7 +153,7 @@ class MissionControl(vmqtt.mqtt_node):
         self.thumbnailFrame = self.tk.AddLabelFrame("Thumbnails", row=2)
         self.notebook = self.tk.AddNotebook(row=3)
 
-        self.image = OpticChiasm.ImageAnalyzer()
+        self.image = oc.ImageAnalyzer()
         self.image.img_crop = (300, 200)
         self.image.img_crop = (250, 450)
         self.image.img_crop = (150, 550)
@@ -520,7 +520,7 @@ class MissionControl(vmqtt.mqtt_node):
         print("mission/mark", Replay, payload)
         if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
             return
-        self.line_rect = OpticChiasm.RectFromPayload(payload)
+        self.line_rect = oc.RectFromPayload(payload)
         print("DoMissionMark()", self.line_rect, payload)
 
     def DoMissionStatus(self, topic, payload, Replay=False):
@@ -584,10 +584,10 @@ class MissionControl(vmqtt.mqtt_node):
     #
 
     def ProcessImage(self):
-        im = OpticChiasm.Image(opencv_fn=self.pic_path)
+        im = oc.Image(opencv_fn=self.pic_path)
         if "center_line" in self.pic_payload:
             line_at = self.pic_payload["center_line"]
-            list_of_RotatedRect = OpticChiasm.ListOfRotatedRectFromListofDicts(line_at)
+            list_of_RotatedRect = oc.ListOfRotatedRectFromListofDicts(line_at)
             # print("ProcessImage() center_line ", list_of_RotatedRect)
             im.DrawLinePoints(list_of_RotatedRect)
         if self.line_rect is not None:
@@ -595,12 +595,12 @@ class MissionControl(vmqtt.mqtt_node):
                 im._im,
                 self.line_rect.p1,
                 self.line_rect.p2,
-                OpticChiasm.DRAW_BGR_BLACK,
+                oc.DRAW_BGR_BLACK,
                 5,
             )
             ctr = self.line_rect.center
             fwd = (ctr[0], ctr[1] - 10)
-            cv2.line(im._im, ctr, fwd, OpticChiasm.DRAW_BGR_WHITE, 5)
+            cv2.line(im._im, ctr, fwd, oc.DRAW_BGR_WHITE, 5)
         self.f1_img1.UpdateImage(source_im=im.im)
         self.f1_fname.ReplaceValue(self.pic_fn)
         self.f1_fps.ReplaceValue("{} fps".format(self.pic_payload["capture_fps"]))

@@ -3,8 +3,8 @@ from builtins import bytes, str, open, super, range, zip, round, input, int, pow
 
 import cv2
 import numpy as np
-import OpticChiasm as oc
-import cameraman
+from vnavslib import opticchiasm as oc
+from vnavsrun import cameraman
 
 im_in = oc.Image("opencv_fn=/Users/almargolis/vnavs_temp/Idle_15.jpeg")
 im_base = im_in.copy()
