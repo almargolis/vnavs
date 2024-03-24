@@ -46,16 +46,16 @@ FILE_TRANSFER_COMPLETE = 2
 
 
 class FileClient(vcomms.SocketWrapperClient):
-    def __init__(self, BufferLen=vcomms.TCPIP_XFR_BUFLEN, Verbose=False):
+    def __init__(self, buffer_len=vcomms.TCPIP_XFR_BUFLEN, verbose=False):
         super().__init__(
-            BufferLen=BufferLen,
-            IniSection="FileClient",
+            buffer_len=buffer_len,
+            ini_section="FileClient",
             IsZeroOneProtocol=False,
-            Verbose=Verbose,
+            verbose=verbose,
         )
-        self.Init()
+        self.init_file_client()
 
-    def Init(self):
+    def init_file_client(self):
         self.file_name = None
         self.file_out = None
         self.buffer = ""
@@ -63,15 +63,15 @@ class FileClient(vcomms.SocketWrapperClient):
         self.start_time = 0
         self.timeout = False
 
-    def GetFile(self, dir_code, filename, path=None):
-        self.StartTransfer(dir_code=dir_code, filename=filename, path=path)
+    def get_file(self, dir_code, filename, path=None):
+        self.start_transfer(dir_code=dir_code, filename=filename, path=path)
         while True:
-            if self.CheckTransfer():
+            if self.check_transfer():
                 return True
             if self.timeout:
                 return False
 
-    def StartTransfer(self, dir_code, filename, path=None):
+    def start_transfer(self, dir_code, filename, path=None):
         self.Init()
         retry_ct = 0
         while (not self.connected) and (retry_ct < 5):
@@ -85,12 +85,12 @@ class FileClient(vcomms.SocketWrapperClient):
             # inconsistency of block / no block. Or one of the OSes trying to be polite.
             time.sleep(1)
             print(
-                "FileClient.StartTransfer() - Attempt Connect",
+                "FileClient.start_transfer() - Attempt Connect",
                 self.socket_host,
                 self.socket_port,
             )
             self.Connect()
-        # print("FileClient.StartTransfer() - CONNECTED", self.socket_host, self.socket_port)
+        # print("FileClient.start_transfer() - CONNECTED", self.socket_host, self.socket_port)
         self.file_name = filename
         if path is None:
             self.file_path = filename
@@ -101,26 +101,26 @@ class FileClient(vcomms.SocketWrapperClient):
         self.timeout = False
         self.buffer = bytearray()
         self.buf_sum = 0
-        self.QueueMessageZ([dir_code, filename])
+        self.queue_message_z([dir_code, filename])
         self.start_time = time.time()
-        self.Select(timeout=0.1)
+        self.select(timeout=0.1)
 
-    def CheckTransfer(self, timeout=30.0):
+    def check_transfer(self, timeout=30.0):
         if self.transfer_state == FILE_TRANSFER_STARTED:
-            self.Select(timeout=0.1)
+            self.select(timeout=0.1)
         if (self.transfer_state == FILE_TRANSFER_STARTED) and (
             (time.time() - self.start_time) > timeout
         ):
             self.file_out.close()
             self.transfer_state = FILE_TRANSFER_COMPLETE
-            print("FileClient.CheckTransfer() Timeout", self.file_name)
+            print("FileClient.check_transfer() Timeout", self.file_name)
             self.timeout = True  # stays true until next transfer started
         if self.transfer_state == FILE_TRANSFER_COMPLETE:
             self.transfer_state = FILE_TRANSFER_IDLE
             return True
         return False
 
-    def RecvData(self, s, data):
+    def recv_data(self, s, data):
         self.buffer += data
         self.buf_sum += len(data)
         p = self.buffer.find(b"\x00")
@@ -142,20 +142,23 @@ class FileClient(vcomms.SocketWrapperClient):
                 self.file_out.write(self.buffer[p + 1 :])
                 self.file_out.close()
                 self.transfer_state = FILE_TRANSFER_COMPLETE
-                # print("FileClient.RecvData() Transfer Complete", time.time() - self.start_time, self.file_name, file_len)
+                # print("FileClient.recv_data() Transfer Complete", time.time() - self.start_time, self.file_name, file_len)
 
 
 class FastMqttClient(vcomms.SocketWrapperClient):
-    # Many of these function names are lower case to be consistent with paho.mqtt.client.
-    def __init__(self, Verbose=False):
-        super().__init__(IniSection="MqttFast", Verbose=Verbose)
+    __slots__ = ('on_connect', 'on_message')
+    def __init__(self, verbose=False):
+        super().__init__(ini_section="MqttFast", verbose=verbose)
         self.on_message = None
         self.on_connect = None
 
     def connect(self, **kwargs):
         # Hmmm ... maybe dangerous. Clients have both connect() and Connect()
         # doing slightly different things.
-        super().Connect(**kwargs)
+        # Above comment is deprecated due to PEP8 transition, but I'm
+        # leaving it here in case I discover there really are two different
+        # functions that need different names.
+        super().connect(**kwargs)
         if self.on_connect is not None:
             client = None  # not implemented
             userdata = None  # not implemented
@@ -163,8 +166,8 @@ class FastMqttClient(vcomms.SocketWrapperClient):
             rc = 0  # not implemented
             self.on_connect(client, userdata, flags, rc)
 
-    def BlockingWriteSocket(self, msg):
-        msg_sent = super().BlockingWriteSocket(msg)
+    def blocking_write_socket(self, msg):
+        msg_sent = super().blocking_write_socket(msg)
         if msg_sent:
             mid = 0  # not implemented -- message id
             return (mqtt.MQTT_ERR_SUCCESS, mid)
@@ -173,26 +176,26 @@ class FastMqttClient(vcomms.SocketWrapperClient):
             return (mqtt.MQTT_ERR_NO_CONN, mid)
 
     def loop(self, timeout=1.0):
-        self.Select(timeout=timeout)
+        self.select(timeout=timeout)
 
     def loop_forever(self):
-        self.SelectForever()
+        self.select_forever()
 
     def loop_start(self):
-        self.SelectThreadStart()
+        self.select_thread_start()
 
     def loop_stop(self, force=False):
         # unused force parameter exists for mosquitto compatibility
-        self.SelectThreadStop()
+        self.select_thread_stop()
 
     def publish(self, topic, msg, qos=0):
-        self.QueueMessageZ(["publish", topic, msg])
+        self.queue_message_z(["publish", topic, msg])
         mid = 0  # not implemented -- message id
         return (mqtt.MQTT_ERR_SUCCESS, mid)
 
     def read(self, topic, qos=0):
         # This is a non-repeating request to get the latest message
-        self.QueueMessageZ(["read", topic])
+        self.queue_message_z(["read", topic])
         mid = 0  # not implemented -- message id
         return (mqtt.MQTT_ERR_SUCCESS, mid)
 
@@ -202,7 +205,7 @@ class FastMqttClient(vcomms.SocketWrapperClient):
         while not packet_sent:
             try:
                 print("SUBSCRIBE", topic)
-                self.QueueMessageZ(["subscribe", topic, mode])
+                self.queue_message_z(["subscribe", topic, mode])
                 packet_sent = True
             except socket.error as e:
                 # socket.error: [Errno 11] Resource temporarily unavailable
@@ -212,7 +215,7 @@ class FastMqttClient(vcomms.SocketWrapperClient):
                     continue
                 raise
 
-    def ProcessMessage(self, s, message):
+    def process_message(self, s, message):
         if message[0] == "":
             return
         if message[0] == "message":
@@ -229,7 +232,7 @@ class FastMqttClient(vcomms.SocketWrapperClient):
 class PahoClient(mqtt.Client):
     # This should be a very thin wrapper.
     # FastMqttClient() should have as close to identical API as Paho client.
-    # This object reconciles any unavoidable differences so mqtt_node works
+    # This object reconciles any unavoidable differences so MqqtNode works
     # with either server.
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -250,7 +253,7 @@ class PahoClient(mqtt.Client):
         super().subscribe(topic, qos)
 
 
-class FastMqttMessage(object):
+class FastMqttMessage():
     def __init__(self, topic, payload, qos=0, mid=0):
         self.topic = topic
         self.payload = payload
@@ -258,7 +261,7 @@ class FastMqttMessage(object):
         self.mid = mid  # this is a fast mqtt extension
 
 
-class Counters(object):
+class Counters():
     def __init__(self):
         self.start_time = time.time()
         self.counters = {}
@@ -295,27 +298,27 @@ class Counters(object):
 
 
 #
-# Blocking == True
+# blocking == True
 # 	Single threaded node.
-#       if BlockingTimeoutSecs is None,
+#       if blockingTimeoutSecs is None,
 # 		mqtt loop_forever() is run and after Connect() all processing is done via
 # 		callbacks.
-#       if BlockingTimeoutSecs is not None.
+#       if blockingTimeoutSecs is not None.
 # 		messages are not automatically processed, call CheckMqtt() periodically
 # 		to process messages.
-#               A convenient way to do this is is to call Loop() and implement a DoLoop()
+#               A convenient way to do this is is to call loop() and implement a do_loop()
 #               method. This has the advantage of working identically for blocking and
 #               non-blocking modes so the node blocking mode can be changed easily.
-#               Loop() handles most exception processing. DoLoop() is called repetitively
+#               loop() handles most exception processing. do_loop() is called repetitively
 #               and frequently, so it does not need to implement the overall looping
 # 		or routine exceptions.
-# Blocking == False
+# blocking == False
 # 	Threaded node. Mqttc runs in its own thread and communicates with the main
 # 		node thread via callbacks. Since that is happening asyncronously,
 # 		you must be thoughtful regarding race conditions.
-# 	It is recommended to use the Loop() / DoLoop() mechanism to make sure
-# 		connections and exceptions are handled properly. Since Loop()
-# 		is non-blocking, DoLoop() needs to check self.mqttcConnected.
+# 	It is recommended to use the loop() / do_loop() mechanism to make sure
+# 		connections and exceptions are handled properly. Since loop()
+# 		is non-blocking, do_loop() needs to check self.mqttcConnected.
 #
 # (The following is a draft. May not be quite correct)
 # Where do I put my code for a node?
@@ -327,17 +330,17 @@ class Counters(object):
 #
 def LaunchNode(node_class):
     n = node_class()
-    n.Loop()
+    n.loop()
 
 
-def Publish(
+def connect_and_publish_mqqt_message(
     topic,
     payload,
     ResponseTopic=None,
     host=None,
     port=None,
-    BlockIfNotConnected=True,
-    Verbose=False,
+    block_if_not_connected=True,
+    verbose=False,
 ):
     if ResponseTopic is None:
         subscriptions = []
@@ -345,62 +348,63 @@ def Publish(
         save_payload = False
     else:
         subscriptions = [Subscription(ResponseTopic)]
-        conf = "Publish" + NowStr()
+        conf = "publish" + NowStr()
         save_payload = True
-    node = mqtt_node(
-        Subscriptions=subscriptions,
-        BrokerType="F",
-        BlockIfNotConnected=BlockIfNotConnected,
-        SingleThreaded=True,
-        AckTopic=ResponseTopic,
+    node = MqqtNode(
+        subscriptions=subscriptions,
+        broker_type="F",
+        block_if_not_connected=block_if_not_connected,
+        single_threaded=True,
+        ack_topic=ResponseTopic,
         host=host,
         port=port,
-        Verbose=Verbose,
+        verbose=verbose,
     )
-    node.ConnectToMqttServer()
-    if (not node.mqttc.connected) and (not BlockIfNotConnected):
+    node.connect_to_mqtt_server()
+    if (not node.mqttc.connected) and (not block_if_not_connected):
         # This exits quickly if not immediately connected. Used by find_server()
-        if Verbose:
+        if verbose:
             print("Server not found")
         return None
     while not node.mqttc.connected:
         try:
-            node.ConnectToMqttServer()
+            node.connect_to_mqtt_server()
         except:
             pass
-    node.Publish(topic, payload, ConfRequest=conf)
+    node.publish(topic, payload, conf_request=conf)
     while node.mqttc.sent_ct < 1:
-        node.CheckMqttPendingActivity()
+        node.check_mqtt_pending_activity()
     if ResponseTopic is None:
         return None
-    return node.WaitForPayload(conf)
+    return node.wait_for_payload(conf)
 
 
-def find_server(port=vconst.FAST_MQTT_PORT, Verbose=False):
+def find_server(port=vconst.FAST_MQTT_PORT, verbose=False):
     this_host_ip = vcomms.host_primary_ip_address()
     ix = this_host_ip.rfind(".")
     this_network = this_host_ip[: ix + 1]
     # for scan_d in range(1,255):
-    for scan_d in range(18, 25):
+    for scan_d in range(1, 256):
         scan_ip = this_network + str(scan_d)
         print(scan_ip)
         payload = {}
-        response = Publish(
+        response = connect_and_publish_mqqt_message(
             vconst.system_whoru,
             payload,
             ResponseTopic=vconst.system_server,
             host=scan_ip,
             port=port,
-            BlockIfNotConnected=False,
-            Verbose=Verbose,
+            block_if_not_connected=False,
+            verbose=verbose,
         )
         if response is not None:
             print("Server Found!!!")
             return scan_ip
+    print("Server Not Found!!!")
     return None
 
 
-class Subscription(object):
+class Subscription():
     __slots__ = (
         "async_delivery",
         "handler_method",
@@ -432,7 +436,7 @@ class Subscription(object):
             self.queue = Queue.Queue()
 
 
-class ConfirmationRequest(object):
+class ConfirmationRequest():
     __slots__ = ("checked_time", "conf_id", "confirmed_time", "payload", "request_time")
 
     def __init__(self, conf_id):
@@ -452,7 +456,7 @@ class ConfirmationRequest(object):
         return "( CONF {} - {} - {} )".format(self.conf_id, conf, chk)
 
 
-class mqtt_node(object):
+class MqqtNode():
     __slots__ = (
         "args",
         "automatically_connect",
@@ -486,23 +490,23 @@ class mqtt_node(object):
     def __init__(
         self,
         node_name=None,
-        Subscriptions=[],
-        AckTopic=None,
-        LoopSleep=0.01,
-        AutomaticallyConnect=True,
-        AutomaticallyHandleSynchronousMessages=True,
-        BlockIfNotConnected=True,
-        SingleThreaded=False,
-        SelectTimeoutSecs=1.0,
-        BrokerType="F",
+        subscriptions=[],
+        ack_topic=None,
+        loop_leep=0.01,
+        automatically_connect=True,
+        automatically_handle_synchronous_messages=True,
+        block_if_not_connected=True,
+        single_threaded=False,
+        select_timeout_secs=1.0,
+        broker_type="F",
         host=None,
         port=None,
-        Streamer=False,
-        Verbose=True,
+        streamer=False,
+        verbose=True,
     ):
-        # AutomaticallyConnect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
+        # automatically_connect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
         # 	switch between cameras / bots manually.
-        # BlockIfNotConnected is for nodes that only need to run when connected to a message server. DoLoop() is what is blocked.
+        # block_if_not_connected is for nodes that only need to run when connected to a message server. do_loop() is what is blocked.
         # 	If set to false, the node needs code to avoid crashing when calling communications activities.
         self.args = {}
         for this in sys.argv[1:]:
@@ -523,33 +527,33 @@ class mqtt_node(object):
         #
         self.confirmation_pending = {}
         self.vnavs_pid = int(time.time())  # non-repeating with ~ 1 second
-        self.vnavs_mid = 0  # Publish() sequence
-        self.block_if_not_connected = BlockIfNotConnected
-        self.config = ConfigParser.SafeConfigParser()
-        self.config.readfp(open(vconst.config_file_path))
-        self.automatically_connect = AutomaticallyConnect
+        self.vnavs_mid = 0  # publish() sequence
+        self.block_if_not_connected = block_if_not_connected
+        self.config = ConfigParser.ConfigParser()
+        self.config.read_file(open(vconst.config_file_path))
+        self.automatically_connect = automatically_connect
         self.automatically_handle_synchronous_messages = (
-            AutomaticallyHandleSynchronousMessages
+            automatically_handle_synchronous_messages
         )
-        self.single_threaded = SingleThreaded
-        self.select_timeout = SelectTimeoutSecs
+        self.single_threaded = single_threaded
+        self.select_timeout = select_timeout_secs
         self.has_synchronous_message_subscriptions = False
         self.subscriptions = {}
-        for this in Subscriptions:
+        for this in subscriptions:
             if not this.async_delivery:
                 self.has_synchronous_message_subscriptions = True
             self.subscriptions[this.topic] = this
         self.wildcard_handler = None
-        self.broker_type = BrokerType
-        self.verbose = Verbose  # needed by InitMqttClient()
-        self.socket_host = None  # needed by InitMqttClient()
-        self.socket_port = None  # needed by InitMqttClient()
-        self.InitMqttClient()
+        self.broker_type = broker_type
+        self.verbose = verbose  # needed by init_mqtt_client()
+        self.socket_host = None  # needed by init_mqtt_client()
+        self.socket_port = None  # needed by init_mqtt_client()
+        self.init_mqtt_client()
         self.broker_timeout = 60
         self.debug = 0
         self.exception_last_time = 0
         self.exception_ct = 0
-        self.loop_sleep = LoopSleep
+        self.loop_sleep = loop_leep
         self.lastSocketError = None
         if node_name is None:
             self.node_name = self.__class__.__name__
@@ -557,7 +561,7 @@ class mqtt_node(object):
             self.node_name = node_name
         self.stats = Counters()
         self.streamer = None
-        if Streamer:
+        if streamer:
             self.streamer = socket_xfer()
         if self.verbose:
             if self.single_threaded:
@@ -565,12 +569,12 @@ class mqtt_node(object):
             else:
                 print("Not Single Threaded")
 
-    def InitMqttClient(self):
+    def init_mqtt_client(self):
         if self.broker_type == "M":
-            iniSection = "MqttBroker"  # Mosquitto
+            ini_section = "MqttBroker"  # Mosquitto
             self.mqttc = PahoClient()
         else:
-            iniSection = "MqttFast"
+            ini_section = "MqttFast"
             self.mqttc = FastMqttClient()
         # Assign event callbacks
         self.mqttc.on_message = self.on_message
@@ -578,14 +582,14 @@ class mqtt_node(object):
         if ARG_HOST in self.args:
             self.socket_host = self.args[ARG_HOST]
         else:
-            self.socket_host = self.config.get(iniSection, "Host")
+            self.socket_host = self.config.get(ini_section, "Host")
         if ARG_PORT in self.args:
             self.socket_port = int(self.args[ARG_PORT])
         else:
-            self.socket_port = int(self.config.get(iniSection, "Port"))
+            self.socket_port = int(self.config.get(ini_section, "Port"))
         if self.verbose:
             print(
-                "InitMqttClient()",
+                "init_mqtt_client()",
                 self.broker_type,
                 "@",
                 self.socket_host,
@@ -593,9 +597,9 @@ class mqtt_node(object):
                 self.socket_port,
             )
 
-    def ConnectToMqttServer(self):
+    def connect_to_mqtt_server(self):
         if self.mqttc.connected:
-            print("mqtt_node() already connected")
+            print("MqqtNode() already connected")
             return
         while True:
             if self.block_if_not_connected:
@@ -606,25 +610,25 @@ class mqtt_node(object):
                 host=self.socket_host, port=self.socket_port, timeout=timeout
             )
             if self.mqttc.connected:
-                print("mqtt_node() connected")
+                print("MqqtNode() connected")
                 break
             else:
-                print("mqtt_node() NOT connected")
+                print("MqqtNode() NOT connected")
                 return False
         if self.single_threaded:
             if self.select_timeout is None:
                 self.mqttc.loop_forever()
                 return True
             else:
-                # client must periodically either call call Loop() or periodically call mqtt loop()
+                # client must periodically either call call loop() or periodically call mqtt loop()
                 return True
         else:
             # this starts a separate thread which is handy, but tkinter and others don't support threads
             self.mqttc.loop_start()
             return True
 
-    def CheckMqttPendingActivity(self):
-        # Blocking mode nodes with BlockingTimeoutSecs not None need
+    def check_mqtt_pending_activity(self):
+        # blocking mode nodes with blockingTimeoutSecs not None need
         # to call this periodically or messages will never be seen.
         # Depending on how you think about it, calling these blocking
         # may seem like an oxymoron.
@@ -639,28 +643,28 @@ class mqtt_node(object):
             # reconnect to server when possible.
             # Maybe do an E-Stop sort of thing.i
             # Helmsman stiops on e-stop. Other may change mode, signal operator, whtever
-            print("CheckMqttPendingActivity() Socket Error:", e.errno)
+            print("check_mqtt_pending_activity() Socket Error:", e.errno)
             self.mqttc.connected = False
 
-    def Disconnect(self):
+    def disconnect(self):
         if not self.single_threaded:
             self.mqttc.loop_stop(force=False)
         self.mqttc.disconnect()
 
-    def GetIniDirectory(self, section, attribute, IsWriteable=True):
+    def get_ini_directory(self, section, attribute, IsWriteable=True):
         source = "vnavs.ini [{}] {}".format(section, attribute)
         dir_name = self.config.get(section, attribute)
         dir_name = vconst.CheckDirectory(dir_name, source, IsWriteable=IsWriteable)
         return dir_name
 
-    def Loop(self):
+    def loop(self):
         while True:
             try:
                 if self.automatically_connect and (not self.mqttc.connected):
                     # This could be a reconnection. Maybe we want more logging, etc.
                     # Exceptions with socket.error is how we detect a disconnect.
-                    self.ConnectToMqttServer()
-                    print("Loop() Juat attempted to connect")
+                    self.connect_to_mqtt_server()
+                    print("loop() Just attempted to connect")
                 if self.mqttc.connected:
                     if self.mqttc.thread is not None:
                         if not self.mqttc.thread.is_alive():
@@ -673,25 +677,25 @@ class mqtt_node(object):
                             # to add exsception logic to the thread so this never
                             # gets here again.
                             print("THREAD DEAD")
-                            self.InitMqttClient()
-                            self.ConnectToMqttServer()
+                            self.init_mqtt_client()
+                            self.connect_to_mqtt_server()
                 if self.mqttc.connected:
                     if self.single_threaded:
-                        self.CheckMqttPendingActivity()
+                        self.check_mqtt_pending_activity()
                     if (
                         self.has_synchronous_message_subscriptions
                         and self.automatically_handle_synchronous_messages
                     ):
-                        self.HandleAllSynchronousMessages()
-                    self.DoLoop()
+                        self.handle_all_synchronous_messages()
+                    self.do_loop()
                 elif not self.block_if_not_connected:
                     if (
                         self.has_synchronous_message_subscriptions
                         and self.automatically_handle_synchronous_messages
                     ):
-                        self.HandleAllSynchronousMessages()
-                    self.DoLoop()
-                if self.CheckExceptions():
+                        self.handle_all_synchronous_messages()
+                    self.do_loop()
+                if self.check_exceptions():
                     sys.exit(0)
                 if self.loop_sleep > 0:
                     # This is essentially a yield to the other thread. Without this, the communications
@@ -700,7 +704,7 @@ class mqtt_node(object):
                     # sleep. Cameraman does fine without it.
                     time.sleep(self.loop_sleep)
             except KeyboardInterrupt:
-                self.CleanupLoop()
+                self.cleanup_loop()
                 sys.exit(0)
             except:
                 exception_time = time.process_time()
@@ -709,8 +713,8 @@ class mqtt_node(object):
                 payload["node_module"] = self.__module__
                 payload["traceback"] = traceback.format_exc()
                 print(payload["traceback"])  # display in case we are running in console
-                self.Publish(vconst.system_abend_topic, payload)
-                self.CleanupLoop()
+                self.publish(vconst.system_abend_topic, payload)
+                self.cleanup_loop()
                 if (exception_time - self.exception_last_time) < 60:
                     if self.exception_ct > 10:
                         sys.exit(0)
@@ -719,7 +723,7 @@ class mqtt_node(object):
                     self.exception_ct = 0
                 self.exception_last_time = exception_time
 
-    def CleanupLoop(self):
+    def cleanup_loop(self):
         pass  # override in client if cleanup needed
 
     #
@@ -727,7 +731,7 @@ class mqtt_node(object):
     # It was a particular problem when when capturing a long
     # long sequence with the RPI camera and hte sender socket died.
     #
-    def CheckExceptions(self):
+    def check_exceptions(self):
         if stop_process:
             return True
         if self.streamer is not None:
@@ -739,14 +743,14 @@ class mqtt_node(object):
                 return True
         return False
 
-    def MessageStr(self, msg):
+    def message_str(self, msg):
         max_chars = 25
         s = str(msg)
         if len(s) <= max_chars:
             return s
         return s[:max_chars] + " [...]"
 
-    def GetLatestMessage(self, topic):
+    def get_latest_message(self, topic):
         # This methodology risks loosing a latest message that arrives between the line
         # where the payload is copied and the line where the subscription object payload is cleared.
         # This should be extremely rare and is not completely inconsistent with the expectation that
@@ -754,7 +758,7 @@ class mqtt_node(object):
         # As currenty written, using a single swap statement, this should be completely thread safe.
         #
         if topic not in self.subscriptions:
-            raise Exception("GetLatestMessage() unknown topic '{}'".format(topic))
+            raise Exception("get_latest_message() unknown topic '{}'".format(topic))
         subscription = self.subscriptions[topic]
         if subscription.last_payload is None:
             return (
@@ -763,50 +767,50 @@ class mqtt_node(object):
         payload, subscription.last_payload = subscription.last_payload, None
         return payload
 
-    def HandleAllSynchronousMessages(self):
+    def handle_all_synchronous_messages(self):
         for this in self.subscriptions.values():
             if this.handler_method is None:
                 continue
             if this.async_delivery:
                 # messages was handled as soon as it arrived
                 continue
-            payload = self.GetLatestMessage(this.topic)
+            payload = self.get_latest_message(this.topic)
             if payload is not None:
                 if this.handler_needs_topic:
                     this.handler_method(this.topic, payload)
                 else:
                     this.handler_method(payload)
 
-    def Publish(self, topic, payload, ConfRequest=None):
+    def publish(self, topic, payload, conf_request=None):
         # payload is a dict to be converted to JSON)
-        # ConfRequest is an ID asking the recipient to clearly identify
+        # conf_request is an ID asking the recipient to clearly identify
         # the response to this request. This requires cooperative
         # requestors and respondors.
         if not self.mqttc.connected:
-            print("Publish() Not connected, not sent")
+            print("publish() Not connected, not sent")
             # for now, silently ignore publish errors. Need to do better
             return
         self.vnavs_mid += 1
-        j = vcomms.PrepareMessage(
+        j = vcomms.prepare_message(
             self.node_name,
             self.vnavs_pid,
             self.vnavs_mid,
             topic,
             payload,
-            ConfRequest=ConfRequest,
+            conf_request=conf_request,
         )
-        if ConfRequest is not None:
-            self.confirmation_pending[ConfRequest] = ConfirmationRequest(ConfRequest)
-            print("Publish() has confirmation request", payload)
-        # print("Publish() JSON", j)
+        if conf_request is not None:
+            self.confirmation_pending[conf_request] = ConfirmationRequest(conf_request)
+            print("publish() has confirmation request", payload)
+        # print("publish() JSON", j)
         res, mid = self.mqttc.publish(topic, j)
         if res != mqtt.MQTT_ERR_SUCCESS:
-            print("MQTT Publish Error")
+            print("MQTT publish Error")
 
-    def GetConfRequest(self, payload):
-        return payload.get("_confRequest", None)
+    def get_conf_request(self, payload):
+        return payload.get("_conf_request", None)
 
-    def CheckConfirmation(self, conf):
+    def check_confirmation(self, conf):
         res = False
         if conf in self.confirmation_pending:
             c = self.confirmation_pending[conf]
@@ -814,28 +818,28 @@ class mqtt_node(object):
                 res = True
                 if c.checked_time is None:
                     c.checked_time = time.time
-        self.ScrubConfirmations()
+        self.scrub_confirmations()
         if res:
             return c.payload
         else:
             return None
 
-    def ScrubConfirmations(self):
+    def scrub_confirmations(self):
         # This should delete checked confirmations after a little while
         # print("ScrubConfirmation()", self.confirmation_pending)
         return
 
-    def WaitForPayload(self, conf):
+    def wait_for_payload(self, conf):
         # This was created for limited use where convenience matters more than the ability
         # to handle exception cases.
         while True:
             if not (conf in self.confirmation_pending):
-                print("WaitForPayload()", conf, "not pending.")
+                print("wait_for_payload()", conf, "not pending.")
                 return None  # maybe should be exception
-            payload = self.CheckConfirmation(conf)
+            payload = self.check_confirmation(conf)
             if payload is not None:
                 return payload
-            self.CheckMqttPendingActivity()
+            self.check_mqtt_pending_activity()
 
     def on_connect(self, client, userdata, flags, rc):
         print("on_connect() rc: " + str(rc))
@@ -855,7 +859,7 @@ class mqtt_node(object):
                 + " "
                 + str(message.qos)
                 + " "
-                + self.MessageStr(message.payload),
+                + self.message_str(message.payload),
             )
         msg = message.payload
         if msg == "":
@@ -912,35 +916,35 @@ class mqtt_node(object):
 #
 
 
-class TestSender(mqtt_node):
-    def __init__(self, Verbose=False):
+class TestSender(MqqtNode):
+    def __init__(self, verbose=False):
         super().__init__(
-            Subscriptions=[],
-            Blocking=False,
-            BrokerType="F",
-            Streamer=False,
-            Verbose=Verbose,
+            subscriptions=[],
+            blocking=False,
+            broker_type="F",
+            streamer=False,
+            verbose=verbose,
         )
         self.msgCt = 0
         self.startTime = time.time()
 
-    def DoLoop(self):
+    def do_loop(self):
         self.msgCt += 1
         self.mqttc.publish("test", self.msgCt)
         if (self.msgCt % 10) == 0:
             rate = self.msgCt / (time.time() - self.startTime)
-            print("Published", self.msgCt, rate)
+            print("published", self.msgCt, rate)
 
 
-class TestReceiver(mqtt_node):
-    def __init__(self, Verbose=False):
+class TestReceiver(MqqtNode):
+    def __init__(self, verbose=False):
         super().__init__(
-            Subscriptions=["test"],
-            Blocking=True,
-            BlockingTimeoutSecs=0,
-            BrokerType="F",
-            Streamer=False,
-            Verbose=Verbose,
+            subscriptions=["test"],
+            blocking=True,
+            blockingTimeoutSecs=0,
+            broker_type="F",
+            streamer=False,
+            verbose=verbose,
         )
         self.msgCt = 0
         self.startTime = time.time()
@@ -952,31 +956,31 @@ class TestReceiver(mqtt_node):
             print("Received", self.msgCt, msg, rate)
 
 
-class FastMqttUtil(mqtt_node):
-    def __init__(self, Verbose=False):
+class FastMqttUtil(MqqtNode):
+    def __init__(self, verbose=False):
         super().__init__(
-            Subscriptions=[],
-            Blocking=True,
-            BlockingTimeoutSecs=0,
-            BrokerType="F",
-            Streamer=False,
-            Verbose=Verbose,
+            subscriptions=[],
+            blocking=True,
+            blockingTimeoutSecs=0,
+            broker_type="F",
+            streamer=False,
+            verbose=verbose,
         )
 
 
 if __name__ == "__main__":
     if "verbose" in sys.argv:
-        print("VERBOSE")
+        print("verbose")
         verbose = True
     else:
         print("QUIET")
         verbose = False
     if sys.argv[1] == "i":
-        find_server(Verbose=verbose)
+        find_server(verbose=verbose)
     elif sys.argv[1] == "s":
         n = TestSender()
         n.Connect()
-        n.Loop()
+        n.loop()
     elif sys.argv[1] == "r":
         n = TestReceiver()
         n.Connect()

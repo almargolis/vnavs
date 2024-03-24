@@ -1,8 +1,10 @@
 import configparser
+import json
 import multiprocessing
 import os
 import queue
 import select
+import signal
 import socket
 import sys
 import threading
@@ -31,6 +33,45 @@ def host_primary_ip_address():
         s.close()
     return ip_address
 
+def prepare_message(
+    sender_name, sender_pid, sender_seq, topic, payload, conf_request=None
+):
+    payload["_topic"] = topic
+    payload["_sender"] = sender_name
+    payload["_sendTime"] = time.time()
+    payload["_sendPid"] = sender_pid
+    payload["_sendSeq"] = sender_seq
+    if conf_request is not None:
+        payload["_conf_request"] = conf_request
+    j = json.dumps(payload, cls=JsonNumpyEncoder)
+    return j
+
+
+def prepare_response(payload, conf_request=False):
+    # Prepares payload to be used as a response.
+    # Copy identifier fields so recipients can match source message
+    # so it knows request is completed and where to continue its process.
+    # Info about original message is always there thanks to Publish()
+    new_payload = {}
+    if "_topic" in payload:
+        new_payload["_ackTopic"] = payload["_topic"]
+    if "_sendPid" in payload:
+        new_payload["_ackPid"] = payload["_sendPid"]
+    if "_sendSeq" in payload:
+        new_payload["_ackSeq"] = payload["_sendSeq"]
+    if conf_request:
+        if "_conf_request" in payload:
+            new_payload["_isConfirmation"] = payload["_conf_request"]
+    return new_payload
+
+
+class JsonNumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.int64):
+            obj_out = int(obj)
+            # print("JsonNumpyEncoder()", obj.__class__.__name__, obj_out.__class__.__name__)
+            return obj_out
+        return super().default(obj)
 
 
 
@@ -99,6 +140,10 @@ def Streamer(q, q_len, host_ip, host_socket):
 # application. The ugly detals are completely hidden.
 #
 class socket_xfer:
+    __slots__ = ('capture_ct', 'f',
+              'os_socket_ip', 'os_socket_socket', 'queue', 'q_len', 'start', 'streamer',
+              'timer_ct', 'timer_skip_ct', 'timer_start')
+
     def __init__(self):
         self.os_socket_ip = "192.168.8.11"
         self.os_socket_socket = 3050
@@ -228,7 +273,7 @@ class SocketWrapper:
 
     def __init__(
         self,
-        BufferLen=TCPIP_STD_BUFLEN,
+        buffer_len=TCPIP_STD_BUFLEN,
         host="",
         ini_section=None,
         is_server=False,
@@ -237,7 +282,7 @@ class SocketWrapper:
         is_zero_one_protocol=True,
         verbose=False,
     ):
-        self.buffer_len = BufferLen
+        self.buffer_len = buffer_len
         self.config = configparser.ConfigParser()
         self.config.read_file(open(vconst.config_file_path))
         self.debug = "c"
@@ -368,7 +413,7 @@ class SocketWrapper:
         if s not in self.output_sockets:
             self.output_sockets.append(s)
 
-    def queue_messageZ(self, parts, s=None, QueueClass=queue.Queue):
+    def queue_message_z(self, parts, s=None, QueueClass=queue.Queue):
         msg_parts = []
         for this in parts:
             msg_parts.append(this)
@@ -483,11 +528,15 @@ class SocketWrapper:
         while True:
             self.select(timeout=MaxAllowableWriteLatency)
 
+#def cleanup(signum, stack_frame)
+
 
 class SocketWrapperServer(SocketWrapper):
+    __slots__ = ()
+
     def __init__(
         self,
-        BufferLen=TCPIP_STD_BUFLEN,
+        buffer_len=TCPIP_STD_BUFLEN,
         host="",
         ini_section=None,
         is_zero_one_protocol=True,
@@ -496,7 +545,7 @@ class SocketWrapperServer(SocketWrapper):
     ):
         # if ini_section is specified, it is used. Else specify host/port. host of '' binds to all avalable networks.
         super().__init__(
-            BufferLen=BufferLen,
+            buffer_len=buffer_len,
             host="",
             ini_section=ini_section,
             is_zero_one_protocol=is_zero_one_protocol,
@@ -505,6 +554,7 @@ class SocketWrapperServer(SocketWrapper):
             port=port,
             verbose=verbose,
         )
+        #signal.signal(signal.SIGHUP, cleanup)
 
     def server(self, host=None, port=None):
         if host is not None:
@@ -528,13 +578,13 @@ class SocketWrapperClient(SocketWrapper):
 
     def __init__(
         self,
-        BufferLen=TCPIP_STD_BUFLEN,
+        buffer_len=TCPIP_STD_BUFLEN,
         ini_section=None,
         is_zero_one_protocol=True,
         verbose=False,
     ):
         super().__init__(
-            BufferLen=BufferLen,
+            buffer_len=buffer_len,
             ini_section=ini_section,
             is_zero_one_protocol=is_zero_one_protocol,
             is_socket_blocking=False,
@@ -578,7 +628,7 @@ class SocketWrapperClient(SocketWrapper):
             print("connect_async() Successful")
             return True
         except socket.error as e:
-            if e.errno in [22, 36, 37, 56, 61, 111, 114, 115]:
+            if e.errno in [22, 36, 37, 48, 56, 61, 65, 111, 114, 115]:
                 # BlockingIOError started appearing in exception messages instead of socket_error
                 # in Raspbian Stretch / Python3.5. Not sure if any action needed.
                 #
@@ -609,8 +659,18 @@ class SocketWrapperClient(SocketWrapper):
                 # socket.error: [Errno 22] Invalid argument
                 # socket.error: [Errno 36] Operation now in progress
                 # socket.error: [Errno 37] Operation already in progress
+                # socket.error: [Errno 48] Address already in use
+                #   #48 experienced 3/24/24 after #65 on program restarts.
+                #   This happened repeatedly on ports that had been fine
+                #   repeatedly until I added 65 to the exception list.
+                #   Communications seemed OK after adding 48 and 65 to lsit.
                 # socket error: [Errno 56] Socket is already connected
                 # socket.error: [Errno 61] Connection refused
+                # socket.error: [Errno 65] No route to host
+                #   #65 experienced 3/24/24, MACOS on client attempting to connect
+                #   to non-existant server. While scanning for a server.
+                #   Other non-existant servers did not cause this error.
+                #   Ping to that ip just returned a normal looking timeout.
                 # socket.error: [Errno 111] Connection refused
                 # socket.error: [Errno 114] Operation already in progress (new, Raspbian Stretch)
                 # socket.error: [Errno 115] Operation now in progress
@@ -678,73 +738,8 @@ class SocketWrapperClient(SocketWrapper):
         return False
 
 
-class FileServer(SocketWrapperServer):
-    __slots__ = "file_dirs"
-
-    def __init__(self, verbose=True):
-        super().__init__(
-            BufferLen=TCPIP_XFR_BUFLEN, ini_section="FileServer", verbose=verbose
-        )
-        self.file_dirs = {}
-        specs = self.config.items("FileServer")
-        print("FileServer", specs)
-        for key, value in specs:
-            # the ini modules translates keys to lower case, so dir codes must be lower case
-            if key[0] == "x":
-                code = key[1:]
-                path = os.path.expanduser(value)
-                self.file_dirs[code] = path
-
-    def process_message(self, s, message):
-        dir_code = message[0]
-        source_dir = self.file_dirs[dir_code]
-        fn = message[1]
-        fp = os.path.join(source_dir, fn)
-        print("FS", dir_code, fn, fp, message)
-        try:
-            f = open(fp, "rb")
-            c = f.read()
-            f.close()
-        except IOError as e:
-            # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
-            if e.errno == 2:
-                self.queue_message("0\x00", s=s)
-                return
-            else:
-                raise
-        print("SEND FILE", fp, len(c))
-        ix = 0
-        while ix < len(c):
-            rec = c[ix : ix + self.buffer_len]
-            if ix == 0:
-                rec = (
-                    repr(len(c)).encode() + "\x00".encode() + rec
-                )  # add file size to first block
-            self.queue_message(rec, s=s)
-            ix += self.buffer_len
 
 
 def status_info():
     print("This host IP Address:", host_primary_ip_address())
 
-
-if __name__ == "__main__":
-    if "verbose" in sys.argv:
-        print("verbose")
-        verbose = True
-    else:
-        print("QUIET")
-        verbose = False
-    if "noarchive" in sys.argv:
-        noarchive = True
-    else:
-        noarchive = False
-    if sys.argv[1] == "f":
-        # s = FileServer(verbose=verbose)
-        s = FileServer(verbose=False)
-        s.server()
-    elif sys.argv[1] == "m":
-        s = FastMqttServer(NoArchive=noarchive, verbose=verbose)
-        s.server()
-    elif sys.argv[1] == "s":
-        status_info()

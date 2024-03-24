@@ -1,8 +1,10 @@
 
+import configparser
 import json
 import numpy as np
 import os
 import queue
+import sys
 import time
 
 from vnavslib import vnavs_comms as vcomm
@@ -51,7 +53,7 @@ class FastMqttServer(vcomm.SocketWrapperServer):
 
     def __init__(self, NoArchive=False, verbose=False):
         super().__init__(
-            ini_section=FMQTT_INI_SECTION, port=vconst.FAST_MQTT_port, verbose=verbose
+            ini_section=FMQTT_INI_SECTION, port=vconst.FAST_MQTT_PORT, verbose=verbose
         )
         self.topics_last_message = {}
         self.subscriptions = {}
@@ -59,12 +61,17 @@ class FastMqttServer(vcomm.SocketWrapperServer):
         self.message_out_ct = 0
         self.mission_id = None
         self.no_archive = NoArchive
+        if not self.no_archive:
+            try:
+                self.archive_dir = self.config.get(FMQTT_INI_SECTION, FMQTT_ARCHIVE_DIR)
+            except configparser.NoSectionError:
+                print(f"No config file [{FMQTT_INI_SECTION}] - archiving disabled")
+                self.no_archive = True
         if self.no_archive:
             self.archiver = None
             self.archive_dir = None
         else:
             self.archiver = MessageArchiver()
-            self.archive_dir = self.config.get(FMQTT_INI_SECTION, FMQTT_ARCHIVE_DIR)
             self.archive_dir = os.path.expanduser(
                 self.archive_dir
             )  # this expands tilde in path
@@ -96,7 +103,7 @@ class FastMqttServer(vcomm.SocketWrapperServer):
                             queue_class = vcomm.QueueOne
                         else:
                             queue_class = queue.Queue
-                        self.queue_messageZ(
+                        self.queue_message_z(
                             ["message", topic, repr(self.message_in_ct), payload],
                             s=this.s,
                             QueueClass=queue_class,
@@ -119,9 +126,9 @@ class FastMqttServer(vcomm.SocketWrapperServer):
                 # print("WHORU")
                 mid = 0
                 payload_dict = json.loads(payload)
-                payload_dict = PrepareResponse(payload_dict, ConfResponse=True)
-                j = PrepareMessage("FastMqtt", 0, 0, vconst.system_server, payload_dict)
-                self.queue_messageZ(
+                payload_dict = vcomm.prepare_response(payload_dict, conf_request=True)
+                j = vcomm.prepare_message("FastMqtt", 0, 0, vconst.system_server, payload_dict)
+                self.queue_message_z(
                     ["message", vconst.system_server, repr(mid), j], s=s
                 )
             if self.archiver is not None:
@@ -133,7 +140,7 @@ class FastMqttServer(vcomm.SocketWrapperServer):
             else:
                 mid = 0
                 payload = "{}"
-            self.queue_messageZ(["message", topic, repr(mid), payload], s=s)
+            self.queue_message_z(["message", topic, repr(mid), payload], s=s)
             print("READ", topic)
         elif action == "subscribe":
             topic = message[1]
@@ -183,49 +190,10 @@ class MessageArchiver:
         self.archive_buffer = []
         self.archive_size = 0
 
-def PrepareMessage(
-    sender_name, sender_pid, sender_seq, topic, payload, ConfRequest=None
-):
-    payload["_topic"] = topic
-    payload["_sender"] = sender_name
-    payload["_sendTime"] = time.time()
-    payload["_sendPid"] = sender_pid
-    payload["_sendSeq"] = sender_seq
-    if ConfRequest is not None:
-        payload["_confRequest"] = ConfRequest
-    j = json.dumps(payload, cls=JsonNumpyEncoder)
-    return j
-
-
-def PrepareResponse(payload, ConfResponse=False):
-    # Prepares payload to be used as a response.
-    # Copy identifier fields so recipients can match source message
-    # so it knows request is completed and where to continue its process.
-    # Info about original message is always there thanks to Publish()
-    new_payload = {}
-    if "_topic" in payload:
-        new_payload["_ackTopic"] = payload["_topic"]
-    if "_sendPid" in payload:
-        new_payload["_ackPid"] = payload["_sendPid"]
-    if "_sendSeq" in payload:
-        new_payload["_ackSeq"] = payload["_sendSeq"]
-    if ConfResponse:
-        if "_confRequest" in payload:
-            new_payload["_isConfirmation"] = payload["_confRequest"]
-    return new_payload
-
 def JsonShowTypes(payload):
     for key, value in payload.items():
         print(key, value.__class__.__name__, value)
 
-
-class JsonNumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.int64):
-            obj_out = int(obj)
-            # print("JsonNumpyEncoder()", obj.__class__.__name__, obj_out.__class__.__name__)
-            return obj_out
-        return super().default(obj)
 
 
 if __name__ == "__main__":
