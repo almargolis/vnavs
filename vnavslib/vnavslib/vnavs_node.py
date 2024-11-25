@@ -1,27 +1,19 @@
-#
-# These are MQTT and FMQTT clients that handle a lot of boilerplate for
-# threading consistent API for both types of servers.
-#
 
-import datetime
+import configparser
 import json
 import socket
 import sys
-import threading
-import traceback
 import time
+import traceback
 
 import paho.mqtt.client as mqtt
 
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_comms as vcomms
 
-if sys.version_info[0] < 3:
-    import ConfigParser
-    import Queue
-else:
-    import configparser as ConfigParser
-    import queue as Queue
+from vnavslib import vnavs_comms as vcomms
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_mqtt_clients as vmqtt
+
+stop_process = False
 
 ARG_HOST = "host"
 ARG_PORT = "port"
@@ -30,235 +22,61 @@ ARG_TRUE = "true"
 ARG_FALSE = "false"
 ARG_CWD = "cwd"
 
-stop_process = False
-
-SUBSCRIPTION_MODE_ALL = "a"
-SUBSCRIPTION_MODE_LATEST = "l"
-
-
 def NowStr():
     return datetime.datetime.now().strftime("%Y%m%d%H%M%S")
 
 
-FILE_TRANSFER_IDLE = 0
-FILE_TRANSFER_STARTED = 1
-FILE_TRANSFER_COMPLETE = 2
 
+class Subscription():
+    __slots__ = (
+        "async_delivery",
+        "handler_method",
+        "handler_needs_topic",
+        "last_payload",
+        "message_queue",
+        "request_only",
+        "topic",
+    )
 
-class FileClient(vcomms.SocketWrapperClient):
-    def __init__(self, buffer_len=vcomms.TCPIP_XFR_BUFLEN, verbose=False):
-        super().__init__(
-            buffer_len=buffer_len,
-            ini_section="FileClient",
-            IsZeroOneProtocol=False,
-            verbose=verbose,
-        )
-        self.init_file_client()
-
-    def init_file_client(self):
-        self.file_name = None
-        self.file_out = None
-        self.buffer = ""
-        self.transfer_state = FILE_TRANSFER_IDLE
-        self.start_time = 0
-        self.timeout = False
-
-    def get_file(self, dir_code, filename, path=None):
-        self.start_transfer(dir_code=dir_code, filename=filename, path=path)
-        while True:
-            if self.check_transfer():
-                return True
-            if self.timeout:
-                return False
-
-    def start_transfer(self, dir_code, filename, path=None):
-        self.Init()
-        retry_ct = 0
-        while (not self.connected) and (retry_ct < 5):
-            retry_ct += 1
-            # There is an issue here that effects all connects.
-            # Possibly just OSX connecting to RPI, but not sure.
-            # First connect fails -- or seems to
-            # If you try to reconnect immediately, you get a fail
-            #    socket.error: [Errno 37] Operation already in progress
-            # So some patience is needed. Somewhere there is some latency or
-            # inconsistency of block / no block. Or one of the OSes trying to be polite.
-            time.sleep(1)
-            print(
-                "FileClient.start_transfer() - Attempt Connect",
-                self.socket_host,
-                self.socket_port,
-            )
-            self.Connect()
-        # print("FileClient.start_transfer() - CONNECTED", self.socket_host, self.socket_port)
-        self.file_name = filename
-        if path is None:
-            self.file_path = filename
-        else:
-            self.file_path = path
-        self.file_out = open(self.file_path, "wb")
-        self.transfer_state = FILE_TRANSFER_STARTED
-        self.timeout = False
-        self.buffer = bytearray()
-        self.buf_sum = 0
-        self.queue_message_z([dir_code, filename])
-        self.start_time = time.time()
-        self.select(timeout=0.1)
-
-    def check_transfer(self, timeout=30.0):
-        if self.transfer_state == FILE_TRANSFER_STARTED:
-            self.select(timeout=0.1)
-        if (self.transfer_state == FILE_TRANSFER_STARTED) and (
-            (time.time() - self.start_time) > timeout
-        ):
-            self.file_out.close()
-            self.transfer_state = FILE_TRANSFER_COMPLETE
-            print("FileClient.check_transfer() Timeout", self.file_name)
-            self.timeout = True  # stays true until next transfer started
-        if self.transfer_state == FILE_TRANSFER_COMPLETE:
-            self.transfer_state = FILE_TRANSFER_IDLE
-            return True
-        return False
-
-    def recv_data(self, s, data):
-        self.buffer += data
-        self.buf_sum += len(data)
-        p = self.buffer.find(b"\x00")
-        # print("RCV DATA", len(data), len(self.buffer), self.buf_sum)
-        if p > 0:
-            try:
-                file_len = int(self.buffer[:p])
-            except:
-                # need to do something specific here to restart / recover transfer
-                # or neatly notify as not complete.
-                # got an "invalid literal" exception. maybe due to noisy network.
-                # raise
-                # maybe we don't have enough data to figure out
-                print("EX", p, len(data))
-                return
-            # print("FILE LEN", file_len)
-            buf_len = p + file_len + 1
-            if len(self.buffer) == buf_len:
-                self.file_out.write(self.buffer[p + 1 :])
-                self.file_out.close()
-                self.transfer_state = FILE_TRANSFER_COMPLETE
-                # print("FileClient.recv_data() Transfer Complete", time.time() - self.start_time, self.file_name, file_len)
-
-
-class FastMqttClient(vcomms.SocketWrapperClient):
-    __slots__ = ('on_connect', 'on_message')
-    def __init__(self, verbose=False):
-        super().__init__(ini_section="MqttFast", verbose=verbose)
-        self.on_message = None
-        self.on_connect = None
-
-    def connect(self, **kwargs):
-        # Hmmm ... maybe dangerous. Clients have both connect() and Connect()
-        # doing slightly different things.
-        # Above comment is deprecated due to PEP8 transition, but I'm
-        # leaving it here in case I discover there really are two different
-        # functions that need different names.
-        super().connect(**kwargs)
-        if self.on_connect is not None:
-            client = None  # not implemented
-            userdata = None  # not implemented
-            flags = None  # not implemented
-            rc = 0  # not implemented
-            self.on_connect(client, userdata, flags, rc)
-
-    def blocking_write_socket(self, msg):
-        msg_sent = super().blocking_write_socket(msg)
-        if msg_sent:
-            mid = 0  # not implemented -- message id
-            return (mqtt.MQTT_ERR_SUCCESS, mid)
-        else:
-            mid = 0  # not sue if this matches Paho MQTT behavior
-            return (mqtt.MQTT_ERR_NO_CONN, mid)
-
-    def loop(self, timeout=1.0):
-        self.select(timeout=timeout)
-
-    def loop_forever(self):
-        self.select_forever()
-
-    def loop_start(self):
-        self.select_thread_start()
-
-    def loop_stop(self, force=False):
-        # unused force parameter exists for mosquitto compatibility
-        self.select_thread_stop()
-
-    def publish(self, topic, msg, qos=0):
-        self.queue_message_z(["publish", topic, msg])
-        mid = 0  # not implemented -- message id
-        return (mqtt.MQTT_ERR_SUCCESS, mid)
-
-    def read(self, topic, qos=0):
-        # This is a non-repeating request to get the latest message
-        self.queue_message_z(["read", topic])
-        mid = 0  # not implemented -- message id
-        return (mqtt.MQTT_ERR_SUCCESS, mid)
-
-    def subscribe(self, topic, qos, timeout=1.0, mode=SUBSCRIPTION_MODE_ALL):
-        packet_sent = False
-        start_time = time.time()
-        while not packet_sent:
-            try:
-                print("SUBSCRIBE", topic)
-                self.queue_message_z(["subscribe", topic, mode])
-                packet_sent = True
-            except socket.error as e:
-                # socket.error: [Errno 11] Resource temporarily unavailable
-                if e.errno == 11:
-                    return
-                if (e.errno == 11) and ((time.time() - start_time) < timeout):
-                    continue
-                raise
-
-    def process_message(self, s, message):
-        if message[0] == "":
-            return
-        if message[0] == "message":
-            topic = message[1]
-            mid = message[2]
-            payload = message[3]
-            if self.on_message is not None:
-                mqtt_message = FastMqttMessage(topic, payload, mid=mid)
-                client = None  # not implemented
-                userdata = None  # not implemented
-                self.on_message(client, userdata, mqtt_message)
-
-
-class PahoClient(mqtt.Client):
-    # This should be a very thin wrapper.
-    # FastMqttClient() should have as close to identical API as Paho client.
-    # This object reconciles any unavoidable differences so MqqtNode works
-    # with either server.
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.connected = False
-        self.connect_in_progress = False
-
-    def connect(self, *args, **kwargs):
-        super().connect(*args, **kwargs)
-        self.connected = True
-        self.connect_in_progress = False
-
-    def disconnect(self):
-        super().disconnect()
-        self.connected = False
-        self.connect_in_progress = False
-
-    def subscribe(self, topic, qos, timeout=1.0, mode=SUBSCRIPTION_MODE_ALL):
-        super().subscribe(topic, qos)
-
-
-class FastMqttMessage():
-    def __init__(self, topic, payload, qos=0, mid=0):
+    def __init__(
+        self,
+        topic,
+        handler=None,
+        handler_needs_topic=False,
+        request_only=False,
+        async_delivery=False,
+        LatestOnly=True,
+    ):
+        self.async_delivery = async_delivery  # process asyncronously
         self.topic = topic
-        self.payload = payload
-        self.qos = qos
-        self.mid = mid  # this is a fast mqtt extension
+        self.request_only = request_only
+        self.handler_method = handler
+        self.handler_needs_topic = handler_needs_topic
+        self.last_payload = None
+        if LatestOnly:
+            self.message_queue = None
+        else:
+            self.message_queue = queue.Queue()
+
+
+class ConfirmationRequest():
+    __slots__ = ("checked_time", "conf_id", "confirmed_time", "payload", "request_time")
+
+    def __init__(self, conf_id):
+        self.checked_time = None
+        self.conf_id = conf_id
+        self.confirmed_time = None
+        self.payload = None
+        self.request_time = time.time()
+
+    def __repr__(self):
+        conf = "not confirmed"
+        if self.confirmed_time is not None:
+            conf = "confirmed"
+        chk = "not checked"
+        if self.checked_time is not None:
+            chk = "checked"
+        return "( CONF {} - {} - {} )".format(self.conf_id, conf, chk)
 
 
 class Counters():
@@ -297,171 +115,39 @@ class Counters():
         print(fmt.format(*outVal))
 
 
+
 #
-# blocking == True
-# 	Single threaded node.
-#       if blockingTimeoutSecs is None,
-# 		mqtt loop_forever() is run and after Connect() all processing is done via
-# 		callbacks.
-#       if blockingTimeoutSecs is not None.
-# 		messages are not automatically processed, call CheckMqtt() periodically
-# 		to process messages.
-#               A convenient way to do this is is to call loop() and implement a do_loop()
-#               method. This has the advantage of working identically for blocking and
-#               non-blocking modes so the node blocking mode can be changed easily.
-#               loop() handles most exception processing. do_loop() is called repetitively
-#               and frequently, so it does not need to implement the overall looping
-# 		or routine exceptions.
-# blocking == False
-# 	Threaded node. Mqttc runs in its own thread and communicates with the main
-# 		node thread via callbacks. Since that is happening asyncronously,
-# 		you must be thoughtful regarding race conditions.
-# 	It is recommended to use the loop() / do_loop() mechanism to make sure
-# 		connections and exceptions are handled properly. Since loop()
-# 		is non-blocking, do_loop() needs to check self.mqttcConnected.
+# VnavsNode() encapsolates practices that VNAVS nodes are expected
+#               to follow. This allows simple nodes to have 
+#               relatively code, most of which are specific to
+#               the node's purpose, not communications.
 #
-# (The following is a draft. May not be quite correct)
-# Where do I put my code for a node?
+# automatically_connect=False is for nodes that don't want automatic connection managment. 
+#       One eample is darkroom which may run stand-alone or as a nhode communivating with bots.
+# wait_if_not_connected=True is for nodes that have nothing to do if no message server
+#       is available. do_loop() is blocked.
+# 	    If set to False, the node can continue critical functions like managing actuators,
+#       sensors or GUI but it need code to check the connection status in order to
+#       avoid crashing when calling communications activities.
+# single_threaded=False is the default configuration. This starts a separate thread for
+#       for communications processing so the node can do it's functional work without
+#       monitoring communications activity. The node can publish() whenever it needs and
+#       receives messages asynchronously via handlers defined with the subscription. 
+# select_timeout mainly applies to single_threaded=True mode. Use None for a node
+#       that has nothing else to do but receive messages and does all its work in
+#       the subscriptions handlers. This might be the case for a message logger.
+#       If a selet_timeout period is specified, the node must periodically 
+#       exercise messaging by either calling loop() or or mqttc.loop(). 
+#       ** This needs clarification **
+# mqttc is a handler for either true mqqt or vnavs fast mqqt
 #
-# rmsg* handlers (callbacks) get called as messages arrive and run in the socket thread.
-# It is possible for all code to live in these handlers. This makes for easy coding,
-# but can lead to poor performance if the handlers take a long time to complete,
-# either due to CPU intensive operations or waiting for external events (like database selects).
-#
-def LaunchNode(node_class):
-    n = node_class()
-    n.loop()
 
-
-def connect_and_publish_mqqt_message(
-    topic,
-    payload,
-    ResponseTopic=None,
-    host=None,
-    port=None,
-    block_if_not_connected=True,
-    verbose=False,
-):
-    if ResponseTopic is None:
-        subscriptions = []
-        conf = None
-        save_payload = False
-    else:
-        subscriptions = [Subscription(ResponseTopic)]
-        conf = "publish" + NowStr()
-        save_payload = True
-    node = MqqtNode(
-        subscriptions=subscriptions,
-        broker_type="F",
-        block_if_not_connected=block_if_not_connected,
-        single_threaded=True,
-        ack_topic=ResponseTopic,
-        host=host,
-        port=port,
-        verbose=verbose,
-    )
-    node.connect_to_mqtt_server()
-    if (not node.mqttc.connected) and (not block_if_not_connected):
-        # This exits quickly if not immediately connected. Used by find_server()
-        if verbose:
-            print("Server not found")
-        return None
-    while not node.mqttc.connected:
-        try:
-            node.connect_to_mqtt_server()
-        except:
-            pass
-    node.publish(topic, payload, conf_request=conf)
-    while node.mqttc.sent_ct < 1:
-        node.check_mqtt_pending_activity()
-    if ResponseTopic is None:
-        return None
-    return node.wait_for_payload(conf)
-
-
-def find_server(port=vconst.FAST_MQTT_PORT, verbose=False):
-    this_host_ip = vcomms.host_primary_ip_address()
-    ix = this_host_ip.rfind(".")
-    this_network = this_host_ip[: ix + 1]
-    # for scan_d in range(1,255):
-    for scan_d in range(1, 256):
-        scan_ip = this_network + str(scan_d)
-        print(scan_ip)
-        payload = {}
-        response = connect_and_publish_mqqt_message(
-            vconst.system_whoru,
-            payload,
-            ResponseTopic=vconst.system_server,
-            host=scan_ip,
-            port=port,
-            block_if_not_connected=False,
-            verbose=verbose,
-        )
-        if response is not None:
-            print("Server Found!!!")
-            return scan_ip
-    print("Server Not Found!!!")
-    return None
-
-
-class Subscription():
-    __slots__ = (
-        "async_delivery",
-        "handler_method",
-        "handler_needs_topic",
-        "last_payload",
-        "queue",
-        "request_only",
-        "topic",
-    )
-
-    def __init__(
-        self,
-        topic,
-        handler=None,
-        handler_needs_topic=False,
-        request_only=False,
-        async_delivery=False,
-        LatestOnly=True,
-    ):
-        self.async_delivery = async_delivery  # process asyncronously
-        self.topic = topic
-        self.request_only = request_only
-        self.handler_method = handler
-        self.handler_needs_topic = handler_needs_topic
-        self.last_payload = None
-        if LatestOnly:
-            self.queue = None
-        else:
-            self.queue = Queue.Queue()
-
-
-class ConfirmationRequest():
-    __slots__ = ("checked_time", "conf_id", "confirmed_time", "payload", "request_time")
-
-    def __init__(self, conf_id):
-        self.checked_time = None
-        self.conf_id = conf_id
-        self.confirmed_time = None
-        self.payload = None
-        self.request_time = time.time()
-
-    def __repr__(self):
-        conf = "not confirmed"
-        if self.confirmed_time is not None:
-            conf = "confirmed"
-        chk = "not checked"
-        if self.checked_time is not None:
-            chk = "checked"
-        return "( CONF {} - {} - {} )".format(self.conf_id, conf, chk)
-
-
-class MqqtNode():
+class VnavsNode():
     __slots__ = (
         "args",
         "automatically_connect",
         "automatically_handle_synchronous_messages",
-        "block_if_not_connected",
+        "wait_if_not_connected",
         "broker_timeout",
         "broker_type",
         "config",
@@ -492,22 +178,18 @@ class MqqtNode():
         node_name=None,
         subscriptions=[],
         ack_topic=None,
-        loop_leep=0.01,
+        loop_sleep=0.01,
         automatically_connect=True,
         automatically_handle_synchronous_messages=True,
-        block_if_not_connected=True,
+        wait_if_not_connected=True,
         single_threaded=False,
         select_timeout_secs=1.0,
         broker_type="F",
         host=None,
-        port=None,
+        port=vconst.FAST_MQTT_PORT,
         streamer=False,
         verbose=True,
     ):
-        # automatically_connect is for nodes that don't want automatic connection managment. Such as darkroom which may run stand-alone or
-        # 	switch between cameras / bots manually.
-        # block_if_not_connected is for nodes that only need to run when connected to a message server. do_loop() is what is blocked.
-        # 	If set to false, the node needs code to avoid crashing when calling communications activities.
         self.args = {}
         for this in sys.argv[1:]:
             eq_pos = this.find("=")
@@ -528,8 +210,8 @@ class MqqtNode():
         self.confirmation_pending = {}
         self.vnavs_pid = int(time.time())  # non-repeating with ~ 1 second
         self.vnavs_mid = 0  # publish() sequence
-        self.block_if_not_connected = block_if_not_connected
-        self.config = ConfigParser.ConfigParser()
+        self.wait_if_not_connected = wait_if_not_connected
+        self.config = configparser.ConfigParser()
         self.config.read_file(open(vconst.config_file_path))
         self.automatically_connect = automatically_connect
         self.automatically_handle_synchronous_messages = (
@@ -553,7 +235,7 @@ class MqqtNode():
         self.debug = 0
         self.exception_last_time = 0
         self.exception_ct = 0
-        self.loop_sleep = loop_leep
+        self.loop_sleep = loop_sleep
         self.lastSocketError = None
         if node_name is None:
             self.node_name = self.__class__.__name__
@@ -572,10 +254,10 @@ class MqqtNode():
     def init_mqtt_client(self):
         if self.broker_type == "M":
             ini_section = "MqttBroker"  # Mosquitto
-            self.mqttc = PahoClient()
+            self.mqttc = vmqtt.PahoClient()
         else:
             ini_section = "MqttFast"
-            self.mqttc = FastMqttClient()
+            self.mqttc = vmqtt.FastMqttClient()
         # Assign event callbacks
         self.mqttc.on_message = self.on_message
         self.mqttc.on_connect = self.on_connect
@@ -602,7 +284,7 @@ class MqqtNode():
             print("MqqtNode() already connected")
             return
         while True:
-            if self.block_if_not_connected:
+            if self.wait_if_not_connected:
                 timeout = None
             else:
                 timeout = 0.01
@@ -617,14 +299,14 @@ class MqqtNode():
                 return False
         if self.single_threaded:
             if self.select_timeout is None:
-                self.mqttc.loop_forever()
+                self.mqttc.select_forever()
                 return True
             else:
-                # client must periodically either call call loop() or periodically call mqtt loop()
                 return True
         else:
-            # this starts a separate thread which is handy, but tkinter and others don't support threads
-            self.mqttc.loop_start()
+            # tkinter and others don't support threads.
+            # This starts select() looping in a separate thread.
+            self.mqttc.thread_start()
             return True
 
     def check_mqtt_pending_activity(self):
@@ -657,7 +339,7 @@ class MqqtNode():
         dir_name = vconst.CheckDirectory(dir_name, source, IsWriteable=IsWriteable)
         return dir_name
 
-    def loop(self):
+    def main_loop(self):
         while True:
             try:
                 if self.automatically_connect and (not self.mqttc.connected):
@@ -687,14 +369,18 @@ class MqqtNode():
                         and self.automatically_handle_synchronous_messages
                     ):
                         self.handle_all_synchronous_messages()
-                    self.do_loop()
-                elif not self.block_if_not_connected:
+                    if hasattr(self, 'client_loop_code'):
+                        # used to be do_loop()
+                        self.client_loop_code()
+                elif not self.wait_if_not_connected:
                     if (
                         self.has_synchronous_message_subscriptions
                         and self.automatically_handle_synchronous_messages
                     ):
                         self.handle_all_synchronous_messages()
-                    self.do_loop()
+                    if hasattr(self, 'client_loop_code'):
+                        # used to be do_loop()
+                        self.client_loop_code()
                 if self.check_exceptions():
                     sys.exit(0)
                 if self.loop_sleep > 0:
@@ -729,7 +415,7 @@ class MqqtNode():
     #
     # Long running processes should call this periodically.
     # It was a particular problem when when capturing a long
-    # long sequence with the RPI camera and hte sender socket died.
+    # long sequence with the RPI camera and the sender socket died.
     #
     def check_exceptions(self):
         if stop_process:
@@ -781,6 +467,7 @@ class MqqtNode():
                 else:
                     this.handler_method(payload)
 
+    # VnavsNode
     def publish(self, topic, payload, conf_request=None):
         # payload is a dict to be converted to JSON)
         # conf_request is an ID asking the recipient to clearly identify
@@ -845,10 +532,10 @@ class MqqtNode():
         print("on_connect() rc: " + str(rc))
         for this_subscription in self.subscriptions.values():
             if not this_subscription.request_only:
-                if this_subscription.queue is None:
-                    mode = SUBSCRIPTION_MODE_LATEST
+                if this_subscription.message_queue is None:
+                    mode = vmqtt.SUBSCRIPTION_MODE_LATEST
                 else:
-                    mode = SUBSCRIPTION_MODE_ALL
+                    mode = vmqtt.SUBSCRIPTION_MODE_ALL
                 self.mqttc.subscribe(this_subscription.topic, 0, mode=mode)
 
     def on_message(self, client, userdata, message):
@@ -862,6 +549,7 @@ class MqqtNode():
                 + self.message_str(message.payload),
             )
         msg = message.payload
+        #print(f"VnavsNode.on_message() MESSAGE {msg}")
         if msg == "":
             payload = {}
         else:
@@ -871,6 +559,7 @@ class MqqtNode():
                 payload = {}
                 print("JSON Error", message.payload)
         subscription = self.subscriptions[message.topic]
+        #print(f"VnavsNode.on_message() PAYLOAD {payload}")
         if "_sendTime" in payload:
             send_time = float(payload["_sendTime"])
             send_diff = time.time() - send_time
@@ -903,90 +592,3 @@ class MqqtNode():
 
     def on_log(self, client, userdata, level, buf):
         print(buf)
-
-
-#
-# With TestSender and TestReceiver on the same RPI3 and the mosquitto broker
-# on a second RPI3 connected via ethernet cable, the sender published
-# about 1430 messages / second but the receiver only got about 315 / second.
-# -- the reciver got all messages in order so it was constantly falling behind
-# -- when the sender terminated, undelivered messages were discarded,
-# 	so the reciever never got the last messages. This may be fixable
-# 	by configuration, but doesn't matter because the reading is so slow.
-#
-
-
-class TestSender(MqqtNode):
-    def __init__(self, verbose=False):
-        super().__init__(
-            subscriptions=[],
-            blocking=False,
-            broker_type="F",
-            streamer=False,
-            verbose=verbose,
-        )
-        self.msgCt = 0
-        self.startTime = time.time()
-
-    def do_loop(self):
-        self.msgCt += 1
-        self.mqttc.publish("test", self.msgCt)
-        if (self.msgCt % 10) == 0:
-            rate = self.msgCt / (time.time() - self.startTime)
-            print("published", self.msgCt, rate)
-
-
-class TestReceiver(MqqtNode):
-    def __init__(self, verbose=False):
-        super().__init__(
-            subscriptions=["test"],
-            blocking=True,
-            blockingTimeoutSecs=0,
-            broker_type="F",
-            streamer=False,
-            verbose=verbose,
-        )
-        self.msgCt = 0
-        self.startTime = time.time()
-
-    def rmsg_test(self, msg):
-        self.msgCt += 1
-        if (self.msgCt % 10) == 0:
-            rate = self.msgCt / (time.time() - self.startTime)
-            print("Received", self.msgCt, msg, rate)
-
-
-class FastMqttUtil(MqqtNode):
-    def __init__(self, verbose=False):
-        super().__init__(
-            subscriptions=[],
-            blocking=True,
-            blockingTimeoutSecs=0,
-            broker_type="F",
-            streamer=False,
-            verbose=verbose,
-        )
-
-
-if __name__ == "__main__":
-    if "verbose" in sys.argv:
-        print("verbose")
-        verbose = True
-    else:
-        print("QUIET")
-        verbose = False
-    if sys.argv[1] == "i":
-        find_server(verbose=verbose)
-    elif sys.argv[1] == "s":
-        n = TestSender()
-        n.Connect()
-        n.loop()
-    elif sys.argv[1] == "r":
-        n = TestReceiver()
-        n.Connect()
-    elif sys.argv[1] == "fpub":
-        s = FastMqttUtil()
-        s.Connect()
-        time.sleep(1)
-        s.mqttc.publish(sys.argv[2], sys.argv[3])
-        time.sleep(1)

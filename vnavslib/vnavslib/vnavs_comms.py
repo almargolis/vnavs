@@ -13,7 +13,6 @@ import time
 
 from vnavslib import vnavs_const as vconst
 
-stop_process = False
 
 TCPIP_STD_BUFLEN = 4096
 TCPIP_STD_BUFLEN = 8192
@@ -401,7 +400,7 @@ class SocketWrapper:
             # print("SocketWrapper.process_received_packet()", this_message, parts)
             self.process_message(s, parts)
 
-    def queue_message(self, message, s=None, QueueClass=queue.Queue):
+    def queue_message_str(self, message, s=None, QueueClass=queue.Queue):
         # message is a string
         # print("ZZZ - Q request")
         if s is None:  # This should only be true if self.is_server is False
@@ -416,13 +415,17 @@ class SocketWrapper:
     def queue_message_z(self, parts, s=None, QueueClass=queue.Queue):
         msg_parts = []
         for this in parts:
-            msg_parts.append(this)
+            msg_parts.append(str(this))
             msg_parts.append("\x00")
         msg_parts.append("\x01")
-        # print("YYY", msg_parts)
-        self.queue_message("".join(msg_parts), s=s, QueueClass=QueueClass)
+        #print("SocketWrapper.queue_message_z()", msg_parts)
+        self.queue_message_str("".join(msg_parts), s=s, QueueClass=QueueClass)
 
     def select(self, timeout=1.0):
+        # This method may be the primary independent worker in threaded mode.
+        # It is called repeatedly by select_forever() as long as the thread
+        # is running.
+        #
         # If this is a server and the client connection fails, we want to clean up that connection and
         # continue serving. Potentially could want to nofify someone.
         # If this is a client, we want to neaten things up but re-raise the exception because the
@@ -520,6 +523,8 @@ class SocketWrapper:
                 raise
 
     def select_forever(self, MaxAllowableWriteLatency=0.001):
+        # This method is the root os thread start()
+        #
         # This error 9 occurs in the OS select call for a client if the server goes
         # away. That kills the SocketWrapper thread but leaves the main thread
         # running but not communicating. This is now trapped in Loop() by checking
@@ -709,7 +714,8 @@ class SocketWrapperClient(SocketWrapper):
                 time.sleep(0.01)
         return True
 
-    def select_thread_start(self):
+    def thread_start(self):
+        # was named select_thread_start()
         if self.thread is None:
             self.thread = threading.Thread(target=self.select_forever)
             self.thread.start()
@@ -717,7 +723,8 @@ class SocketWrapperClient(SocketWrapper):
             if not self.thread.is_alive():
                 self.thread.start()
 
-    def select_thread_stop(self):
+    def thread_stop(self):
+        # was named select_thread_stop()
         if self.thread is not None:
             self.thread.stop()
             self.thread = None

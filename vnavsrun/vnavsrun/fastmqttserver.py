@@ -9,7 +9,7 @@ import time
 
 from vnavslib import vnavs_comms as vcomm
 from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_mqtt_clients as vmqtt
 
 #
 # FastMqttServer is a simplified broker that is much faster thean mosquitto.
