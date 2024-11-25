@@ -1,17 +1,15 @@
-
 import os
 import sys
 
-from vnavslib import vnavs_comm|mp                                                                                                                                                                                                                                                                                                                                                                                                     \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\,,,,,,,,,,,,,,,,,,,,,,,,,,,,,\,,,,,,\
-—±”[[[[[as vcomm
+from vnavslib import vnavs_comms as vcomms
 
 
-class FileServer(vcomm.SocketWrapperServer):
+class FileServer(vcomms.SocketWrapperServer):
     __slots__ = "file_dirs"
 
     def __init__(self, verbose=True):
         super().__init__(
-            BufferLen=vcomm.TCPIP_XFR_BUFLEN, ini_section="FileServer", verbose=verbose
+            BufferLen=vcomms.TCPIP_XFR_BUFLEN, ini_section="FileServer", verbose=verbose
         )
         self.file_dirs = {}
         specs = self.config.items("FileServer")
@@ -64,4 +62,4 @@ if __name__ == "__main__":
         s = FileServer(verbose=False)
         s.server()
     elif sys.argv[1] == "s":
-        vcomm.status_info()
+        vcomms.status_info()

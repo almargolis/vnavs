@@ -1,4 +1,3 @@
-
 import configparser
 import json
 import socket
@@ -22,12 +21,12 @@ ARG_TRUE = "true"
 ARG_FALSE = "false"
 ARG_CWD = "cwd"
 
+
 def NowStr():
     return datetime.datetime.now().strftime("%Y%m%d%H%M%S")
 
 
-
-class Subscription():
+class Subscription:
     __slots__ = (
         "async_delivery",
         "handler_method",
@@ -59,7 +58,7 @@ class Subscription():
             self.message_queue = queue.Queue()
 
 
-class ConfirmationRequest():
+class ConfirmationRequest:
     __slots__ = ("checked_time", "conf_id", "confirmed_time", "payload", "request_time")
 
     def __init__(self, conf_id):
@@ -79,7 +78,7 @@ class ConfirmationRequest():
         return "( CONF {} - {} - {} )".format(self.conf_id, conf, chk)
 
 
-class Counters():
+class Counters:
     def __init__(self):
         self.start_time = time.time()
         self.counters = {}
@@ -115,14 +114,13 @@ class Counters():
         print(fmt.format(*outVal))
 
 
-
 #
 # VnavsNode() encapsolates practices that VNAVS nodes are expected
-#               to follow. This allows simple nodes to have 
+#               to follow. This allows simple nodes to have
 #               relatively code, most of which are specific to
 #               the node's purpose, not communications.
 #
-# automatically_connect=False is for nodes that don't want automatic connection managment. 
+# automatically_connect=False is for nodes that don't want automatic connection managment.
 #       One eample is darkroom which may run stand-alone or as a nhode communivating with bots.
 # wait_if_not_connected=True is for nodes that have nothing to do if no message server
 #       is available. do_loop() is blocked.
@@ -132,17 +130,18 @@ class Counters():
 # single_threaded=False is the default configuration. This starts a separate thread for
 #       for communications processing so the node can do it's functional work without
 #       monitoring communications activity. The node can publish() whenever it needs and
-#       receives messages asynchronously via handlers defined with the subscription. 
+#       receives messages asynchronously via handlers defined with the subscription.
 # select_timeout mainly applies to single_threaded=True mode. Use None for a node
 #       that has nothing else to do but receive messages and does all its work in
 #       the subscriptions handlers. This might be the case for a message logger.
-#       If a selet_timeout period is specified, the node must periodically 
-#       exercise messaging by either calling loop() or or mqttc.loop(). 
+#       If a selet_timeout period is specified, the node must periodically
+#       exercise messaging by either calling loop() or or mqttc.loop().
 #       ** This needs clarification **
 # mqttc is a handler for either true mqqt or vnavs fast mqqt
 #
 
-class VnavsNode():
+
+class VnavsNode:
     __slots__ = (
         "args",
         "automatically_connect",
@@ -369,7 +368,7 @@ class VnavsNode():
                         and self.automatically_handle_synchronous_messages
                     ):
                         self.handle_all_synchronous_messages()
-                    if hasattr(self, 'client_loop_code'):
+                    if hasattr(self, "client_loop_code"):
                         # used to be do_loop()
                         self.client_loop_code()
                 elif not self.wait_if_not_connected:
@@ -378,7 +377,7 @@ class VnavsNode():
                         and self.automatically_handle_synchronous_messages
                     ):
                         self.handle_all_synchronous_messages()
-                    if hasattr(self, 'client_loop_code'):
+                    if hasattr(self, "client_loop_code"):
                         # used to be do_loop()
                         self.client_loop_code()
                 if self.check_exceptions():
@@ -549,7 +548,7 @@ class VnavsNode():
                 + self.message_str(message.payload),
             )
         msg = message.payload
-        #print(f"VnavsNode.on_message() MESSAGE {msg}")
+        # print(f"VnavsNode.on_message() MESSAGE {msg}")
         if msg == "":
             payload = {}
         else:
@@ -559,7 +558,7 @@ class VnavsNode():
                 payload = {}
                 print("JSON Error", message.payload)
         subscription = self.subscriptions[message.topic]
-        #print(f"VnavsNode.on_message() PAYLOAD {payload}")
+        # print(f"VnavsNode.on_message() PAYLOAD {payload}")
         if "_sendTime" in payload:
             send_time = float(payload["_sendTime"])
             send_diff = time.time() - send_time

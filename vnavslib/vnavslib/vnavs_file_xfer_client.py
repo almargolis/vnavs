@@ -1,5 +1,3 @@
-
-
 FILE_TRANSFER_IDLE = 0
 FILE_TRANSFER_STARTED = 1
 FILE_TRANSFER_COMPLETE = 2
@@ -103,4 +101,3 @@ class FileClient(vcomms.SocketWrapperClient):
                 self.file_out.close()
                 self.transfer_state = FILE_TRANSFER_COMPLETE
                 # print("FileClient.recv_data() Transfer Complete", time.time() - self.start_time, self.file_name, file_len)
-

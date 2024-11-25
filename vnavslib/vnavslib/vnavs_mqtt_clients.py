@@ -16,12 +16,11 @@ from vnavslib import vnavs_const as vconst
 from vnavslib import vnavs_comms as vcomms
 
 
-
 SUBSCRIPTION_MODE_ALL = "a"
 SUBSCRIPTION_MODE_LATEST = "l"
 
 
-class FastMqttMessage():
+class FastMqttMessage:
     def __init__(self, topic, payload, qos=0, mid=0):
         self.topic = topic
         self.payload = payload
@@ -29,10 +28,9 @@ class FastMqttMessage():
         self.mid = mid  # this is a fast mqtt extension
 
 
-
-
 class FastMqttClient(vcomms.SocketWrapperClient):
-    __slots__ = ('on_connect', 'on_message')
+    __slots__ = ("on_connect", "on_message")
+
     def __init__(self, verbose=False):
         super().__init__(ini_section="MqttFast", verbose=verbose)
         self.on_message = None
@@ -68,12 +66,12 @@ class FastMqttClient(vcomms.SocketWrapperClient):
     # client but I am finding them confusing right now. I am simplifying
     # now and will figure out compatibility if I ever get back to
     # testing Mosquitto.
-    #def loop_forever(self):
+    # def loop_forever(self):
     #    self.select_forever()
-    #def start_thread(self):
+    # def start_thread(self):
     #    # was named loop_start()
     #    self.select_thread_start()
-    #def loop_stop(self, force=False):
+    # def loop_stop(self, force=False):
     #    # unused force parameter exists for mosquitto compatibility
     #    self.select_thread_stop()
 
@@ -140,10 +138,3 @@ class PahoClient(mqtt.Client):
 
     def subscribe(self, topic, qos, timeout=1.0, mode=SUBSCRIPTION_MODE_ALL):
         super().subscribe(topic, qos)
-
-
-
-
-
-
-

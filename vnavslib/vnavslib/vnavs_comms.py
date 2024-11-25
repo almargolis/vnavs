@@ -32,6 +32,7 @@ def host_primary_ip_address():
         s.close()
     return ip_address
 
+
 def prepare_message(
     sender_name, sender_pid, sender_seq, topic, payload, conf_request=None
 ):
@@ -71,7 +72,6 @@ class JsonNumpyEncoder(json.JSONEncoder):
             # print("JsonNumpyEncoder()", obj.__class__.__name__, obj_out.__class__.__name__)
             return obj_out
         return super().default(obj)
-
 
 
 #
@@ -139,9 +139,19 @@ def Streamer(q, q_len, host_ip, host_socket):
 # application. The ugly detals are completely hidden.
 #
 class socket_xfer:
-    __slots__ = ('capture_ct', 'f',
-              'os_socket_ip', 'os_socket_socket', 'queue', 'q_len', 'start', 'streamer',
-              'timer_ct', 'timer_skip_ct', 'timer_start')
+    __slots__ = (
+        "capture_ct",
+        "f",
+        "os_socket_ip",
+        "os_socket_socket",
+        "queue",
+        "q_len",
+        "start",
+        "streamer",
+        "timer_ct",
+        "timer_skip_ct",
+        "timer_start",
+    )
 
     def __init__(self):
         self.os_socket_ip = "192.168.8.11"
@@ -418,7 +428,7 @@ class SocketWrapper:
             msg_parts.append(str(this))
             msg_parts.append("\x00")
         msg_parts.append("\x01")
-        #print("SocketWrapper.queue_message_z()", msg_parts)
+        # print("SocketWrapper.queue_message_z()", msg_parts)
         self.queue_message_str("".join(msg_parts), s=s, QueueClass=QueueClass)
 
     def select(self, timeout=1.0):
@@ -533,7 +543,8 @@ class SocketWrapper:
         while True:
             self.select(timeout=MaxAllowableWriteLatency)
 
-#def cleanup(signum, stack_frame)
+
+# def cleanup(signum, stack_frame)
 
 
 class SocketWrapperServer(SocketWrapper):
@@ -559,7 +570,7 @@ class SocketWrapperServer(SocketWrapper):
             port=port,
             verbose=verbose,
         )
-        #signal.signal(signal.SIGHUP, cleanup)
+        # signal.signal(signal.SIGHUP, cleanup)
 
     def server(self, host=None, port=None):
         if host is not None:
@@ -745,8 +756,5 @@ class SocketWrapperClient(SocketWrapper):
         return False
 
 
-
-
 def status_info():
     print("This host IP Address:", host_primary_ip_address())
-

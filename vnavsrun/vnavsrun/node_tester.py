@@ -1,5 +1,4 @@
-
-import sys 
+import sys
 import time
 
 from vnavslib import vnavs_node as vnode
@@ -32,10 +31,16 @@ class TestSender(vnode.VnavsNode):
 
     def client_loop_code(self):
         self.msgCt += 1
-        self.publish(TEST_TOPIC, {'MessageCt': self.msgCt,})
+        self.publish(
+            TEST_TOPIC,
+            {
+                "MessageCt": self.msgCt,
+            },
+        )
         if (self.msgCt % 100) == 0:
             rate = self.msgCt / (time.time() - self.startTime)
             print(f"published {self.msgCt} @ {rate} msgs/sec")
+
 
 #
 # This is single threaded with select_timeout_secs == None.
@@ -44,7 +49,11 @@ class TestSender(vnode.VnavsNode):
 class TestReceiverSingleAsync(vnode.VnavsNode):
     def __init__(self, verbose=False):
         super().__init__(
-            subscriptions=[vnode.Subscription(TEST_TOPIC, handler=self.rmsg_test, async_delivery=True)],
+            subscriptions=[
+                vnode.Subscription(
+                    TEST_TOPIC, handler=self.rmsg_test, async_delivery=True
+                )
+            ],
             wait_if_not_connected=True,
             broker_type="F",
             single_threaded=True,
@@ -60,12 +69,19 @@ class TestReceiverSingleAsync(vnode.VnavsNode):
         if (self.msgCt % 10) == 0:
             in_msg_ct = msg["MessageCt"]
             rate = self.msgCt / (time.time() - self.startTime)
-            print(f"Received read ct: {self.msgCt}  last msg_ct: {in_msg_ct} rate: {rate} msgs/sec)")
+            print(
+                f"Received read ct: {self.msgCt}  last msg_ct: {in_msg_ct} rate: {rate} msgs/sec)"
+            )
+
 
 class TestReceiverSingleSynchronous(vnode.VnavsNode):
     def __init__(self, verbose=False):
         super().__init__(
-            subscriptions=[vnode.Subscription(TEST_TOPIC, handler=self.rmsg_test, async_delivery=False)],
+            subscriptions=[
+                vnode.Subscription(
+                    TEST_TOPIC, handler=self.rmsg_test, async_delivery=False
+                )
+            ],
             wait_if_not_connected=True,
             broker_type="F",
             single_threaded=True,
@@ -81,7 +97,9 @@ class TestReceiverSingleSynchronous(vnode.VnavsNode):
         if (self.msgCt % 10) == 0:
             in_msg_ct = msg["MessageCt"]
             rate = self.msgCt / (time.time() - self.startTime)
-            print(f"Received read ct: {self.msgCt}  last msg_ct: {in_msg_ct} rate: {rate} msgs/sec)")
+            print(
+                f"Received read ct: {self.msgCt}  last msg_ct: {in_msg_ct} rate: {rate} msgs/sec)"
+            )
 
 
 class FastMqttUtil(vnode.VnavsNode):

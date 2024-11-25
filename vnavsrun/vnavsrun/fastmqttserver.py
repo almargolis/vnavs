@@ -1,4 +1,3 @@
-
 import configparser
 import json
 import numpy as np
@@ -16,7 +15,7 @@ from vnavslib import vnavs_mqtt_clients as vmqtt
 # It supports publish/subscribe with less chance of blockage due to increased
 # speed. Use that when you need to see every message.
 # It also supports a read mode, which allows you to get the latst message
-# for a topic without scrolling through all messages, ignoring any previous messages. 
+# for a topic without scrolling through all messages, ignoring any previous messages.
 # This is essentially
 # a LIFO. Use this for topics which generate large volumes of messages
 # that you can't process.
@@ -127,7 +126,9 @@ class FastMqttServer(vcomm.SocketWrapperServer):
                 mid = 0
                 payload_dict = json.loads(payload)
                 payload_dict = vcomm.prepare_response(payload_dict, conf_request=True)
-                j = vcomm.prepare_message("FastMqtt", 0, 0, vconst.system_server, payload_dict)
+                j = vcomm.prepare_message(
+                    "FastMqtt", 0, 0, vconst.system_server, payload_dict
+                )
                 self.queue_message_z(
                     ["message", vconst.system_server, repr(mid), j], s=s
                 )
@@ -152,6 +153,7 @@ class FastMqttServer(vcomm.SocketWrapperServer):
                 s
             ] = subscription  # keep latest subscription if duplicate
             print("SUBSCRIPTIONS", topic, len(self.subscriptions[topic]))
+
 
 class MessageArchiver:
     __slots__ = ("archive_buffer", "archive_size", "archive_file")
@@ -190,10 +192,10 @@ class MessageArchiver:
         self.archive_buffer = []
         self.archive_size = 0
 
+
 def JsonShowTypes(payload):
     for key, value in payload.items():
         print(key, value.__class__.__name__, value)
-
 
 
 if __name__ == "__main__":
@@ -212,4 +214,3 @@ if __name__ == "__main__":
         s.server()
     elif sys.argv[1] == "s":
         vcomm.status_info()
-

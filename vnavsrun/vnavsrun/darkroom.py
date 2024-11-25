@@ -275,9 +275,7 @@ class ProcessStep(object):
         if new_filter_name != self.cv_filter_name:
             self.filter_selection.ReplaceValue(new_filter_name)
             self.cv_filter_name = new_filter_name
-            self.cv_specs = oc.ImageFilterCollection.image_filters[
-                self.cv_filter_name
-            ]
+            self.cv_specs = oc.ImageFilterCollection.image_filters[self.cv_filter_name]
             self.parms_specs = self.cv_specs.parms
             if self.cv_specs.annotate_code is not None:
                 annotation_control = False
@@ -699,9 +697,7 @@ class Darkroom(vmqtt.mqtt_node):
             ProcessStep.steps[0].source_im = new_image
             ProcessStep.steps[0].source_path = path
         else:
-            ProcessStep.steps[0].source_im = oc.Image(
-                im=new_image, colorcode=colorcode
-            )
+            ProcessStep.steps[0].source_im = oc.Image(im=new_image, colorcode=colorcode)
             ProcessStep.steps[0].source_path = path
         ProcessStep.steps[0].ClearInfo()
         if path is not None:

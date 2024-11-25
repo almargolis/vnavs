@@ -1,11 +1,14 @@
 import serial
 import sys
 
+
 class Botvac:
-    __slots__ = ('ser_connection', )
+    __slots__ = ("ser_connection",)
 
     def __init__(self):
-        self.ser_connection = serial.Serial("/dev/ttyUSB0", 115200, rtscts=True, dsrdtr=True, timeout=0.1)
+        self.ser_connection = serial.Serial(
+            "/dev/ttyUSB0", 115200, rtscts=True, dsrdtr=True, timeout=0.1
+        )
 
     def disconnect():
         self.ser_connection.close()
@@ -20,7 +23,6 @@ class Botvac:
         else:
             return False
 
-
     def get_rest(self):
         data = []
         while True:
@@ -30,7 +32,6 @@ class Botvac:
             print(res)
             data.append(res)
         return data
-
 
     def check_bump(self):
         self.send("GetDigitalSensors")
@@ -42,7 +43,6 @@ class Botvac:
                     return True
         return False
 
-
     def check_if_stopped(self):
         sself.send("GetMotors LeftWheel")
         res = self.get_rest()
@@ -52,6 +52,7 @@ class Botvac:
                 if parts[1] == "0":
                     return True
         return False
+
 
 def test():
     bot = Botvac()
@@ -69,7 +70,7 @@ def test():
     bot.send(move_fwd_command)
     while True:
         if bot.check_bump():
-           break
+            break
         if bot.check_if_stopped():
             bot.send(move_fwd_command)
 
@@ -81,4 +82,3 @@ def test():
 
     bot.send("TestMode Off")
     bot.disconnect()
-
