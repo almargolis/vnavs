@@ -16,6 +16,8 @@ TEST_TOPIC = "test"
 # 	by configuration, but doesn't matter because the reading is so slow.
 #
 
+# loop_sleep = 0 results in 27K msgs/sec
+# loop_sleep = 0.01 results in 80 msgs/sec
 
 class TestSender(vnode.VnavsNode):
     def __init__(self, verbose=False):
@@ -23,6 +25,7 @@ class TestSender(vnode.VnavsNode):
             subscriptions=[],
             wait_if_not_connected=False,
             broker_type="F",
+            loop_sleep=0,
             streamer=False,
             verbose=verbose,
         )
@@ -56,6 +59,7 @@ class TestReceiverSingleAsync(vnode.VnavsNode):
             ],
             wait_if_not_connected=True,
             broker_type="F",
+            loop_sleep=0.01,
             single_threaded=True,
             select_timeout_secs=None,
             streamer=False,

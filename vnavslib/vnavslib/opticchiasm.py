@@ -518,7 +518,7 @@ ImageFilter(
     "Cameraman",
     '{x_output_im} = oc.Cameraman(im_in, "{path}", "{fn}")',
     [
-        vdata.DataAttribStr("path", "/Users/almargolis/projects/vnavs/scripts"),
+        vdata.DataAttribStr("path", "./scripts"),
         vdata.DataAttribStr("fn", "test.cam"),
     ],
     Flags=[],

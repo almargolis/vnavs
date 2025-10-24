@@ -177,7 +177,7 @@ class VnavsNode:
         node_name=None,
         subscriptions=[],
         ack_topic=None,
-        loop_sleep=0.01,
+        loop_sleep=0.001,
         automatically_connect=True,
         automatically_handle_synchronous_messages=True,
         wait_if_not_connected=True,
@@ -387,6 +387,7 @@ class VnavsNode:
                     # thread can be blocked. Navigator was experiencing MANY MINUTES of message delivery
                     # delay without this. Nodes with lots of i/o in the main thread may not need this
                     # sleep. Cameraman does fine without it.
+                    # Was using 0.01 sec, just changed to 0.001 to try speeding up process.
                     time.sleep(self.loop_sleep)
             except KeyboardInterrupt:
                 self.cleanup_loop()
@@ -562,7 +563,7 @@ class VnavsNode:
         if "_sendTime" in payload:
             send_time = float(payload["_sendTime"])
             send_diff = time.time() - send_time
-            if send_diff > 5:
+            if send_diff > 120:
                 print(
                     "Node stale message {} - {} = {} {}".format(
                         time.time(), send_time, send_diff, message.topic

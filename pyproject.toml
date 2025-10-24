@@ -1,0 +1,145 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vnavs"
+version = "0.9.0"
+description = "Visually Navigating Autonomous Vehicle System - High-performance robotics framework"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "LGPL-3.0-or-later"}
+authors = [
+    {name = "Al Margolis", email = "almargolis@users.noreply.github.com"}
+]
+keywords = [
+    "robotics",
+    "autonomous-vehicles",
+    "mqtt",
+    "computer-vision",
+    "navigation",
+    "embedded-systems",
+    "raspberry-pi",
+    "ros-alternative"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: System :: Hardware",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+]
+
+dependencies = [
+    "paho-mqtt>=1.6.0",
+    "opencv-python>=4.5.0",
+    "numpy>=1.19.0",
+    "Pillow>=8.0.0",
+    "geopy>=2.0.0",
+    "pyserial>=3.5",
+    "configparser>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.2.0",
+    "pytest-cov>=2.12.0",
+    "black>=21.0",
+    "pylint>=2.8.0",
+]
+raspberry-pi = [
+    "picamera>=1.13",
+    "spidev>=3.5",
+]
+hardware = [
+    "pyfirmata>=1.1.0",
+    "pygame>=2.0.0",
+    "evdev>=1.4.0",
+    "pynmea2>=1.18.0",
+]
+all = [
+    "vnavs[dev,raspberry-pi,hardware]",
+]
+
+[project.urls]
+Homepage = "https://github.com/almargolis/vnavs"
+Repository = "https://github.com/almargolis/vnavs"
+Issues = "https://github.com/almargolis/vnavs/issues"
+
+[tool.setuptools]
+packages = ["vnavslib.vnavslib", "vnavsrun.vnavsrun"]
+
+[tool.setuptools.package-data]
+"*" = ["*.ini.example"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38', 'py39', 'py310', 'py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | vnavs\.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | node_modules
+  | temp
+  | playground
+)/
+'''
+
+[tool.pylint.messages_control]
+max-line-length = 100
+disable = [
+    "C0103",  # Invalid name (allow short variable names)
+    "R0913",  # Too many arguments
+    "R0914",  # Too many local variables
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --strict-markers"
+testpaths = [
+    "vnavslib/test",
+    "vnavsrun/test",
+]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[tool.coverage.run]
+source = ["vnavslib", "vnavsrun"]
+omit = [
+    "*/test/*",
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/vnavs.venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

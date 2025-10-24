@@ -1,0 +1,52 @@
+# VNAVS Core Dependencies
+# Python 3.8+ required
+
+# Message Passing
+paho-mqtt>=1.6.0
+
+# Computer Vision
+opencv-python>=4.5.0
+numpy>=1.19.0
+Pillow>=8.0.0
+
+# GPS and Navigation
+geopy>=2.0.0
+
+# Hardware Communication
+pyserial>=3.5
+
+# Configuration
+configparser>=5.0.0
+
+# Optional Dependencies (comment out if not needed)
+
+# Raspberry Pi Camera (RPi only)
+# picamera>=1.13
+
+# Arduino Communication
+# pyfirmata>=1.1.0
+
+# Joystick Support
+# pygame>=2.0.0
+# evdev>=1.4.0
+
+# Raspberry Pi Sense HAT (RPi only)
+# sense-hat>=2.2.0
+
+# NMEA GPS Parser
+# pynmea2>=1.18.0
+
+# SPI Communication (RPi)
+# spidev>=3.5
+
+# GUI Support (Tkinter is usually included with Python)
+# If using easytk GUI module, ensure tkinter is available
+
+# Development Dependencies (for testing and development)
+pytest>=6.2.0
+pytest-cov>=2.12.0
+black>=21.0
+pylint>=2.8.0
+
+# Python 2/3 Compatibility (legacy, being removed)
+# future>=0.18.2
