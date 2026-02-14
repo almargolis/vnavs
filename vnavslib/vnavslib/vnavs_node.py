@@ -243,7 +243,7 @@ class VnavsNode:
         self.stats = Counters()
         self.streamer = None
         if streamer:
-            self.streamer = socket_xfer()
+            self.streamer = vcomms.SocketXfer()
         if self.verbose:
             if self.single_threaded:
                 print("Single Threaded")

@@ -1,15 +1,13 @@
 import configparser
 import json
 import multiprocessing
-import os
 import queue
 import select
-import signal
 import socket
-import sys
 import threading
-import traceback
 import time
+
+import numpy as np
 
 from vnavslib import vnavs_const as vconst
 
@@ -26,7 +24,7 @@ def host_primary_ip_address():
         # doesn't even have to be reachable
         s.connect((vconst.NON_ROUTABLE_IP, 1))
         ip_address = s.getsockname()[0]
-    except:
+    except Exception:
         ip_address = vconst.host_LOCAL
     finally:
         s.close()
@@ -85,7 +83,7 @@ class JsonNumpyEncoder(json.JSONEncoder):
 # We therefore manage memory to avoid hitting the swap disk.
 # Getting
 #
-def Streamer(q, q_len, host_ip, host_socket):
+def lifo_streamer(q, q_len, host_ip, host_socket):
     lifo = []
     while True:
         # This process runs forever
@@ -138,7 +136,7 @@ def Streamer(q, q_len, host_ip, host_socket):
 # The client application just writes as if this were a reliable, single-threaded
 # application. The ugly detals are completely hidden.
 #
-class socket_xfer:
+class SocketXfer:
     __slots__ = (
         "capture_ct",
         "f",
@@ -161,14 +159,14 @@ class socket_xfer:
         self.queue = multiprocessing.Queue()
         self.q_len = multiprocessing.Value("i", 0)
         self.streamer = multiprocessing.Process(
-            target=Streamer,
+            target=lifo_streamer,
             args=(self.queue, self.q_len, self.os_socket_ip, self.os_socket_socket),
         )
         self.streamer.daemon = True  # causes child process to terminate with its parent
         self.streamer.start()
         self.timer_ct = 0
         self.timer_skip_ct = 0
-        self.timer_start = time.clock()
+        self.timer_start = time.perf_counter()
         self.f = open("temp.text", "w")
 
     def stop(self):
@@ -176,7 +174,7 @@ class socket_xfer:
 
     def write(self, stream):
         self.capture_ct += 1
-        self.f.write("%d\n" % (self.capture_ct))
+        self.f.write(f"{self.capture_ct}\n")
         self.f.flush()
         if not self.streamer.is_alive():
             self.timer_skip_ct += 1
@@ -190,10 +188,11 @@ class socket_xfer:
         self.queue.put(stream)
         self.timer_ct += 1
         if self.timer_ct >= 10:
-            timer_stop = time.clock()
+            timer_stop = time.perf_counter()
             print(
-                "Qd %d in %f secs SKIPPED %d"
-                % (self.timer_ct, timer_stop - self.timer_start, self.timer_skip_ct)
+                f"Qd {self.timer_ct} in "
+                f"{timer_stop - self.timer_start:f} secs "
+                f"SKIPPED {self.timer_skip_ct}"
             )
             self.timer_ct = 0
             self.timer_skip_ct = 0
@@ -261,6 +260,7 @@ class QueueOne:
 
 class SocketWrapper:
     __slots__ = (
+        "_stop_event",
         "buffer_len",
         "config",
         "debug",
@@ -304,9 +304,8 @@ class SocketWrapper:
                 self.socket_port = int(self.config.get(ini_section, "port"))
             except configparser.NoSectionError:
                 print(
-                    "Ini section {} not found, using default host/port {}/{}".format(
-                        ini_section, host, port
-                    )
+                    f"Ini section {ini_section} not found,"
+                    f" using default host/port {host}/{port}"
                 )
 
         # This can be a server or client. Either way, self.os_socket is the primary socket
@@ -328,6 +327,7 @@ class SocketWrapper:
         # Trying tcpSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         # per: https://stackoverflow.com/questions/19071512/socket-error-errno-48-address-already-in-use
         #
+        self._stop_event = threading.Event()
         self.is_server = is_server
         self.is_zero_one_protocol = is_zero_one_protocol
         self.message_in_ct = 0
@@ -378,8 +378,9 @@ class SocketWrapper:
 
     def print_error(self, loc, e):
         print(
-            "Exception @ %s: %s [%s] %s"
-            % (loc, e.__class__.__name__, e.errno, e.strerror)
+            f"Exception @ {loc}: "
+            f"{e.__class__.__name__} [{e.errno}] "
+            f"{e.strerror}"
         )
 
     def process_received_packet(self, s, data):
@@ -396,7 +397,7 @@ class SocketWrapper:
             del self.fragments[s]
         messages = data.split(b"\x01")  # split data block into messages
         # print("SocketWrapper.process_received_packet()", data, "**", messages)
-        if data[-1] != b"\x01":
+        if data[-1:] != b"\x01":
             # the last message isn't complete, save the fragment
             fragment = messages.pop()
             self.fragments[s] = fragment
@@ -410,26 +411,26 @@ class SocketWrapper:
             # print("SocketWrapper.process_received_packet()", this_message, parts)
             self.process_message(s, parts)
 
-    def queue_message_str(self, message, s=None, QueueClass=queue.Queue):
+    def queue_message_str(self, message, s=None, queue_class=queue.Queue):
         # message is a string
         # print("ZZZ - Q request")
         if s is None:  # This should only be true if self.is_server is False
             s = self.os_socket
-        if not s in self.output_queues:
-            self.output_queues[s] = QueueClass()
+        if s not in self.output_queues:
+            self.output_queues[s] = queue_class()
         self.output_queues[s].put(message)
         self.message_out_ct += 1
         if s not in self.output_sockets:
             self.output_sockets.append(s)
 
-    def queue_message_z(self, parts, s=None, QueueClass=queue.Queue):
+    def queue_message_z(self, parts, s=None, queue_class=queue.Queue):
         msg_parts = []
         for this in parts:
             msg_parts.append(str(this))
             msg_parts.append("\x00")
         msg_parts.append("\x01")
         # print("SocketWrapper.queue_message_z()", msg_parts)
-        self.queue_message_str("".join(msg_parts), s=s, QueueClass=QueueClass)
+        self.queue_message_str("".join(msg_parts), s=s, queue_class=queue_class)
 
     def select(self, timeout=1.0):
         # This method may be the primary independent worker in threaded mode.
@@ -490,7 +491,7 @@ class SocketWrapper:
                     if self.is_zero_one_protocol:
                         self.process_received_packet(s, data)
                     else:
-                        self.RecvData(s, data)
+                        self.recv_data(s, data)
                 else:
                     # Interpret empty result as closed connection
                     self.close_client_connection(s)
@@ -532,7 +533,7 @@ class SocketWrapper:
                 self.disconnect()
                 raise
 
-    def select_forever(self, MaxAllowableWriteLatency=0.001):
+    def select_forever(self, max_allowable_write_latency=0.001):
         # This method is the root os thread start()
         #
         # This error 9 occurs in the OS select call for a client if the server goes
@@ -540,8 +541,8 @@ class SocketWrapper:
         # running but not communicating. This is now trapped in Loop() by checking
         # thread.is_alive().
         # error: [Errno 9] Bad file descriptor
-        while True:
-            self.select(timeout=MaxAllowableWriteLatency)
+        while not self._stop_event.is_set():
+            self.select(timeout=max_allowable_write_latency)
 
 
 # def cleanup(signum, stack_frame)
@@ -559,7 +560,8 @@ class SocketWrapperServer(SocketWrapper):
         port=vconst.DEFAULT_PORT,
         verbose=False,
     ):
-        # if ini_section is specified, it is used. Else specify host/port. host of '' binds to all avalable networks.
+        # if ini_section is specified, it is used. Else specify
+        # host/port. host of '' binds to all available networks.
         super().__init__(
             buffer_len=buffer_len,
             host="",
@@ -583,8 +585,14 @@ class SocketWrapperServer(SocketWrapper):
             displayhost = "INADDR_ANY"
         else:
             displayhost = self.socket_host
-        print("Server listening on host %s, port %s." % (displayhost, self.socket_port))
-        print("Server listening on port %s." % (repr(self.os_socket.getsockname()),))
+        print(
+            f"Server listening on host {displayhost}, "
+            f"port {self.socket_port}."
+        )
+        print(
+            f"Server listening on port "
+            f"{self.os_socket.getsockname()!r}."
+        )
         while True:
             self.select(timeout=None)
 
@@ -737,7 +745,8 @@ class SocketWrapperClient(SocketWrapper):
     def thread_stop(self):
         # was named select_thread_stop()
         if self.thread is not None:
-            self.thread.stop()
+            self._stop_event.set()
+            self.thread.join()
             self.thread = None
 
     def blocking_write_socket(self, msg):
