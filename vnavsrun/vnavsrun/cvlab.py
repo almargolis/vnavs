@@ -79,11 +79,11 @@ class ProcessStep:
     app = None
     steps = []
     process_file_extension = "drk"
-    process_file_types = (("Darkroom Process", "*." + process_file_extension),)
+    process_file_types = (("CvLab Process", "*." + process_file_extension),)
     python_file_extension = "py"
-    python_file_types = (("Darkroom Python", "*." + python_file_extension),)
+    python_file_types = (("CvLab Python", "*." + python_file_extension),)
     cameraman_file_extension = "cam"
-    cameraman_file_types = (("Darkroom Python", "*." + python_file_extension),)
+    cameraman_file_types = (("CvLab Python", "*." + python_file_extension),)
     imports = []  # imports for exec or script
     # imports.append(('__builtins__', __builtins__, None))
     imports.append(("cv2", cv2, None))
@@ -546,7 +546,7 @@ class ProcessStep:
         return
 
 
-class Darkroom(vmqtt.VnavsNode):
+class CvLab(vmqtt.VnavsNode):
     __slots__ = (
         "camera_iso",
         "camera_last_filename",
@@ -845,7 +845,7 @@ class Darkroom(vmqtt.VnavsNode):
         if self.gui_update_mode:
             return
         tabid = self.notebook.tkw.select()
-        print("Darkroom.OnTabSelected()", tabid, self.notebook_add_id)
+        print("CvLab.OnTabSelected()", tabid, self.notebook_add_id)
         if tabid == self.notebook_add_id:
             # The plus tab was clicked, add a new tab just before that.
             # We want the new tab to be selected but TK ignores select() here,
@@ -864,7 +864,7 @@ class Darkroom(vmqtt.VnavsNode):
         # are processing steps because of the add tab (self.notebook_add_id)
         #
         target_step = ProcessStep.steps[ix]
-        print("darkroom.DeleteProcessStep() BEGIN", ix)
+        print("cvlab.DeleteProcessStep() BEGIN", ix)
         self.gui_update_mode = True
         self.notebook.delete_tab(ix)
         target_step.thumbnail.destroy()
@@ -872,12 +872,12 @@ class Darkroom(vmqtt.VnavsNode):
         for adjust_ix, this_step in enumerate(ProcessStep.steps[ix:]):
             this_step.ix = ix + adjust_ix
             this_step.tab_title = f"Step {this_step.ix}"
-            print("darkroom.DeleteProcessStep() rename tab", ix, this_step.tab_title)
+            print("cvlab.DeleteProcessStep() rename tab", ix, this_step.tab_title)
             self.notebook.tkw.tab(this_step.ix, text=this_step.tab_title)
         self.step_execution_needed = True
         self.gui_update_mode = False
         ProcessStep.steps[ix - 1].select_tab(None)
-        print("darkroom.DeleteProcessStep() END", len(ProcessStep.steps))
+        print("cvlab.DeleteProcessStep() END", len(ProcessStep.steps))
 
     #
     # All work gets done here in DoLoop() in the main thread.
@@ -965,5 +965,5 @@ class Darkroom(vmqtt.VnavsNode):
 
 
 if __name__ == "__main__":
-    m = Darkroom()
+    m = CvLab()
     m.main_loop()

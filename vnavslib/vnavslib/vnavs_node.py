@@ -121,7 +121,7 @@ class Counters:
 #               the node's purpose, not communications.
 #
 # automatically_connect=False is for nodes that don't want automatic connection managment.
-#       One eample is darkroom which may run stand-alone or as a nhode communivating with bots.
+#       One eample is cvlab which may run stand-alone or as a nhode communivating with bots.
 # wait_if_not_connected=True is for nodes that have nothing to do if no message server
 #       is available. do_loop() is blocked.
 # 	    If set to False, the node can continue critical functions like managing actuators,

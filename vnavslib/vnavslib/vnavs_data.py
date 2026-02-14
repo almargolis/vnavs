@@ -4,7 +4,7 @@ import os
 
 #
 # This is a standardized data dictionary for vnavs.
-# The base was developed for the filter parms in darkroom and then
+# The base was developed for the filter parms in cvlab and then
 # opticchiasm. It was then used to replace the simple dictionary
 # for cameraman orders and the goal is for it to eventually support
 # all vnavs messages. This will be used for message validation and

@@ -68,9 +68,9 @@ class Notebook(tkinter.Frame):
             self.tab_labels_widget[label_col].grid(column=label_col, row=0)
         # The new tab is not visible, unless its the first tab.
         # This is the behavior of ttk.Notebook.
-        # We cannot run select() immediately because the client (darkroom)
+        # We cannot run select() immediately because the client (cvlab)
         # won't get it. Waiting for 100 is too short. after_idle() didn't solve.
-        # ttk.Notebook does something with the same effect and darkroom depends on
+        # ttk.Notebook does something with the same effect and cvlab depends on
         # that. In general, it seems to make sense to assure that the client
         # applications gets the initial select event.
         if len(self.tab_labels_text) == 1:
@@ -139,10 +139,10 @@ class Notebook(tkinter.Frame):
         #     attribute _w.
         #   self.tab_labels_text is the tab caption. It is used as the tabid
         #     for select() and OnTabSelected events.
-        #   self.tab_frames is the tab content frame. It is used in darkroom
+        #   self.tab_frames is the tab content frame. It is used in cvlab
         #     to select the tab for a process step.
         #
-        # The above were in use by darkroom and mission_control using
+        # The above were in use by cvlab and mission_control using
         # ttk.Notebook. This works identically.
         #
         if isinstance(tabid, int):
