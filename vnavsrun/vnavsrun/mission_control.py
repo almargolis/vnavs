@@ -26,7 +26,7 @@ except ImportError:
 from vnavsrun import engineer_1
 from vnavsrun import helmsman
 from vnavsrun import navigator
-from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_node as vmqtt
 from vnavslib import vnavs_const as vconst
 from vnavslib import vnavs_comms as vcomms
 from vnavslib import vnavs_data as vdata
@@ -61,7 +61,7 @@ TRANSFER_TYPE_IMAGE = "i"  # Transfering image, display when done
 TRANSFER_TYPE_LOG = "l"  # Transfering mission log, start image download when done
 
 
-class MissionControl(vmqtt.mqtt_node):
+class MissionControl(vmqtt.VnavsNode):
     def __init__(self, Verbose=False):
         # Verbose = True
         super().__init__(

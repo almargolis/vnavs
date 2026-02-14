@@ -26,7 +26,7 @@ from vnavslib.easytk import (
     OVERLAY_COL,
 )
 from vnavslib import opticchiasm as oc
-from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_node as vmqtt
 from vnavslib import vnavs_const as vconst
 from vnavslib import vnavs_data as vdata
 
@@ -546,7 +546,7 @@ class ProcessStep(object):
         return
 
 
-class Darkroom(vmqtt.mqtt_node):
+class Darkroom(vmqtt.VnavsNode):
     __slots__ = (
         "camera_iso",
         "camera_last_filename",

@@ -13,7 +13,7 @@ import time
 import traceback
 
 from vnavslib import vnavs_comms as vcomms
-from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_node as vmqtt
 from vnavslib import vnavs_const as vconst
 from vnavslib import vnavs_data as vdata
 
@@ -62,7 +62,7 @@ class CameramanOrdersDict(vdata.Dict):
         self.AddAttrib(vdata.DataAttribInt("shutter_speed", 0))
 
 
-class cameraman(vmqtt.mqtt_node):
+class cameraman(vmqtt.VnavsNode):
     __slots__ = (
         "burst_fps_ct",
         "burst_fps_rate",

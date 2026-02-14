@@ -10,7 +10,7 @@ import time
 Arduino = None
 util = None
 
-from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_node as vmqtt
 from vnavslib import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
@@ -371,7 +371,7 @@ HELMSMAN_I_ACCUMULATOR = "i_accumulator"
 HELMSMAN_DERIVATIVE = "derivative"
 
 
-class helmsman(vmqtt.mqtt_node):
+class helmsman(vmqtt.VnavsNode):
     def __init__(self):
         self.orders_q = queue.Queue(10)
         super().__init__(

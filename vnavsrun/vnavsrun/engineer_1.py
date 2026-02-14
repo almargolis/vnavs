@@ -9,7 +9,7 @@ import sys
 import time
 
 
-from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_node as vmqtt
 from vnavslib import vnavs_const as vconst
 import paho.mqtt.client as mqtt
 
@@ -668,7 +668,7 @@ class GpsDevice(object):
         return False
 
 
-class engineer_1(vmqtt.mqtt_node):
+class engineer_1(vmqtt.VnavsNode):
     def __init__(self, Verbose=False):
         global dev_sense_hat
         import dev_sense_hat

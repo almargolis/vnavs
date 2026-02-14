@@ -15,7 +15,7 @@ import sys
 import time
 
 from vnavslib import vnavs_comms as vcomms
-from vnavslib import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_node as vmqtt
 from vnavslib import vnavs_const as vconst
 from vnavslib import vnavs_data as vdata
 from vnavsrun import engineer_1
@@ -1061,7 +1061,7 @@ class NavStep(object):
         self.derivative = 0
 
 
-class navigator(vmqtt.mqtt_node):
+class navigator(vmqtt.VnavsNode):
     def __init__(self, Verbose=False):
         super().__init__(
             Subscriptions=[
