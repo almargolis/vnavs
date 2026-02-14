@@ -80,12 +80,12 @@ class ProcessStep:
     )
     app = None
     steps = []
-    process_file_extension = "drk"
-    process_file_types = (("CvLab Process", "*." + process_file_extension),)
+    process_file_extension = "cvp"
+    process_file_types = (("CvPipeline Process", "*." + process_file_extension),)
     python_file_extension = "py"
-    python_file_types = (("CvLab Python", "*." + python_file_extension),)
+    python_file_types = (("CvPipeline Python", "*." + python_file_extension),)
     cameraman_file_extension = "cam"
-    cameraman_file_types = (("CvLab Python", "*." + python_file_extension),)
+    cameraman_file_types = (("CvPipeline Python", "*." + python_file_extension),)
     imports = []  # imports for exec or script
     # imports.append(('__builtins__', __builtins__, None))
     imports.append(("cv2", cv2, None))
@@ -548,7 +548,7 @@ class ProcessStep:
         return
 
 
-class CvLab(vmqtt.VnavsNode):
+class CvPipeline(vmqtt.VnavsNode):
     __slots__ = (
         "camera_iso",
         "camera_last_filename",
@@ -783,18 +783,18 @@ class CvLab(vmqtt.VnavsNode):
         self.loading = False
 
     def save_process_file(self):
-        drk_fn = self.status_frame.do_file_save_as_name_dialog(
+        cvp_fn = self.status_frame.do_file_save_as_name_dialog(
             directory=self.scripts_dir,
             file_name=self.load_process_file_name,
             file_types=ProcessStep.process_file_types,
         )
-        fn_root, fn_ext = os.path.splitext(drk_fn)
-        drk_f = open(drk_fn, "w")
+        fn_root, fn_ext = os.path.splitext(cvp_fn)
+        cvp_f = open(cvp_fn, "w")
         for this_step in ProcessStep.steps:
-            drk_f.write(f"/{this_step.cv_filter_name}\n")
+            cvp_f.write(f"/{this_step.cv_filter_name}\n")
             for this_key, this_value in this_step.parm_values.items():
-                drk_f.write(f"parm.{this_key}={this_value}\n")
-        drk_f.close()
+                cvp_f.write(f"parm.{this_key}={this_value}\n")
+        cvp_f.close()
         cam_fn = fn_root + "." + ProcessStep.cameraman_file_extension
         py_fn = fn_root + "." + ProcessStep.python_file_extension
         ProcessStep.write_cameraman(cam_fn)
@@ -847,7 +847,7 @@ class CvLab(vmqtt.VnavsNode):
         if self.gui_update_mode:
             return
         tabid = self.notebook.tkw.select()
-        print("CvLab.OnTabSelected()", tabid, self.notebook_add_id)
+        print("CvPipeline.OnTabSelected()", tabid, self.notebook_add_id)
         if tabid == self.notebook_add_id:
             # The plus tab was clicked, add a new tab just before that.
             # We want the new tab to be selected but TK ignores select() here,
@@ -866,7 +866,7 @@ class CvLab(vmqtt.VnavsNode):
         # are processing steps because of the add tab (self.notebook_add_id)
         #
         target_step = ProcessStep.steps[ix]
-        print("cvlab.DeleteProcessStep() BEGIN", ix)
+        print("cvpipeline.DeleteProcessStep() BEGIN", ix)
         self.gui_update_mode = True
         self.notebook.delete_tab(ix)
         target_step.thumbnail.destroy()
@@ -874,12 +874,12 @@ class CvLab(vmqtt.VnavsNode):
         for adjust_ix, this_step in enumerate(ProcessStep.steps[ix:]):
             this_step.ix = ix + adjust_ix
             this_step.tab_title = f"Step {this_step.ix}"
-            print("cvlab.DeleteProcessStep() rename tab", ix, this_step.tab_title)
+            print("cvpipeline.DeleteProcessStep() rename tab", ix, this_step.tab_title)
             self.notebook.tkw.tab(this_step.ix, text=this_step.tab_title)
         self.step_execution_needed = True
         self.gui_update_mode = False
         ProcessStep.steps[ix - 1].select_tab(None)
-        print("cvlab.DeleteProcessStep() END", len(ProcessStep.steps))
+        print("cvpipeline.DeleteProcessStep() END", len(ProcessStep.steps))
 
     #
     # All work gets done here in DoLoop() in the main thread.
@@ -967,5 +967,5 @@ class CvLab(vmqtt.VnavsNode):
 
 
 if __name__ == "__main__":
-    m = CvLab()
+    m = CvPipeline()
     m.main_loop()

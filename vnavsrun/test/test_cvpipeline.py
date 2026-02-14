@@ -5,7 +5,7 @@ import numpy as np
 from vnavslib import image_filters
 from vnavslib import opticchiasm as oc
 from ezcomms import vnavs_data as vdata
-from vnavsrun import cvlab
+from vnavsrun import cvpipeline
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ _PROCESS_STEP_SLOT_DEFAULTS = {
 
 def make_process_step(**overrides):
     """Create a ProcessStep without invoking __init__ (which needs Tkinter)."""
-    ps = object.__new__(cvlab.ProcessStep)
+    ps = object.__new__(cvpipeline.ProcessStep)
     defaults = {k: v for k, v in _PROCESS_STEP_SLOT_DEFAULTS.items()}
     # Give each instance its own mutable containers
     defaults["info_data"] = []
@@ -95,20 +95,20 @@ _saved_app = None
 
 def _save_class_state():
     global _saved_steps, _saved_app
-    _saved_steps = cvlab.ProcessStep.steps
-    _saved_app = cvlab.ProcessStep.app
+    _saved_steps = cvpipeline.ProcessStep.steps
+    _saved_app = cvpipeline.ProcessStep.app
 
 
 def _restore_class_state():
-    cvlab.ProcessStep.steps = _saved_steps
-    cvlab.ProcessStep.app = _saved_app
+    cvpipeline.ProcessStep.steps = _saved_steps
+    cvpipeline.ProcessStep.app = _saved_app
 
 
 def _with_clean_class_state(fn):
     """Decorator that saves/restores ProcessStep class state around a test."""
     def wrapper(*args, **kwargs):
         _save_class_state()
-        cvlab.ProcessStep.steps = []
+        cvpipeline.ProcessStep.steps = []
         try:
             return fn(*args, **kwargs)
         finally:
@@ -271,7 +271,7 @@ def test_get_code_str_with_data_attrib_int_parameter():
 def test_get_code_str_with_annotation_shown():
     fname = "_test_annot_show"
     try:
-        annot_parm = vdata.DataAttribBoolean(cvlab.SHOW_ANNOTATION, "True")
+        annot_parm = vdata.DataAttribBoolean(cvpipeline.SHOW_ANNOTATION, "True")
         filt = _make_test_filter(
             fname,
             "{x_output_im} = im_in.copy()",
@@ -294,7 +294,7 @@ def test_get_code_str_with_annotation_shown():
 def test_get_code_str_with_annotation_hidden():
     fname = "_test_annot_hide"
     try:
-        annot_parm = vdata.DataAttribBoolean(cvlab.SHOW_ANNOTATION, "False")
+        annot_parm = vdata.DataAttribBoolean(cvpipeline.SHOW_ANNOTATION, "False")
         filt = _make_test_filter(
             fname,
             "{x_output_im} = im_in.copy()",
@@ -361,7 +361,7 @@ def test_execute_step_basic_image_filter():
                 (MockLabel(), MockLabel()),
             ],
         )
-        cvlab.ProcessStep.steps = [ps]
+        cvpipeline.ProcessStep.steps = [ps]
         ps.execute_step()
         assert ps.exec_im is not None
         assert ps.exec_im.im.shape == (10, 10, 3)
@@ -403,7 +403,7 @@ def test_execute_step_two_step_pipeline():
             parm_values={},
             info_widgets=[],
         )
-        cvlab.ProcessStep.steps = [step0, step1]
+        cvpipeline.ProcessStep.steps = [step0, step1]
         step0.execute_step()
         step1.execute_step()
         assert step1.exec_im is not None
@@ -433,7 +433,7 @@ def test_execute_step_runtime_error_shows_traceback():
             deposition=deposition_label,
             info_widgets=[],
         )
-        cvlab.ProcessStep.steps = [ps]
+        cvpipeline.ProcessStep.steps = [ps]
         ps.execute_step()
         assert ps.exec_im is None
         assert "boom" in deposition_label.last_value
@@ -461,7 +461,7 @@ def test_execute_step_updates_execution_time():
             execution_time=exec_time_label,
             info_widgets=[],
         )
-        cvlab.ProcessStep.steps = [ps]
+        cvpipeline.ProcessStep.steps = [ps]
         ps.execute_step()
         assert exec_time_label.last_value is not None
         assert "ms" in exec_time_label.last_value
@@ -492,7 +492,7 @@ def test_execute_step_populates_info_widgets():
             info_data=[("Speed", "42"), ("Quality", "High")],
             info_widgets=[(lbl0, val0), (lbl1, val1)],
         )
-        cvlab.ProcessStep.steps = [ps]
+        cvpipeline.ProcessStep.steps = [ps]
         ps.execute_step()
         assert lbl0.last_value == "Speed"
         assert val0.last_value == "42"
@@ -527,9 +527,9 @@ def test_execute_all_steps_calls_each_step():
                 info_widgets=[],
             )
             steps.append(ps)
-        cvlab.ProcessStep.steps = steps
+        cvpipeline.ProcessStep.steps = steps
         # execute_all_steps is a classmethod
-        cvlab.ProcessStep.execute_all_steps()
+        cvpipeline.ProcessStep.execute_all_steps()
         # Each step should have had its execution_time set
         for ps in steps:
             assert ps.execution_time.last_value is not None
@@ -539,11 +539,11 @@ def test_execute_all_steps_calls_each_step():
 
 
 # ---------------------------------------------------------------------------
-# Tests: CvLab.do_cameraman_pic_ready
+# Tests: CvPipeline.do_cameraman_pic_ready
 # ---------------------------------------------------------------------------
 
 def test_do_cameraman_pic_ready_stores_payload():
-    dr = object.__new__(cvlab.CvLab)
+    dr = object.__new__(cvpipeline.CvPipeline)
     dr.last_pic_payload = None
     payload = {"filename": "test.jpg", "iso": 800}
     dr.do_cameraman_pic_ready(payload)
@@ -551,7 +551,7 @@ def test_do_cameraman_pic_ready_stores_payload():
 
 
 def test_do_cameraman_pic_ready_overwrites_previous():
-    dr = object.__new__(cvlab.CvLab)
+    dr = object.__new__(cvpipeline.CvPipeline)
     dr.last_pic_payload = {"old": True}
     new_payload = {"filename": "new.jpg"}
     dr.do_cameraman_pic_ready(new_payload)
@@ -560,18 +560,18 @@ def test_do_cameraman_pic_ready_overwrites_previous():
 
 
 # ---------------------------------------------------------------------------
-# Tests: .drk file format parsing
+# Tests: .cvp file format parsing
 # ---------------------------------------------------------------------------
 
-def test_drk_parse_slash_prefix_becomes_filter_name(tmp_path):
+def test_cvp_parse_slash_prefix_becomes_filter_name(tmp_path):
     """'/' prefix lines become filter names."""
-    drk_file = tmp_path / "test.drk"
-    drk_file.write_text("/Image\nparm.Image_threshold=42\n")
+    cvp_file = tmp_path / "test.cvp"
+    cvp_file.write_text("/Image\nparm.Image_threshold=42\n")
     # Parse manually the same way load_process_file does
     filters = []
     current_filter = None
     current_parms = {}
-    f = open(str(drk_file), "r")
+    f = open(str(cvp_file), "r")
     for ln in f:
         ln = ln.strip()
         if ln == "":
@@ -594,14 +594,14 @@ def test_drk_parse_slash_prefix_becomes_filter_name(tmp_path):
     assert filters[0][0] == "Image"
 
 
-def test_drk_parse_parm_key_value(tmp_path):
+def test_cvp_parse_parm_key_value(tmp_path):
     """'parm.key=value' lines parse correctly (strips 5-char 'parm.' prefix)."""
-    drk_file = tmp_path / "test.drk"
-    drk_file.write_text("/MyFilter\nparm.threshold=128\nparm.mode=fast\n")
+    cvp_file = tmp_path / "test.cvp"
+    cvp_file.write_text("/MyFilter\nparm.threshold=128\nparm.mode=fast\n")
     filters = []
     current_filter = None
     current_parms = {}
-    f = open(str(drk_file), "r")
+    f = open(str(cvp_file), "r")
     for ln in f:
         ln = ln.strip()
         if ln == "":
@@ -623,14 +623,14 @@ def test_drk_parse_parm_key_value(tmp_path):
     assert filters[0][1] == {"threshold": "128", "mode": "fast"}
 
 
-def test_drk_parse_empty_lines_skipped(tmp_path):
+def test_cvp_parse_empty_lines_skipped(tmp_path):
     """Empty/whitespace lines are skipped."""
-    drk_file = tmp_path / "test.drk"
-    drk_file.write_text("/FilterA\n\n   \n/FilterB\n")
+    cvp_file = tmp_path / "test.cvp"
+    cvp_file.write_text("/FilterA\n\n   \n/FilterB\n")
     filters = []
     current_filter = None
     current_parms = {}
-    f = open(str(drk_file), "r")
+    f = open(str(cvp_file), "r")
     for ln in f:
         ln = ln.strip()
         if ln == "":

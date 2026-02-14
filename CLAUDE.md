@@ -17,10 +17,10 @@ pytest vnavslib/test
 pytest vnavsrun/test
 
 # Run a single test file
-pytest vnavsrun/test/test_cvlab.py -v
+pytest vnavsrun/test/test_cvpipeline.py -v
 
 # Run a single test function
-pytest vnavsrun/test/test_cvlab.py::test_clear_info_empties_existing_list -v
+pytest vnavsrun/test/test_cvpipeline.py::test_clear_info_empties_existing_list -v
 
 # Format code
 black .
@@ -36,7 +36,7 @@ pylint vnavslib/vnavslib/ vnavsrun/vnavsrun/
 - **`ezcomms`** (external package, `~/projects/published/ezcomms`) — Communication and data layer: `vnavs_node.py`, `vnavs_comms.py`, `vnavs_mqtt_clients.py`, `vnavs_data.py`, `vnavs_const.py`, `vnavs_file_xfer_client.py`. Installed via `pip install -e`.
 - **`vnavslib/vnavslib/`** — Vision pipeline and hardware abstraction (opticchiasm, image_filters, image_analyzer, cv_notes, joystick, macbookcamera, etc.)
 - **`vnavsrun/vnavsrun/`** — Application-level nodes (servers, controllers, GUIs)
-- Tests: `vnavsrun/test/` (25 tests in test_cvlab.py), ezcomms has its own tests (26 tests)
+- Tests: `vnavsrun/test/` (25 tests in test_cvpipeline.py), ezcomms has its own tests (26 tests)
 
 ### Communication Layer (ezcomms)
 
@@ -59,12 +59,12 @@ The vision system is split across four modules:
 - **`image_analyzer.py`** — `ImageAnalyzer` class for standalone image analysis (line detection, contour classification) plus helper functions (`calc_rect_centerline`, `color_key`, `filter_contours`, etc.).
 - **`cv_notes.py`** — Unused/experimental code kept for reference (Robogames race logic, ColorBalance, thinning algorithms, etc.).
 
-`cvlab.py` (in vnavsrun) is the GUI editor for building filter pipelines using these modules.
+`cvpipeline.py` (in vnavsrun) is the GUI editor for building filter pipelines using these modules.
 
 ### Key Patterns
 
 - **`__slots__` everywhere** — All domain classes use `__slots__` for memory efficiency on embedded platforms.
-- **Class-level state on ProcessStep** — `ProcessStep.steps` (list) and `ProcessStep.app` (in `cvlab.py`) are class variables shared across instances, representing the global pipeline state. Tests must save/restore these.
+- **Class-level state on ProcessStep** — `ProcessStep.steps` (list) and `ProcessStep.app` (in `cvpipeline.py`) are class variables shared across instances, representing the global pipeline state. Tests must save/restore these.
 - **Subscription modes** — LIFO (keep only latest, for sensors) vs FIFO (all messages, for commands), configured per-subscription via `VnavsNode`.
 - **Message metadata** — Every published message gets `_topic`, `_sender`, `_sendTime`, `_sendSeq` automatically.
 - **Threading** — Multi-threaded by default; single-threaded mode for Tkinter GUI apps (configured via `single_threaded=True` in VnavsNode).
@@ -72,7 +72,7 @@ The vision system is split across four modules:
 
 ### Testing Classes With Tkinter Dependencies
 
-Classes like `ProcessStep` and `CvLab` have `__init__` methods that create GUI widgets. Tests bypass this using `object.__new__(ClassName)` to allocate without calling `__init__`, then manually set `__slots__` attributes. See `test_cvlab.py` for the `make_process_step()` factory pattern and `MockLabel`/`MockCanvas` stand-ins.
+Classes like `ProcessStep` and `CvPipeline` have `__init__` methods that create GUI widgets. Tests bypass this using `object.__new__(ClassName)` to allocate without calling `__init__`, then manually set `__slots__` attributes. See `test_cvpipeline.py` for the `make_process_step()` factory pattern and `MockLabel`/`MockCanvas` stand-ins.
 
 ## Coding Conventions
 
