@@ -4,12 +4,12 @@ import os
 
 if (len(sys.argv) >= 2) and (sys.argv[1] == "gui"):
     from PIL import ImageTk, Image
-    from vnavslib import easytk
-    from vnavslib.easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+    from eztk import eztk
+    from eztk.eztk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
 else:
     ImageTk = None
     Image = None
-    easytk = None
+    eztk = None
 
 import threading
 import time
@@ -148,7 +148,7 @@ class MissionControl(vmqtt.VnavsNode):
         # this one value and moved on since there doesn't seem to be any downside.
         self.file_client = vnavs_file_xfer_client.FileClient(buffer_len=150000, verbose=False)
 
-        self.tk = easytk.EasyTk(debug=True)
+        self.tk = eztk.EasyTk(debug=True)
         self.tk.tkw.title("VNAVS Mission Control")
         self.status_frame = self.tk.add_label_frame("Status", row=1)
         self.thumbnail_frame = self.tk.add_label_frame("Thumbnails", row=2)

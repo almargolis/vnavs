@@ -13,7 +13,7 @@ from vnavsrun import cvlab
 # ---------------------------------------------------------------------------
 
 class MockLabel:
-    """Stand-in for an easytk label widget."""
+    """Stand-in for an eztk label widget."""
 
     def __init__(self):
         self.last_value = None
@@ -23,7 +23,7 @@ class MockLabel:
 
 
 class MockCanvas:
-    """Stand-in for an easytk canvas widget."""
+    """Stand-in for an eztk canvas widget."""
 
     def __init__(self):
         self.last_source_im = None

@@ -76,7 +76,7 @@ Classes like `ProcessStep` and `CvLab` have `__init__` methods that create GUI w
 - **PEP 8 snake_case** for all methods and parameters (ongoing modernization from CamelCase)
 - **`class Foo:` not `class Foo(object):`** — Python 3 style
 - Black formatter with 88 char line length
-- easytk widget API parameters (`OnClick`, `OnTabSelected`, `Selection`, `Where`) keep their CamelCase — that's easytk's API, not ours
+- eztk widget API parameters (`OnClick`, `OnTabSelected`, `Selection`, `Where`) keep their CamelCase — that's eztk's API, not ours
 - Constants are UPPER_SNAKE_CASE
 - Tests use plain `assert` statements (no unittest classes)
 - **Prefer dot-notation access over `from` imports** — Import modules, not their contents. Access names via `module.name` to keep the namespace explicit. This applies especially to project-internal code. The exception is widely established external conventions (e.g., `from PIL import Image`, `import numpy as np`) where `from` imports are standard practice.

@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 from PIL import ImageTk, Image
 
-from vnavslib import easytk
+from eztk import eztk
 from vnavslib import image_analyzer
 from vnavslib import image_filters
 from vnavslib import opticchiasm as oc
@@ -19,7 +19,7 @@ from vnavslib import vnavs_const as vconst
 from vnavslib import vnavs_data as vdata
 from vnavslib import vnavs_file_xfer_client
 from vnavslib import vnavs_node as vmqtt
-from vnavslib.easytk import (
+from eztk.eztk import (
     FIRST_ROW,
     SAME_ROW,
     NEXT_ROW,
@@ -622,7 +622,7 @@ class CvLab(vmqtt.VnavsNode):
         self.image.img_fname_suffix = ""
 
         self.gui_update_mode = True
-        self.tk = easytk.EasyTk()
+        self.tk = eztk.EasyTk()
         self.tk.tkw.title("VNAVS OpenCV Visualizer")
         self.status_frame = self.tk.add_label_frame("Status", row=1)
         self.thumbnail_frame = self.tk.add_label_frame("Thumbnails", row=2)
