@@ -17,28 +17,6 @@ build/
 
 # Configuration files (may contain local paths/settings)
 *.ini
-*.cfg
-*.conf
-vnavs.ini
-
-# Mission logs and data files
-*.nav
-*.mission
-*.log
-
-# Images and media
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.mp4
-*.avi
-*.bmp
-
-# Databases
-*.db
-*.sqlite
-*.sqlite3
 
 # IDE and editors
 .vscode/
@@ -46,44 +24,14 @@ vnavs.ini
 *.swp
 *.swo
 *~
-.project
-.pydevproject
-.settings/
 
 # OS files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 
 # Test and coverage
 .coverage
 htmlcov/
-.tox/
-.nox/
 coverage.xml
-*.cover
-
-# Temporary and build directories
-temp/
-tmp/
-BotImages/
-playground/
-python/samples/
-
-# Node.js
-node_modules/
-npm-debug.log
-yarn-error.log
-
-# Documentation builds
-docs/_build/
-docs/.doctrees/
 
 # mypy
 .mypy_cache/
-.dmypy.json
-dmypy.json
