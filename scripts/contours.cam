@@ -1,9 +1,0 @@
-im_in = im_base.copy()
-im_in = im_in.CopyAsGray()
-im_in = oc.Image(im=cv2.GaussianBlur(im_in.im, (3,3), 0.0), colorcode=im_in.colorcode)
-im_in = oc.Image(im=oc.AutoCanny(im_in.ImAsGray(), 0.33), colorcode=oc.IM_GRAY)
-contours_in, hierarchy_in = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-
-annotated = im_in.CopyAsBGR()
-cv2.drawContours(annotated._im, contours_in, -1, (0, 0, 255), 3)display_image = annotated

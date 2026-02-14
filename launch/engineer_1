@@ -1,2 +1,0 @@
-#/bin/bash
-screen -d -m -S engineer_1 /bin/bash ~/projects/vnavs/launch/run_engineer_1

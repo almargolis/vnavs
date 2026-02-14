@@ -1,2 +1,0 @@
-#/bin/bash
-screen -d -m -S fastmqtt /bin/bash ~/projects/vnavs/launch/run_fastmqtt

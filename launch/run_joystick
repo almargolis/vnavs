@@ -1,4 +1,0 @@
-#/bin/bash
-cd ~/projects/vnavs
-source ~/venv_cv/bin/activate
-python python/joystick.py node
