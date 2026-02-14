@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -41,19 +41,16 @@ classifiers = [
 ]
 
 dependencies = [
-    "paho-mqtt>=1.6.0",
-    "opencv-python>=4.5.0",
-    "numpy>=1.19.0",
-    "Pillow>=8.0.0",
+    "ezcomms",
+    "eztk",
+    "cvpipeline",
     "geopy>=2.0.0",
     "pyserial>=3.5",
-    "configparser>=5.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=6.2.0",
-    "pytest-cov>=2.12.0",
     "black>=21.0",
     "pylint>=2.8.0",
 ]
@@ -67,9 +64,6 @@ hardware = [
     "evdev>=1.4.0",
     "pynmea2>=1.18.0",
 ]
-all = [
-    "vnavs[dev,raspberry-pi,hardware]",
-]
 
 [project.urls]
 Homepage = "https://github.com/almargolis/vnavs"
@@ -79,32 +73,10 @@ Issues = "https://github.com/almargolis/vnavs/issues"
 [tool.setuptools]
 packages = ["vnavslib.vnavslib", "vnavsrun.vnavsrun"]
 
-[tool.setuptools.package-data]
-"*" = ["*.ini.example"]
-
 [tool.black]
 line-length = 88
 target-version = ['py38', 'py39', 'py310', 'py311']
 include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | vnavs\.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-  | node_modules
-  | temp
-  | playground
-)/
-'''
 
 [tool.pylint.messages_control]
 max-line-length = 100
@@ -124,22 +96,3 @@ testpaths = [
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-
-[tool.coverage.run]
-source = ["vnavslib", "vnavsrun"]
-omit = [
-    "*/test/*",
-    "*/tests/*",
-    "*/__pycache__/*",
-    "*/vnavs.venv/*",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-]
