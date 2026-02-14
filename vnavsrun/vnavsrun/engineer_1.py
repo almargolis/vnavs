@@ -38,7 +38,7 @@ DDT_STR = "str"
 # data interpretation errors when code is developed by multiple people over a
 # period of time.
 #
-class VnavsAttribute(object):
+class VnavsAttribute:
     __slots__ = (
         "name",
         "default_value",
@@ -71,7 +71,7 @@ class VnavsAttribute(object):
         self.limit_value = limit_value  # value < limit_value
 
 
-class VnavsDataDict(object):
+class VnavsDataDict:
     __slots__ = "attributes"
 
     def __init__(self):
@@ -107,7 +107,7 @@ class VnavsDataDict(object):
         return self.attributes.keys()
 
 
-class VnavsDataRecord(object):
+class VnavsDataRecord:
     _dict = None
 
     def __init__(self, payload=None):
@@ -231,11 +231,11 @@ def PositionStringToPosition(position_str):
 
 
 def PositionString(latitude, longitude):
-    position = "{},{}".format(latitude, longitude)
+    position = f"{latitude},{longitude}"
     return position
 
 
-class HelmOrder(object):
+class HelmOrder:
     __slots__ = ("heading_to_waypoint", "distance_to_waypoint")
 
     def __init__(self, heading_to_waypoint, distance_to_waypoint):
@@ -253,7 +253,7 @@ def PositionFactory(payload):
     return p
 
 
-class Position(object):
+class Position:
     __slots__ = (
         "heading",
         "latitude",
@@ -281,7 +281,7 @@ class Position(object):
             if note != "":
                 note += " "
             note += "@ " + repr(self.speed)
-        return "({}, {}, {})".format(self.latitude, self.longitude, note)
+        return f"({self.latitude}, {self.longitude}, {note})"
 
     def DistanceToWaypoint(self, waypoint):
         # Adapted from https://stackoverflow.com/questions/4913349/haversine-formula-in-python-bearing-and-distance-between-two-gps-points
@@ -430,7 +430,7 @@ def find_center_of_gps_samples(gps_samples):
     return Position(center_latitude, center_longitude)
 
 
-class GpsDevice(object):
+class GpsDevice:
     def __init__(self):
         self.gps_buffer = ""  # read buffer
         self.next_eol_ix = -1  # index of first <cr><lf>
@@ -669,20 +669,20 @@ class GpsDevice(object):
 
 
 class engineer_1(vmqtt.VnavsNode):
-    def __init__(self, Verbose=False):
+    def __init__(self, verbose=False):
         global dev_sense_hat
         import dev_sense_hat
 
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.engineer_1_settings_topic, handler=self.OnSettings
                 )
             ],
-            SingleThreaded=False,
-            BrokerType="F",
-            Streamer=False,
-            Verbose=Verbose,
+            single_threaded=False,
+            broker_type="F",
+            streamer=False,
+            verbose=verbose,
         )
         self.heading = 0
         self.goal_longitude = None
@@ -702,15 +702,14 @@ class engineer_1(vmqtt.VnavsNode):
             start_position = PositionStringToPosition(differential_base_position)
         self.gps_device.StartRelativeGpsPositioning(start_position)
 
-    def DoLoop(self):
-        # executed repetitively by mqtt_node.Loop() which handles exceptions and proper shutdown.
+    def client_loop_code(self):
+        # executed repetitively by VnavsNode.main_loop() which handles exceptions and proper shutdown.
         #
 
         have_new_gps_data = self.gps_device.UpdateGpsInfo()
         if have_new_gps_data:
             payload = self.gps_device.data.CreatePayload()
-            # print("Engineeer_1.DoLoop() GPS Payload", payload)
-            self.Publish(vconst.engineer_1_gps_topic, payload)
+            self.publish(vconst.engineer_1_gps_topic, payload)
             self.stats.Count("GpsMsg")
 
         if (time.time() - self.last_acceleromter_timestamp) > SEND_ACCELEROMETER_PERIOD:
@@ -720,7 +719,7 @@ class engineer_1(vmqtt.VnavsNode):
             self.imu_data.imu_roll = self.orientation["roll"]
             self.imu_data.imu_timestamp = time.time()
             payload = self.imu_data.CreatePayload()
-            self.Publish(vconst.engineer_1_imu_topic, payload)
+            self.publish(vconst.engineer_1_imu_topic, payload)
             self.last_acceleromter_timestamp = time.time()
             self.stats.Count("ImuMsg")
             # print("ACCC %+8.4f %+8.4f GPS: %+8.4f" % (self.acc_speed_forward, self.acc_speed_sideways, self.gps_speed))
@@ -797,8 +796,7 @@ def TestGps():
 
 def RunNode():
     h = engineer_1()
-    h.Loop()
-    h.Disconnect()
+    h.main_loop()
 
 
 if __name__ == "__main__":

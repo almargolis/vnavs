@@ -12,7 +12,6 @@ import time
 import cv2
 import numpy as np
 
-import cameraman
 import easytk
 from easytk import (
     FIRST_ROW,
@@ -25,10 +24,14 @@ from easytk import (
     RIGHT_COL,
     OVERLAY_COL,
 )
-import OpticChiasm
-import vnavs_mqtt as vmqtt
-import vnavs_const as vconst
-import vnavs_data as vdata
+
+from vnavslib import opticchiasm as OpticChiasm
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_data as vdata
+from vnavslib import vnavs_file_xfer_client
+from vnavslib import vnavs_node as vmqtt
+from vnavslib.macbookcamera import MacbookCamera
+from vnavsrun import cameraman
 
 BOT_1_MAP_TRANSPOSE = [
     [-1.30565584e-01, -1.56472861e00, 4.58333935e02],
@@ -43,7 +46,7 @@ SRC_BOT_CAMERA = "bot"
 SHOW_ANNOTATION = "ShowAnnotation"
 
 
-class ProcessStep(object):
+class ProcessStep:
     __slots__ = (
         "cv_filter_name",
         "cv_specs",
@@ -351,7 +354,7 @@ class ProcessStep(object):
         f.write("\n")
         source_path = cls.steps[0].source_path
         if source_path is None:
-            f.write("cam = cameraman.macbook_camera()\n")
+            f.write("cam = MacbookCamera()\n")
             f.write("im_in = cam.capture_image()\n")
         else:
             f.write('im_in = oc.Image("opencv_fn={}")\n'.format(source_path))
@@ -548,7 +551,7 @@ class ProcessStep(object):
         return
 
 
-class Darkroom(vmqtt.mqtt_node):
+class Darkroom(vmqtt.VnavsNode):
     __slots__ = (
         "camera_iso",
         "camera_last_filename",
@@ -584,21 +587,21 @@ class Darkroom(vmqtt.mqtt_node):
 
     def __init__(self):
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady
                 )
             ],
-            SingleThreaded=True,
-            BrokerType="F",
-            AutomaticallyConnect=False,
-            BlockIfNotConnected=False,
-            SelectTimeoutSecs=0.1,
-            Verbose=False,
+            single_threaded=True,
+            broker_type="F",
+            automatically_connect=False,
+            wait_if_not_connected=False,
+            select_timeout_secs=0.1,
+            verbose=False,
         )
         self.load_process_file_name = None
         self.delete_process_step_ix = None
-        self.file_client = vmqtt.FileClient(Verbose=False)
+        self.file_client = vnavs_file_xfer_client.FileClient(verbose=False)
         self.downloadDir = self.config.get("FileClient", "DownloadDir")
         self.downloadDir = os.path.expanduser(
             self.downloadDir
@@ -676,7 +679,7 @@ class Darkroom(vmqtt.mqtt_node):
         payload["shutter_speed"] = self.camera_shutter_speed.Value()
         if self.pic_source == SRC_BOT_CAMERA:
             print(payload)
-            self.Publish(vconst.cameraman_orders_topic, payload)
+            self.publish(vconst.cameraman_orders_topic, payload)
 
     def ConfigureImageSource(
         self, path=None, new_image=None, iso=None, shutter_speed=None, colorcode=None
@@ -826,9 +829,9 @@ class Darkroom(vmqtt.mqtt_node):
     def OnSelectSource(self, *args):
         self.pic_source = self.source_widget.Value()
         if self.pic_source == SRC_LOCAL_CAMERA:
-            self.local_cam = cameraman.macbook_camera()
+            self.local_cam = MacbookCamera()
         elif self.pic_source == SRC_BOT_CAMERA:
-            self.ConnectToMqttServer()
+            self.connect_to_mqtt_server()
 
     def OnTabSelected(self, x):
         # This ends up with the initial view being a default filter tab created here
@@ -888,7 +891,7 @@ class Darkroom(vmqtt.mqtt_node):
     # Methods in the Tkinter and VnavsMqtt threads should just set flags
     # and return quickly.
     #
-    def DoLoop(self):
+    def client_loop_code(self):
         if self.loading:
             # This was added in order to avoid crashes due to trying to load images
             # while a new process is being loaded. I am a little surprised that
@@ -935,7 +938,7 @@ class Darkroom(vmqtt.mqtt_node):
                     self.pic_fn = payload["filename"]
                     path = os.path.join(self.downloadDir, self.pic_fn)
                     # print("DoLoop() GetFile: ", path)
-                    if not self.file_client.GetFile("i", self.pic_fn, path=path):
+                    if not self.file_client.get_file("i", self.pic_fn, path=path):
                         print("Unable to fetch PIC", self.pic_fn)
                         return
                     self.last_pic_time = time.time()
@@ -970,4 +973,4 @@ class Darkroom(vmqtt.mqtt_node):
 
 if __name__ == "__main__":
     m = Darkroom()
-    m.Loop()
+    m.main_loop()

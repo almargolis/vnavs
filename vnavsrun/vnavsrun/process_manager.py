@@ -4,14 +4,15 @@ import subprocess
 import sys
 import time
 
-import vnavs_const as vconst
-import vnavs_comms as vcomms
-import vnavs_mqtt as vmqtt
+from vnavslib import vnavs_comms as vcomms
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_node as vmqtt
+from vnavsrun import fastmqttserver
 
 SYSTEMCTL = "/bin/systemctl"
 
 
-class SystemProcess(object):
+class SystemProcess:
     def __init__(self):
         self.system_release = platform.release()
 
@@ -92,10 +93,10 @@ def PiShutdown():
     print(output)
 
 
-class process(vmqtt.mqtt_node):
-    def __init__(self, Verbose=False):
+class process(vmqtt.VnavsNode):
+    def __init__(self, verbose=False):
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.process_log_list_topic,
                     async_delivery=True,
@@ -103,11 +104,11 @@ class process(vmqtt.mqtt_node):
                     LatestOnly=False,
                 )
             ],
-            SingleThreaded=False,
-            BlockIfNotConnected=False,
-            BrokerType="F",
-            Streamer=False,
-            Verbose=Verbose,
+            single_threaded=False,
+            wait_if_not_connected=False,
+            broker_type="F",
+            streamer=False,
+            verbose=verbose,
         )
         self.system = platform.system()
         if self.system == "Linux":
@@ -116,7 +117,7 @@ class process(vmqtt.mqtt_node):
             self.system_process = None
         self.process_specs = self.config.items("ProcessMonitor")
         self.archive_dir = self.config.get(
-            vcomms.FMQTT_INI_SECTION, vcomms.FMQTT_ARCHIVE_DIR
+            fastmqttserver.FMQTT_INI_SECTION, fastmqttserver.FMQTT_ARCHIVE_DIR
         )
         self.archive_dir = os.path.expanduser(
             self.archive_dir
@@ -133,18 +134,18 @@ class process(vmqtt.mqtt_node):
         free_space = info.f_bfree
         os.close(fd)
         # os.remove()
-        ext_len = len(vcomms.FMQTT_LOG_EXTENSION)
+        ext_len = len(fastmqttserver.FMQTT_LOG_EXTENSION)
         flist = os.listdir(self.archive_dir)
         log_list = []
         for this in flist:
-            if this[-ext_len:] == vcomms.FMQTT_LOG_EXTENSION:
+            if this[-ext_len:] == fastmqttserver.FMQTT_LOG_EXTENSION:
                 log_list.append(this)
-        result_payload = vcomms.PrepareResponse(payload, ConfResponse=True)
+        result_payload = vcomms.prepare_response(payload, conf_request=True)
         result_payload["log_list"] = log_list
         result_payload["free_space"] = free_space
-        self.Publish(vconst.process_result_topic, result_payload)
+        self.publish(vconst.process_result_topic, result_payload)
 
-    def DoLoop(self):
+    def client_loop_code(self):
         screens = GetScreenList()
         for pname, pspec in self.process_specs:
             parts = pspec.split(":")
@@ -161,8 +162,7 @@ class process(vmqtt.mqtt_node):
                 vnavs_process = parts[1]
                 if vnavs_process not in screens:
                     proc = RunCommand(
-                        "screen -d -m -S %s /bin/bash ~/projects/vnavs/launch/run_%s"
-                        % (vnavs_process, vnavs_process),
+                        f"screen -d -m -S {vnavs_process} /bin/bash ~/projects/vnavs/launch/run_{vnavs_process}",
                         Shell=True,
                     )
                     PrintProcResult(proc)
@@ -170,6 +170,8 @@ class process(vmqtt.mqtt_node):
 
 if __name__ == "__main__":
     if sys.argv[1] == "node":
-        vmqtt.LaunchNode(process)
-    p = LinuxProcess()
-    p.WirelessNetworks()
+        m = process()
+        m.main_loop()
+    else:
+        p = LinuxProcess()
+        p.WirelessNetworks()

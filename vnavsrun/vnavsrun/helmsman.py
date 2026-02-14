@@ -26,12 +26,12 @@ TICK_PATTERNS = [
 ]
 
 
-class SteeringPlanStep(object):
+class SteeringPlanStep:
     def __init__(self, direction):
         self.direction = direction
 
 
-class vehicle(object):
+class vehicle:
     """
     This class isolates low level hardware functions so that helmsman is vehicle
     agnostic. Right now it is hardwired for my initial robot. Later on it will
@@ -375,7 +375,7 @@ class helmsman(vmqtt.VnavsNode):
     def __init__(self):
         self.orders_q = queue.Queue(10)
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.helmsman_orders_topic,
                     async_delivery=True,
@@ -397,9 +397,9 @@ class helmsman(vmqtt.VnavsNode):
                     handler=self.OnMissionLogStop,
                 ),
             ],
-            SingleThreaded=False,
-            BrokerType="F",
-            Verbose=False,
+            single_threaded=False,
+            broker_type="F",
+            verbose=False,
         )
         self.v = vehicle()
         self.steering_goal = (
@@ -464,9 +464,7 @@ class helmsman(vmqtt.VnavsNode):
                 pass
             else:
                 print(
-                    "HELMSMAN - Unauthorized Speed Order from %s".format(
-                        payload["_sender"]
-                    )
+                    f"HELMSMAN - Unauthorized Speed Order from {payload['_sender']}"
                 )
                 return
         if HELMSMAN_SPEED_SCALE_MIN in payload:
@@ -495,9 +493,7 @@ class helmsman(vmqtt.VnavsNode):
                 pass
             else:
                 print(
-                    "HELMSMAN - Unauthorized Steering Order from %s".format(
-                        payload["_sender"]
-                    )
+                    f"HELMSMAN - Unauthorized Steering Order from {payload['_sender']}"
                 )
                 return
         if HELMSMAN_HEADING_SCALE_MIN in payload:
@@ -566,7 +562,7 @@ class helmsman(vmqtt.VnavsNode):
             print("SCALE", raw_value, request_value, target_x_value)
         return int(request_value)
 
-    def DoLoop(self):
+    def client_loop_code(self):
         # print("STATE", self.state, "Governor", self.v.governor)
         if not self.mqttc.connected:
             self.v.Estop()
@@ -593,7 +589,7 @@ class helmsman(vmqtt.VnavsNode):
             # Speed and Steering goals are set asynchronously via MQTT messages
             self.v.Tick()
 
-    def CleanupLoop(self):
+    def cleanup_loop(self):
         self.v.Estop()
 
 
@@ -672,4 +668,5 @@ class helmsman(vmqtt.VnavsNode):
 
 if __name__ == "__main__":
     if sys.argv[1] == "node":
-        vmqtt.LaunchNode(helmsman)
+        m = helmsman()
+        m.main_loop()

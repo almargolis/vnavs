@@ -47,7 +47,7 @@ NAVIGATOR_WAYPOINT_HEADING = "waypoint_heading"
 NAVIGATOR_WAYPOINT_DISTANCE = "waypoint_distance"
 
 
-class PID(object):
+class PID:
     __slots__ = (
         "d_gain",
         "d_out",
@@ -257,13 +257,13 @@ def NavigateTowardWaypoint(
     payload[NAVIGATOR_WAYPOINT_LONGITUDE] = waypoint.longitude
     payload[NAVIGATOR_WAYPOINT_HEADING] = delta.heading_to_waypoint
     payload[NAVIGATOR_WAYPOINT_DISTANCE] = delta.distance_to_waypoint
-    navigator.Publish(vconst.navigator_plot_topic, payload)
+    navigator.publish(vconst.navigator_plot_topic, payload)
 
     # print("NavigateTowardWaypoint()", current_yaw, delta.heading_to_waypoint, deltaHeading, nav.steering, nav.speed)
     return delta.distance_to_waypoint
 
 
-class MissionStep(object):
+class MissionStep:
     __slots__ = (
         "mission",
         "mission_vars",
@@ -305,7 +305,7 @@ class MissionStep(object):
         payload[helmsman.HELMSMAN_I_ACCUMULATOR] = self.nav.i_accumulator
         payload[helmsman.HELMSMAN_DERIVATIVE] = self.nav.derivative
         payload[helmsman.HELMSMAN_TIMER] = timer
-        self.navigator.Publish(vconst.helmsman_orders_topic, payload)
+        self.navigator.publish(vconst.helmsman_orders_topic, payload)
         if self.nav.untrustedGpsUpdates < 0:
             # this could be dangerous, skipping navigation indefinately
             if self.nav.hardKeepSeconds <= 0:
@@ -467,7 +467,7 @@ class StepGpsWaypoint(MissionStep):
         # Always publish differntial_base_position, either to set or clear
         payload = {}
         payload["differential_base_position"] = self.differential_base_position
-        self.navigator.Publish(vconst.engineer_1_settings_topic, payload)
+        self.navigator.publish(vconst.engineer_1_settings_topic, payload)
         if len(self.parm_pos) > 1:
             self.speed = int(self.parm_pos[1])
         self.next_time = time.time()
@@ -487,7 +487,7 @@ class StepGpsWaypoint(MissionStep):
             self.PublishNavigation()
             payload = {}
             payload["differential_base_position"] = vconst.DifferentialGpsClear
-            self.navigator.Publish(vconst.engineer_1_settings_topic, payload)
+            self.navigator.publish(vconst.engineer_1_settings_topic, payload)
             return True
         if time.time() > self.next_time:
             # print("StepGpsWaypoint.DoStageStepRun() navigate", delta.distance_to_waypoint)
@@ -602,7 +602,7 @@ class StepMagic(MissionStep):
         cv2.imwrite(outFp, r.annotated)
         payload = {}
         payload["filename"] = outFn
-        # self.Publish('pic_ready', payload, source='cameraman')
+        # self.publish('pic_ready', payload, source='cameraman')
         if len(r.rectangles) > 0:
             print("move")
             self.nav.speed = FORWARD_VERY_SLOW
@@ -683,7 +683,7 @@ class StepMessage(MissionStep):
         if self.name is not None:
             conf = self.name + vmqtt.NowStr()
             self.mission.confirmation_ids[self.name] = conf
-        self.mission.navigator.Publish(self.topic, self.payload, ConfRequest=conf)
+        self.mission.navigator.publish(self.topic, self.payload, conf_request=conf)
         return True
 
 
@@ -702,7 +702,7 @@ MISSION_SCRIPT = "mission_script"
 MISSION_DEBUG = "mission_debug"
 
 
-class MissionStage(object):
+class MissionStage:
     __slots__ = ("mission", "name", "steps")
 
     def __init__(self, mission, name):
@@ -711,7 +711,7 @@ class MissionStage(object):
         self.steps = []
 
 
-class MissionStepDef(object):
+class MissionStepDef:
     def __init__(self, kword, sclass=None, func=None, defs=None):
         self.name = kword
         self.sclass = sclass
@@ -729,7 +729,7 @@ MISSION_STATE_FINISED = 40  # vconst.stage_finis has been completed
 MISSION_STATE_ENDED = 50  # EndMission() termination process completed
 
 
-class Mission(object):
+class Mission:
     __slots__ = (
         "active_stage",
         "confirmation_ids",
@@ -865,8 +865,8 @@ class Mission(object):
         self.mission_state = MISSION_STATE_LOADED
         if InitiatorPayload is not None:
             # Only announce if part of runnng mission -- not mission control
-            payload = vcomms.PrepareResponse(InitiatorPayload)
-            self.navigator.Publish(vconst.mission_loaded_topic, payload)
+            payload = vcomms.prepare_response(InitiatorPayload)
+            self.navigator.publish(vconst.mission_loaded_topic, payload)
         print("Mission Loaded", self.stages_list, InitiatorPayload)
 
     def DoMission(self):
@@ -899,7 +899,7 @@ class Mission(object):
             payload["mission_id"] = self.mission_id
             payload["mission_name"] = self.mission_name
             payload["mission_stage"] = self.active_stage.name
-            self.navigator.Publish(vconst.mission_stage_completed_topic, payload)
+            self.navigator.publish(vconst.mission_stage_completed_topic, payload)
             if self.active_stage.name == vconst.stage_init:
                 self.mission_state = MISSION_STATE_INITED
             elif self.active_stage.name == vconst.stage_finis:
@@ -939,15 +939,15 @@ class Mission(object):
         # implemented at this point.
         if stage_name == vconst.stage_init:
             # This is the start of a mission
-            self.mission_id = "{}_{}".format(self.mission_name, vmqtt.NowStr())
+            self.mission_id = f"{self.mission_name}_{vmqtt.NowStr()}"
             if initiator_payload is None:
                 stage_payload = {}
             else:
-                init_payload = vcomms.PrepareResponse(initiator_payload)
+                init_payload = vcomms.prepare_response(initiator_payload)
             init_payload["mission_id"] = self.mission_id
             init_payload["mission_name"] = self.mission_name
             init_payload["mission_stage"] = stage_name
-            self.navigator.Publish(vconst.mission_init_topic, init_payload)
+            self.navigator.publish(vconst.mission_init_topic, init_payload)
             self.mission_state = MISSION_STATE_STARTED
         elif stage_name == vconst.stage_init:
             self.mission_state = MISSION_STATE_WRAPUP
@@ -955,11 +955,11 @@ class Mission(object):
         if initiator_payload is None:
             stage_payload = {}
         else:
-            stage_payload = vcomms.PrepareResponse(initiator_payload)
+            stage_payload = vcomms.prepare_response(initiator_payload)
         stage_payload["mission_id"] = self.mission_id
         stage_payload["mission_name"] = self.mission_name
         stage_payload["mission_stage"] = stage_name
-        self.navigator.Publish(vconst.mission_stage_started_topic, stage_payload)
+        self.navigator.publish(vconst.mission_stage_started_topic, stage_payload)
         self.active_stage = self.stages_dict[stage_name]
         self.stage_step_ix = 0
         self.stage_step_loop_ct = 0
@@ -991,7 +991,7 @@ class Mission(object):
         payload = {}
         payload["mission_id"] = self.mission_id
         payload["mission_name"] = self.mission_name
-        self.navigator.Publish(vconst.mission_end_topic, payload)
+        self.navigator.publish(vconst.mission_end_topic, payload)
         self.mission_state = MISSION_STATE_ENDED
         print("EndMission() Mission Ended")
         return True
@@ -1037,7 +1037,7 @@ class Mission(object):
         f.close()
 
 
-class NavStep(object):
+class NavStep:
     def __init__(self):
         self.Init()
 
@@ -1062,9 +1062,9 @@ class NavStep(object):
 
 
 class navigator(vmqtt.VnavsNode):
-    def __init__(self, Verbose=False):
+    def __init__(self, verbose=False):
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady
                 ),
@@ -1091,12 +1091,12 @@ class navigator(vmqtt.VnavsNode):
                     vconst.data_get_topic, async_delivery=True, handler=self.OnDataGet
                 ),
             ],
-            SingleThreaded=False,
-            BrokerType="F",
-            Streamer=False,
-            Verbose=Verbose,
+            single_threaded=False,
+            broker_type="F",
+            streamer=False,
+            verbose=verbose,
         )
-        self.missionDir = self.GetIniDirectory(
+        self.missionDir = self.get_ini_directory(
             "Navigator", "MissionDir", IsWriteable=True
         )
         self.gps_data = engineer_1.GpsDataRecord()
@@ -1131,9 +1131,9 @@ class navigator(vmqtt.VnavsNode):
         key = payload[vdata.dkey_field_name]
         key_group = payload[vdata.dgroup_field_name]
         pdata = self.persistent_data.GetPdata(key, key_group=key_group)
-        response_payload = vcomms.PrepareResponse(payload, ConfResponse=True)
+        response_payload = vcomms.prepare_response(payload, conf_request=True)
         response_payload["pdata"] = pdata
-        self.Publish(vconst.data_put_topic, response_payload)
+        self.publish(vconst.data_put_topic, response_payload)
 
     def rmsg_navigator_service(self, payload):
         request = payload["request"]
@@ -1147,7 +1147,7 @@ class navigator(vmqtt.VnavsNode):
         payload = self.serviceRequests.pop(0)
         print("PROCESS", payload)
         request = payload["request"]
-        payload = vcomms.PrepareResponse(payload)
+        payload = vcomms.prepare_response(payload)
         payload["MissionName"] = self.mission.missionName
         payload["WaypointCt"] = len(self.mission.waypoints)
         if request == "ClearWaypoints":
@@ -1172,7 +1172,7 @@ class navigator(vmqtt.VnavsNode):
             payload["filename"] = map_fn
             payload["captureFormat"] = "jpeg"
 
-        self.Publish(vconst.navigator_service_ack_topic, payload)
+        self.publish(vconst.navigator_service_ack_topic, payload)
 
     def DoEngineer1Gps(self, payload):
         self.gps_data.LoadPayload(payload)
@@ -1216,7 +1216,7 @@ class navigator(vmqtt.VnavsNode):
         self.mission_load_payload = None
         self.mission_sync_event_payload = None
 
-    def DoLoop(self):
+    def client_loop_code(self):
         if self.mission is None:
             if self.mission_load_payload is not None:
                 mission_payload = self.mission_load_payload
@@ -1246,10 +1246,10 @@ class navigator(vmqtt.VnavsNode):
         payload[helmsman.HELMSMAN_HEADING] = "0"
         payload[helmsman.HELMSMAN_SPEED] = 0
         payload[helmsman.HELMSMAN_TIMER] = 6
-        self.Publish(vconst.helmsman_orders_topic, payload)
+        self.publish(vconst.helmsman_orders_topic, payload)
 
 
-class MissionMap(object):
+class MissionMap:
     def __init__(self, waypoints=None, navpoints=None):
         self.waypoints = waypoints
         self.navpoints = navpoints
@@ -1568,7 +1568,8 @@ def RunMap():
 
 if __name__ == "__main__":
     if sys.argv[1] == "node":
-        vmqtt.LaunchNode(navigator)
+        m = navigator()
+        m.main_loop()
     elif sys.argv[1] == "map":
         RunMap()
     elif sys.argv[1] == "test":

@@ -1,10 +1,11 @@
-import sys
-import evdev
 import platform
+import sys
 import time
 
-import vnavs_const as vconst
-import vnavs_mqtt as vmqtt
+import evdev
+
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_node as vmqtt
 
 
 def PrintCapability(gamepad):
@@ -22,10 +23,10 @@ def PrintCapability(gamepad):
             print("XXX", thisType, thisCap)
 
 
-class joystick(vmqtt.mqtt_node):
-    def __init__(self, Verbose=False):
+class joystick(vmqtt.VnavsNode):
+    def __init__(self, verbose=False):
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.mission_log_start_topic,
                     async_delivery=True,
@@ -37,12 +38,12 @@ class joystick(vmqtt.mqtt_node):
                     handler=self.OnMissionLogStop,
                 ),
             ],
-            SingleThreaded=True,
-            BlockIfNotConnected=False,
-            SelectTimeoutSecs=0.01,
-            BrokerType="F",
-            Streamer=False,
-            Verbose=Verbose,
+            single_threaded=True,
+            wait_if_not_connected=False,
+            select_timeout_secs=0.01,
+            broker_type="F",
+            streamer=False,
+            verbose=verbose,
         )
         self.system = platform.system()
         if self.system == "Linux":
@@ -108,12 +109,12 @@ class joystick(vmqtt.mqtt_node):
             payload["heading"] = self.directionValue
             payload["heading_scale_min"] = self.directionAxis.min
             payload["heading_scale_max"] = self.directionAxis.max
-        self.Publish(vconst.helmsman_orders_topic, payload)
+        self.publish(vconst.helmsman_orders_topic, payload)
         self.helmsmanChanged = False
         print(payload)
         self.last_publish = time.time()
 
-    def DoLoop(self):
+    def client_loop_code(self):
         gamepad_events = self.gamepad.read()
         try:
             for event in gamepad_events:
@@ -132,4 +133,5 @@ class joystick(vmqtt.mqtt_node):
 
 if __name__ == "__main__":
     if sys.argv[1] == "node":
-        vmqtt.LaunchNode(joystick)
+        m = joystick()
+        m.main_loop()

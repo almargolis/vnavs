@@ -30,10 +30,10 @@ from vnavslib import vnavs_node as vmqtt
 from vnavslib import vnavs_const as vconst
 from vnavslib import vnavs_comms as vcomms
 from vnavslib import vnavs_data as vdata
+from vnavslib import vnavs_file_xfer_client
+from vnavsrun import fastmqttserver
 import paho.mqtt.client as mqtt
 
-if sys.version_info[0] < 3:
-    FileExistsError = OSError
 
 BOT_1_MAP_TRANSPOSE = [
     [-1.30565584e-01, -1.56472861e00, 4.58333935e02],
@@ -62,10 +62,9 @@ TRANSFER_TYPE_LOG = "l"  # Transfering mission log, start image download when do
 
 
 class MissionControl(vmqtt.VnavsNode):
-    def __init__(self, Verbose=False):
-        # Verbose = True
+    def __init__(self, verbose=False):
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.cameraman_pic_ready_topic,
                     handler=self.DoCameramanPicReady,
@@ -125,11 +124,11 @@ class MissionControl(vmqtt.VnavsNode):
                     LatestOnly=True,
                 ),
             ],
-            BlockIfNotConnected=False,
-            SingleThreaded=True,
-            SelectTimeoutSecs=0.1,
-            BrokerType="F",
-            Verbose=Verbose,
+            wait_if_not_connected=False,
+            single_threaded=True,
+            select_timeout_secs=0.1,
+            broker_type="F",
+            verbose=verbose,
         )
 
         self.downloadDir = self.config.get("FileClient", "DownloadDir")
@@ -145,7 +144,7 @@ class MissionControl(vmqtt.VnavsNode):
         # The file server is still 4096, so the problem was all in IOS or Mission Control (TK??).
         # If its ever an issue, maybe something between 4096 and 150K would work as well. I just tried
         # this one value and moved on since there doesn't seem to be any downside.
-        self.file_client = vmqtt.FileClient(BufferLen=150000, Verbose=False)
+        self.file_client = vnavs_file_xfer_client.FileClient(buffer_len=150000, verbose=False)
 
         self.tk = easytk.EasyTk(debug=True)
         self.tk.tkw.title("VNAVS Mission Control")
@@ -322,7 +321,7 @@ class MissionControl(vmqtt.VnavsNode):
                 sec_data[fname] = data
         print(contents)
         topic = contents["Head"]["Topic"]
-        self.Publish(topic, contents["Payload"])
+        self.publish(topic, contents["Payload"])
 
     def ImageCv2(self, path):
         im = cv2.imread(path)
@@ -354,24 +353,24 @@ class MissionControl(vmqtt.VnavsNode):
     def ClearWaypoints(self):
         payload = {}
         payload["request"] = "ClearWaypoints"
-        self.Publish(vconst.navigator_service_topic, payload)
+        self.publish(vconst.navigator_service_topic, payload)
 
     def MarkWaypoint(self):
         payload = {}
         payload["request"] = "MarkWaypoint"
-        self.Publish(vconst.navigator_service_topic, payload)
+        self.publish(vconst.navigator_service_topic, payload)
 
     def SaveWaypoints(self):
         payload = {}
         payload["request"] = "SaveWaypoints"
         payload["missionName"] = self.mission_name.get()
-        self.Publish(vconst.navigator_service_topic, payload)
+        self.publish(vconst.navigator_service_topic, payload)
 
     def MapWaypoints(self):
         payload = {}
         payload["request"] = "MakeWaypointMap"
         payload["missionName"] = self.mission_name.get()
-        self.Publish(vconst.navigator_service_topic, payload)
+        self.publish(vconst.navigator_service_topic, payload)
 
     def OnMissionLoad(self):
         # This loads mission here and sends it to navigator.
@@ -394,7 +393,7 @@ class MissionControl(vmqtt.VnavsNode):
         payload = {}
         payload["mission_name"] = mission_name
         payload["mission_script"] = mission_script
-        self.Publish(vconst.mission_load_topic, payload)
+        self.publish(vconst.mission_load_topic, payload)
         print("STARTNAV", payload)
 
     def OnReplayLocal(self):
@@ -441,13 +440,13 @@ class MissionControl(vmqtt.VnavsNode):
         self.speed = 0
         payload = {}
         payload[helmsman.HELMSMAN_SPEED] = self.speed
-        self.Publish(vconst.helmsman_orders_topic, payload)
+        self.publish(vconst.helmsman_orders_topic, payload)
 
     def OnSpeedPlus(self):
         self.speed += 1
         payload = {}
         payload[helmsman.HELMSMAN_SPEED] = self.speed
-        self.Publish(vconst.helmsman_orders_topic, payload)
+        self.publish(vconst.helmsman_orders_topic, payload)
 
     def OnSpeedMinus(self):
         self.speed -= 1
@@ -455,14 +454,14 @@ class MissionControl(vmqtt.VnavsNode):
             self.speed = 0
         payload = {}
         payload[helmsman.HELMSMAN_SPEED] = self.speed
-        self.Publish(vconst.helmsman_orders_topic, payload)
+        self.publish(vconst.helmsman_orders_topic, payload)
 
     def OnStageExecute(self):
         this_stage = self.mission_stage_entry.Value()
         payload = {}
         payload["mission_name"] = self.mission.mission_name
         payload["mission_stage"] = this_stage
-        self.Publish(vconst.mission_sync_event_topic, payload)
+        self.publish(vconst.mission_sync_event_topic, payload)
         next_stage_ix = self.mission.stages_list.index(this_stage) + 1
         if next_stage_ix < len(self.mission.stages_list):
             self.mission_stage_entry.ReplaceValue(
@@ -471,14 +470,14 @@ class MissionControl(vmqtt.VnavsNode):
 
     def OnCancelMission(self):
         print("OnCancelMission()")
-        self.Publish(vconst.process_log_list_topic, {})
+        self.publish(vconst.process_log_list_topic, {})
         payload = {}
         payload["mission_name"] = self.mission_name_entry.Value()
-        self.Publish(vconst.mission_cancel_topic, payload)
+        self.publish(vconst.mission_cancel_topic, payload)
         #
         payload = {}
         payload[helmsman.HELMSMAN_SPEED] = 0
-        self.Publish(vconst.helmsman_orders_topic, payload)
+        self.publish(vconst.helmsman_orders_topic, payload)
 
     #
     # Message Handlers
@@ -620,7 +619,7 @@ class MissionControl(vmqtt.VnavsNode):
             # look for download subdirectories with corresponding log file
             dpath = os.path.join(self.downloadDir, this)
             if os.path.isdir(dpath):
-                log_path = os.path.join(dpath, this + vcomms.FMQTT_LOG_EXTENSION)
+                log_path = os.path.join(dpath, this + fastmqttserver.FMQTT_LOG_EXTENSION)
                 if os.path.isfile(log_path):
                     mission_id_list.append(this)
         mission_id_list.sort()
@@ -654,11 +653,10 @@ class MissionControl(vmqtt.VnavsNode):
             )
         )
 
-    def DoLoop(self):
-        # print("DoLoop()")
+    def client_loop_code(self):
         if self.transfer_type != TRANSFER_TYPE_NONE:
             # Checking the transfer reports completion and does some transfering if not complete
-            if self.file_client.CheckTransfer():
+            if self.file_client.check_transfer():
                 # Transfer is complete
                 # print("DoLoop() Transfer Complete", self.transfer_type)
                 if self.transfer_type == TRANSFER_TYPE_LOG:
@@ -714,7 +712,7 @@ class MissionControl(vmqtt.VnavsNode):
                 if self.transfer_type == TRANSFER_TYPE_IMAGE:
                     transfer_fn = self.pic_fn
                     transfer_path = self.pic_path
-                self.file_client.StartTransfer(
+                self.file_client.start_transfer(
                     self.transfer_type, transfer_fn, path=transfer_path
                 )
                 # print("DoLoop() Start Transfer", self.transfer_type, transfer_fn)
@@ -916,7 +914,8 @@ def SaveGps(waypoint):
 
 if __name__ == "__main__":
     if sys.argv[1] == "gui":
-        vmqtt.LaunchNode(MissionControl)
+        m = MissionControl()
+        m.main_loop()
     elif sys.argv[1] == "gps":
         if len(sys.argv) > 2:
             waypoint = sys.argv[2]
