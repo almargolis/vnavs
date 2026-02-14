@@ -9,8 +9,8 @@ import traceback
 
 import paho.mqtt.client as mqtt
 
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_node as vmqtt
+from ezcomms import vnavs_const as vconst
+from ezcomms import vnavs_node as vmqtt
 
 
 class translate_mosquitto_to_fast(vmqtt.VnavsNode):

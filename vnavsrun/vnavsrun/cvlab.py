@@ -15,10 +15,10 @@ from eztk import eztk
 from vnavslib import image_analyzer
 from vnavslib import image_filters
 from vnavslib import opticchiasm as oc
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_data as vdata
-from vnavslib import vnavs_file_xfer_client
-from vnavslib import vnavs_node as vmqtt
+from ezcomms import vnavs_const as vconst
+from ezcomms import vnavs_data as vdata
+from ezcomms import vnavs_file_xfer_client
+from ezcomms import vnavs_node as vmqtt
 from eztk.eztk import (
     FIRST_ROW,
     SAME_ROW,

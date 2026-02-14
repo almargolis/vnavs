@@ -1,7 +1,9 @@
 import numpy as np
 
 from vnavslib import opticchiasm as oc
-from vnavslib import vnavs_data as vdata
+from ezcomms import vnavs_data as vdata
+
+vdata.DataAttribIntList._oc_module = oc
 
 
 class ImageFilterCollection:

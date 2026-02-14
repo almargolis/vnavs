@@ -4,9 +4,9 @@ import subprocess
 import sys
 import time
 
-from vnavslib import vnavs_comms as vcomms
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_node as vmqtt
+from ezcomms import vnavs_comms as vcomms
+from ezcomms import vnavs_const as vconst
+from ezcomms import vnavs_node as vmqtt
 from vnavsrun import fastmqttserver
 
 SYSTEMCTL = "/bin/systemctl"

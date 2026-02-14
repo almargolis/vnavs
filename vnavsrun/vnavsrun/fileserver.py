@@ -1,7 +1,7 @@
 import os
 import sys
 
-from vnavslib import vnavs_comms as vcomms
+from ezcomms import vnavs_comms as vcomms
 
 
 class FileServer(vcomms.SocketWrapperServer):

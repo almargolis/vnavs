@@ -9,8 +9,9 @@ import sys
 import time
 
 
-from vnavslib import vnavs_node as vmqtt
-from vnavslib import vnavs_const as vconst
+from ezcomms import vnavs_node as vmqtt
+from ezcomms import vnavs_const as vconst
+from ezcomms import vnavs_data as vdata
 import paho.mqtt.client as mqtt
 
 dev_sense_hat = None
@@ -395,6 +396,11 @@ class Position:
 
     def PositionString(self):
         return PositionString(self.latitude, self.longitude)
+
+
+vdata.RegisterClass(
+    vdata.PersistentClass(Position, PositionFactory, vdata.SlotsPayload)
+)
 
 
 #

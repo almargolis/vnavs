@@ -1,7 +1,7 @@
 import sys
 import time
 
-from vnavslib import vnavs_node as vnode
+from ezcomms import vnavs_node as vnode
 
 TEST_TOPIC = "test"
 

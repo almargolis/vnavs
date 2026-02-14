@@ -14,8 +14,6 @@ from operator import itemgetter
 import sys
 import re
 
-from vnavslib import vnavs_data as vdata
-
 # OpenCv uses a range of 0 to HSV_MAX_HUE instead of 0 to 360.
 # old, non-working values were yellow=30, orange=12, blue=120, red=178
 HSV_MAX_HUE = 179

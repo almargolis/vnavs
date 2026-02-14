@@ -13,10 +13,10 @@ import cv2
 import numpy as np
 
 from vnavslib import opticchiasm
-from vnavslib import vnavs_comms as vcomms
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_data as vdata
-from vnavslib import vnavs_node as vmqtt
+from ezcomms import vnavs_comms as vcomms
+from ezcomms import vnavs_const as vconst
+from ezcomms import vnavs_data as vdata
+from ezcomms import vnavs_node as vmqtt
 from vnavslib.macbookcamera import MacbookCamera
 
 picamera = None  # imported below if needed

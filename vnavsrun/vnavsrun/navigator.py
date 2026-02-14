@@ -14,10 +14,10 @@ import string
 import sys
 import time
 
-from vnavslib import vnavs_comms as vcomms
-from vnavslib import vnavs_node as vmqtt
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_data as vdata
+from ezcomms import vnavs_comms as vcomms
+from ezcomms import vnavs_node as vmqtt
+from ezcomms import vnavs_const as vconst
+from ezcomms import vnavs_data as vdata
 from vnavsrun import engineer_1
 from vnavsrun import helmsman
 

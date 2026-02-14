@@ -4,8 +4,8 @@ import time
 
 import evdev
 
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_node as vmqtt
+from ezcomms import vnavs_const as vconst
+from ezcomms import vnavs_node as vmqtt
 
 
 def PrintCapability(gamepad):

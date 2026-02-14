@@ -31,13 +31,14 @@ pylint vnavslib/vnavslib/ vnavsrun/vnavsrun/
 
 ## Architecture
 
-### Two-Package Structure
+### Package Structure
 
-- **`vnavslib/vnavslib/`** — Reusable core library (communication, vision, hardware abstraction)
+- **`ezcomms`** (external package, `~/projects/published/ezcomms`) — Communication and data layer: `vnavs_node.py`, `vnavs_comms.py`, `vnavs_mqtt_clients.py`, `vnavs_data.py`, `vnavs_const.py`, `vnavs_file_xfer_client.py`. Installed via `pip install -e`.
+- **`vnavslib/vnavslib/`** — Vision pipeline and hardware abstraction (opticchiasm, image_filters, image_analyzer, cv_notes, joystick, macbookcamera, etc.)
 - **`vnavsrun/vnavsrun/`** — Application-level nodes (servers, controllers, GUIs)
-- Tests live in `vnavslib/test/` and `vnavsrun/test/`, mirroring module names as `test_<module>.py`
+- Tests: `vnavsrun/test/` (25 tests in test_cvlab.py), ezcomms has its own tests (26 tests)
 
-### Communication Layer (vnavslib)
+### Communication Layer (ezcomms)
 
 `VnavsNode` (in `vnavs_node.py`) is the base class for nearly every module. It provides pub/sub messaging, automatic reconnection, thread management, and exception rate limiting. All nodes inherit from it.
 
@@ -46,6 +47,8 @@ Two broker backends share a unified API:
 - **Mosquitto** — Standard MQTT on port 1883, wrapped via `PahoClient` in `vnavs_mqtt_clients.py`.
 
 `vnavs_comms.py` implements the low-level socket layer: `SocketWrapper` → `SocketWrapperServer`/`SocketWrapperClient`, plus `SocketXfer` for multi-process file transfer.
+
+All vnavs modules import from ezcomms: `from ezcomms import vnavs_node as vmqtt`.
 
 ### Vision Pipeline (vnavslib)
 
