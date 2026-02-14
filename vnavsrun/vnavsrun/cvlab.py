@@ -12,6 +12,8 @@ import numpy as np
 from PIL import ImageTk, Image
 
 from vnavslib import easytk
+from vnavslib import image_analyzer
+from vnavslib import image_filters
 from vnavslib import opticchiasm as oc
 from vnavslib import vnavs_const as vconst
 from vnavslib import vnavs_data as vdata
@@ -108,7 +110,7 @@ class ProcessStep:
         #
         self.filter_selection = self.input_panel.add_listbox(
             "Filters",
-            oc.ImageFilterCollection.image_filter_names,
+            image_filters.ImageFilterCollection.image_filter_names,
             selection=filter_name,
             command=self.new_filter,
             rowspan=4,
@@ -275,7 +277,7 @@ class ProcessStep:
         if new_filter_name != self.cv_filter_name:
             self.filter_selection.replace_value(new_filter_name)
             self.cv_filter_name = new_filter_name
-            self.cv_specs = oc.ImageFilterCollection.image_filters[self.cv_filter_name]
+            self.cv_specs = image_filters.ImageFilterCollection.image_filters[self.cv_filter_name]
             self.parms_specs = self.cv_specs.parms
             if self.cv_specs.annotate_code is not None:
                 annotation_control = False
@@ -427,7 +429,7 @@ class ProcessStep:
         code = self.cv_specs.code
         if code[-1:] != "\n":
             code += "\n"
-        if script and (oc.FLAG_ISBASE in self.cv_specs.flags):
+        if script and (image_filters.FLAG_ISBASE in self.cv_specs.flags):
             code += "im_base = im_in\n"
         if self.cv_specs.annotate_code is not None:
             if show_annotation:
@@ -454,7 +456,7 @@ class ProcessStep:
                 break
             if this.exec_im is not None:
                 latest_im = this.exec_im
-                if oc.FLAG_ISBASE in this.cv_specs.flags:
+                if image_filters.FLAG_ISBASE in this.cv_specs.flags:
                     latest_base_image = this.exec_im
             if this.exec_contours is not None:
                 latest_contours = this.exec_contours
@@ -525,7 +527,7 @@ class ProcessStep:
         if trace is not None:
             deposition = trace + "\n\n" + deposition
             self.deposition.replace_value(deposition)
-        if oc.FLAG_SLIDERS in self.cv_specs.flags:
+        if image_filters.FLAG_SLIDERS in self.cv_specs.flags:
             self.clear_info()
             self.add_info_sliders()
         if self.exec_annotated is not None:
@@ -609,7 +611,7 @@ class CvLab(vmqtt.VnavsNode):
         self.loading = False
         self.step_execution_needed = False
 
-        self.image = oc.ImageAnalyzer()
+        self.image = image_analyzer.ImageAnalyzer()
         self.image.img_crop = (300, 200)
         self.image.img_crop = (250, 450)
         self.image.img_crop = (150, 550)
@@ -682,13 +684,13 @@ class CvLab(vmqtt.VnavsNode):
         new_parms = {}
         if len(ProcessStep.steps) == 0:
             ProcessStep(
-                oc.FILTER_NAME_IMAGE,
+                image_filters.FILTER_NAME_IMAGE,
                 parms=new_parms,
                 where=self.notebook_add_id,
             )
         else:
             ProcessStep.steps[0].set_filter(
-                filter_name=oc.FILTER_NAME_IMAGE, new_parms=new_parms
+                filter_name=image_filters.FILTER_NAME_IMAGE, new_parms=new_parms
             )
         if (new_image is None) and (path is not None):
             new_image = cv2.imread(path)

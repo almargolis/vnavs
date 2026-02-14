@@ -17,10 +17,12 @@ import time
 try:
     import numpy
     import cv2
+    from vnavslib import image_analyzer
     from vnavslib import opticchiasm as oc
 except ImportError:
     cv2 = None
     numpy = None
+    image_analyzer = None
     oc = None
 
 from vnavsrun import engineer_1
@@ -152,7 +154,7 @@ class MissionControl(vmqtt.VnavsNode):
         self.thumbnail_frame = self.tk.add_label_frame("Thumbnails", row=2)
         self.notebook = self.tk.add_notebook(row=3)
 
-        self.image = oc.ImageAnalyzer()
+        self.image = image_analyzer.ImageAnalyzer()
         self.image.img_crop = (300, 200)
         self.image.img_crop = (250, 450)
         self.image.img_crop = (150, 550)

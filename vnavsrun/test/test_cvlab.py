@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 
+from vnavslib import image_filters
 from vnavslib import opticchiasm as oc
 from vnavslib import vnavs_data as vdata
 from vnavsrun import cvlab
@@ -189,7 +190,7 @@ def _make_test_filter(name, code, parms=None, flags=None, annotate_code=None):
     """Create an ImageFilter for testing. Returns the filter object."""
     if parms is None:
         parms = []
-    filt = oc.ImageFilter(name, code, parms, flags=flags)
+    filt = image_filters.ImageFilter(name, code, parms, flags=flags)
     if annotate_code is not None:
         filt.annotate_code = annotate_code
     return filt
@@ -197,10 +198,10 @@ def _make_test_filter(name, code, parms=None, flags=None, annotate_code=None):
 
 def _cleanup_filter(name):
     """Remove a test filter from ImageFilterCollection."""
-    if name in oc.ImageFilterCollection.image_filters:
-        del oc.ImageFilterCollection.image_filters[name]
-    if name in oc.ImageFilterCollection.image_filter_names:
-        oc.ImageFilterCollection.image_filter_names.remove(name)
+    if name in image_filters.ImageFilterCollection.image_filters:
+        del image_filters.ImageFilterCollection.image_filters[name]
+    if name in image_filters.ImageFilterCollection.image_filter_names:
+        image_filters.ImageFilterCollection.image_filter_names.remove(name)
 
 
 def test_get_code_str_image_filter_script_mode():
@@ -209,7 +210,7 @@ def test_get_code_str_image_filter_script_mode():
         filt = _make_test_filter(
             fname,
             "{x_output_im} = xstep.source_im.copy()",
-            flags=[oc.FLAG_ISBASE],
+            flags=[image_filters.FLAG_ISBASE],
         )
         ps = make_process_step(
             cv_filter_name=fname,
@@ -230,7 +231,7 @@ def test_get_code_str_image_filter_exec_mode():
         filt = _make_test_filter(
             fname,
             "{x_output_im} = xstep.source_im.copy()",
-            flags=[oc.FLAG_ISBASE],
+            flags=[image_filters.FLAG_ISBASE],
         )
         ps = make_process_step(
             cv_filter_name=fname,
@@ -345,7 +346,7 @@ def test_execute_step_basic_image_filter():
         filt = _make_test_filter(
             fname,
             "{x_output_im} = xstep.source_im.copy()",
-            flags=[oc.FLAG_ISBASE],
+            flags=[image_filters.FLAG_ISBASE],
         )
         source = oc.Image(im=np.zeros((10, 10, 3), dtype=np.uint8), colorcode="BGR")
         ps = make_process_step(
@@ -377,7 +378,7 @@ def test_execute_step_two_step_pipeline():
         filt0 = _make_test_filter(
             fname0,
             "{x_output_im} = xstep.source_im.copy()",
-            flags=[oc.FLAG_ISBASE],
+            flags=[image_filters.FLAG_ISBASE],
         )
         filt1 = _make_test_filter(
             fname1,
