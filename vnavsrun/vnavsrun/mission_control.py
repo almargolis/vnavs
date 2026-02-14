@@ -17,8 +17,8 @@ import time
 try:
     import numpy
     import cv2
-    from vnavslib import image_analyzer
-    from vnavslib import opticchiasm as oc
+    from cvpipeline import image_analyzer
+    from cvpipeline import opticchiasm as oc
 except ImportError:
     cv2 = None
     numpy = None

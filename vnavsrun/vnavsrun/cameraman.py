@@ -12,12 +12,12 @@ import traceback
 import cv2
 import numpy as np
 
-from vnavslib import opticchiasm
+from cvpipeline import opticchiasm
 from ezcomms import vnavs_comms as vcomms
 from ezcomms import vnavs_const as vconst
 from ezcomms import vnavs_data as vdata
 from ezcomms import vnavs_node as vmqtt
-from vnavslib.macbookcamera import MacbookCamera
+from cvpipeline.macbookcamera import MacbookCamera
 
 picamera = None  # imported below if needed
 

@@ -1,1 +1,1 @@
-from vnavslib import macbookcamera
+from cvpipeline import macbookcamera

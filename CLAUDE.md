@@ -17,10 +17,7 @@ pytest vnavslib/test
 pytest vnavsrun/test
 
 # Run a single test file
-pytest vnavsrun/test/test_cvpipeline.py -v
-
-# Run a single test function
-pytest vnavsrun/test/test_cvpipeline.py::test_clear_info_empties_existing_list -v
+pytest vnavsrun/test/test_cameraman.py -v
 
 # Format code
 black .
@@ -34,9 +31,10 @@ pylint vnavslib/vnavslib/ vnavsrun/vnavsrun/
 ### Package Structure
 
 - **`ezcomms`** (external package, `~/projects/published/ezcomms`) — Communication and data layer: `vnavs_node.py`, `vnavs_comms.py`, `vnavs_mqtt_clients.py`, `vnavs_data.py`, `vnavs_const.py`, `vnavs_file_xfer_client.py`. Installed via `pip install -e`.
-- **`vnavslib/vnavslib/`** — Vision pipeline and hardware abstraction (opticchiasm, image_filters, image_analyzer, cv_notes, joystick, macbookcamera, etc.)
+- **`cvpipeline`** (external package) — Vision pipeline: `opticchiasm.py`, `image_filters.py`, `image_analyzer.py`, `macbookcamera.py`, `cvpipeline.py` (GUI editor). Installed via `pip install -e`.
+- **`vnavslib/vnavslib/`** — Remaining hardware abstraction (cv_notes, joystick, etc.)
 - **`vnavsrun/vnavsrun/`** — Application-level nodes (servers, controllers, GUIs)
-- Tests: `vnavsrun/test/` (25 tests in test_cvpipeline.py), ezcomms has its own tests (26 tests)
+- Tests: cvpipeline has its own tests (25 tests), ezcomms has its own tests (26 tests), eztk has its own tests (52 tests)
 
 ### Communication Layer (ezcomms)
 
@@ -50,16 +48,18 @@ Two broker backends share a unified API:
 
 All vnavs modules import from ezcomms: `from ezcomms import vnavs_node as vmqtt`.
 
-### Vision Pipeline (vnavslib)
+### Vision Pipeline (cvpipeline package)
 
-The vision system is split across four modules:
+The vision system lives in the external `cvpipeline` package, split across four modules:
 
 - **`opticchiasm.py`** — Core vision primitives: `Image` (OpenCV wrapper tracking color space to prevent conversion bugs), color constants (`HSV_*`, `DRAW_BGR_*`, `IM_*`), geometry classes (`HsvSpec`, `RightRect`, `RotatedRect`, `LineObject`), color masking, Hough line detection, `ReflexEntities` (used by cameraman.py for line-following), and utility functions (`auto_canny`, `simplest_cb`, `roi`, etc.).
 - **`image_filters.py`** — Filter system: `ImageFilter` (chainable processing step with code template), `ImageFilterCollection` (registry), `FILTER_NAME_*`/`FLAG_*` constants, and all 26 built-in filter definitions. Filter code templates are strings executed via `exec()` that reference `oc.` prefixed names from opticchiasm.
 - **`image_analyzer.py`** — `ImageAnalyzer` class for standalone image analysis (line detection, contour classification) plus helper functions (`calc_rect_centerline`, `color_key`, `filter_contours`, etc.).
-- **`cv_notes.py`** — Unused/experimental code kept for reference (Robogames race logic, ColorBalance, thinning algorithms, etc.).
+- **`cvpipeline.py`** — GUI editor for building filter pipelines. Imports cameraman from vnavs as optional dependency.
 
-`cvpipeline.py` (in vnavsrun) is the GUI editor for building filter pipelines using these modules.
+`cv_notes.py` (unused/experimental code) remains in `vnavslib/vnavslib/`.
+
+All vnavs modules import from cvpipeline: `from cvpipeline import opticchiasm as oc`.
 
 ### Key Patterns
 

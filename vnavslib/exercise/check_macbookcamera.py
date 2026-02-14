@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-from vnavslib import opticchiasm as oc
-from vnavslib import macbookcamera
+from cvpipeline import opticchiasm as oc
+from cvpipeline import macbookcamera
 
 cam = macbookcamera.MacbookCamera()
 im_in = cam.capture_image()
