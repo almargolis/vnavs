@@ -10,7 +10,7 @@ im_base = im_in.copy()
 #
 # Step 1 - Gray
 #
-im_in = im_in.CopyAsGray()
+im_in = im_in.copy_as_gray()
 
 cv2.imshow("im_in", im_in.im)
 cv2.waitKey(0)

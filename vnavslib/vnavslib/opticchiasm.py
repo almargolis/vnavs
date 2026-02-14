@@ -71,12 +71,12 @@ RACE_THRESHOLD = 150
 #   [0,0] is the upper, left corner of the image
 #   The image is stored as an array of horizontal lines, so the index is [y, x]
 #
-def ReprOpenCv(im):
+def repr_opencv(im):
     imx = Image(im=im, colorcode=IM_BGR)
     return imx.__repr__()
 
 
-class Image(object):
+class Image:
     """
     Image is a wrapper around OpenCv images. Its main unique value is adding colorcode as a property
     of the image, avoiding a variety of bugs. It also provides convenience functions to deal with
@@ -106,7 +106,7 @@ class Image(object):
         self.crop_source = None  # Image() from which this is cropped
         self.crop_x = None  # left x starting position of this crop in source image
         self.crop_y = None  # upper y` starting position of this crop in source image
-        self.ReplaceImage(im, colorcode)
+        self.replace_image(im, colorcode)
 
     def __repr__(self):
         return "Image {}x{}x{} {}".format(
@@ -119,48 +119,48 @@ class Image(object):
         else:
             return Image(im=self._im.copy(), colorcode=self.colorcode)
 
-    def CopyAsBGR(self):
+    def copy_as_bgr(self):
         if self.colorcode == IM_BGR:
             return self.copy()
         transform = getattr(cv2, "COLOR_{}2{}".format(self.colorcode, IM_BGR))
         return Image(im=cv2.cvtColor(self._im, transform), colorcode=IM_BGR)
 
-    def CopyAsGray(self):
+    def copy_as_gray(self):
         if self.colorcode == IM_GRAY:
             return self.copy()
         transform = getattr(cv2, "COLOR_{}2{}".format(self.colorcode, IM_GRAY))
         return Image(im=cv2.cvtColor(self._im, transform), colorcode=IM_GRAY)
 
     @property
-    def im(self):  # im is a property to discourage skipping ReplaceImage()
+    def im(self):  # im is a property to discourage skipping replace_image()
         return self._im
 
-    def ImAsBGR(self):
-        return self.ImAsAny(IM_BGR)
+    def im_as_bgr(self):
+        return self.im_as_any(IM_BGR)
 
-    def ImAsRGB(self):
-        return self.ImAsAny(IM_RGB)
+    def im_as_rgb(self):
+        return self.im_as_any(IM_RGB)
 
-    def ImAsHSV(self):
-        return self.ImAsAny(IM_HSV)
+    def im_as_hsv(self):
+        return self.im_as_any(IM_HSV)
 
-    def ImAsGray(self, Copy=False):
+    def im_as_gray(self, copy=False):
         if self.colorcode == IM_GRAY:
-            if Copy:
+            if copy:
                 return self._im.copy()
             else:
                 return self._im
-        return self.ImAsAny(IM_GRAY)
+        return self.im_as_any(IM_GRAY)
 
-    def ImAsAny(self, colorcode, Copy=False):
-        # print("ImAsAny()", self.colorcode, colorcode, self._im.__class__.__name__)
+    def im_as_any(self, colorcode, copy=False):
+        # print("im_as_any()", self.colorcode, colorcode, self._im.__class__.__name__)
         if self._im is None:
             return None
         colorcode = colorcode.upper()
         if not colorcode in IM_COLORCODES:
             return None
         if self.colorcode == colorcode:
-            if Copy:
+            if copy:
                 return self._im.copy()
             else:
                 return self._im
@@ -169,7 +169,7 @@ class Image(object):
             return None
         return cv2.cvtColor(self._im, transform)
 
-    def ReplaceImage(self, im, colorcode):
+    def replace_image(self, im, colorcode):
         if not colorcode in IM_COLORCODES:
             raise ValueError(f"Invalid colorcode '{colorcode}")
         self._im = im
@@ -187,24 +187,24 @@ class Image(object):
                 self.colordepth = 1
         self.shape = (self.height, self.width, self.colordepth)
 
-    def Write(self, fn=None):
+    def write(self, fn=None):
         if fn is None:
             fn = self.file_path
-        cv2.imwrite(fn, self.ImAsBGR())
+        cv2.imwrite(fn, self.im_as_bgr())
         # except IOError as e:
         # IOError: [Errno 28] Out of disk space
         #                    if e.errno == 28:
 
-    def AverageHue(self, rect=None):
+    def average_hue(self, rect=None):
         if rect is None:
-            hsv = self.ImAsHSV()
+            hsv = self.im_as_hsv()
         else:
-            hsv = self.Crop(rect).ImAsHSV()
+            hsv = self.crop(rect).im_as_hsv()
         average_color = hsv[:, :, 0].mean()
         return average_color
 
-    def Crop(self, rect, Isolate=False):
-        # print("Crop()", rect)
+    def crop(self, rect, isolate=False):
+        # print("crop()", rect)
         if rect is None:
             return self.copy()
         new_image = Image(
@@ -213,28 +213,28 @@ class Image(object):
             ].copy(),
             colorcode=self.colorcode,
         )
-        if not Isolate:
+        if not isolate:
             new_image.crop_source = self
             new_image.crop_x = rect.x_min
             new_image.crop_y = rect.y_min
         return new_image
 
-    def DrawLinePoints(self, linepoints, color=DRAW_BGR_GREEN, thickness=2):
-        # Annotates an array of RightRect or RotatedRect from ChaseLine() or elsewhere
+    def draw_line_points(self, linepoints, color=DRAW_BGR_GREEN, thickness=2):
+        # Annotates an array of RightRect or RotatedRect from chase_line() or elsewhere
         if linepoints is not None:
             for this in linepoints:
                 cv2.rectangle(self._im, this.p1, this.p2, color, thickness)
 
-    def DrawRectangle(self, rect, color=DRAW_BGR_GREEN, thickness=2):
+    def draw_rectangle(self, rect, color=DRAW_BGR_GREEN, thickness=2):
         cv2.rectangle(self._im, rect.p1, rect.p2, color, thickness)
 
-    def RightRectFromSymbolicYX(self, y_range, x_range):
-        return RightRectFromSymbolicYX(self._im, y_range, x_range)
+    def right_rect_from_symbolic_yx(self, y_range, x_range):
+        return right_rect_from_symbolic_yx(self._im, y_range, x_range)
 
-    def RightRectFromSymbolicPP(self, p1, p2):
-        return RightRectFromSymbolicPP(self._im, p1, p2)
+    def right_rect_from_symbolic_pp(self, p1, p2):
+        return right_rect_from_symbolic_pp(self._im, p1, p2)
 
-    def ChaseLine(
+    def chase_line(
         self, hsvspec, rect, end_y=0, sliceheight=20, kernel_dim=3, iterations=1
     ):
         # don't modify source specs, make a working copy to step through
@@ -247,21 +247,21 @@ class Image(object):
         min_blob_area = 1
         min_blob_area = (sliceheight * 0.5) * 3  # 1/2 slice height by 3 pixels
         max_missing = 2
-        print("ChaseLine()", self, line_hsvspec, line_rect)
+        print("chase_line()", self, line_hsvspec, line_rect)
 
         def QualifyLineSegment():
             global next_hsv_spec
             # This advances the search through the image. Adjusting line_hsvspec and line_rect.
             # check if the blob is reasonably a line segment
             # size? color? location?
-            # print("ChaseLine() Qualify", line_hsvspec, line_rect)
-            blobs, next_hsv_spec = self.FindColorBlobs(
+            # print("chase_line() Qualify", line_hsvspec, line_rect)
+            blobs, next_hsv_spec = self.find_color_blobs(
                 hsvspec=line_hsvspec,
                 rect=line_rect,
                 kernel_dim=kernel_dim,
                 iterations=iterations,
-                MinimumBlobArea=min_blob_area,
-                MaximumCtOfRectsWanted=1,
+                minimum_blob_area=min_blob_area,
+                maximum_ct_of_rects_wanted=1,
             )
             if (blobs is None) or (len(blobs) < 1):
                 return None, None
@@ -293,7 +293,7 @@ class Image(object):
         while True:
             chase_ct += 1
             print(
-                "ChaseLine() Loop",
+                "chase_line() Loop",
                 chase_ct,
                 missing_slices,
                 line_points,
@@ -315,58 +315,58 @@ class Image(object):
                 # False positives are worse than false negatives.
                 return line_points
 
-    def FindColorBlobs(
+    def find_color_blobs(
         self,
         hsvspec,
         rect=None,
         kernel_dim=3,
         iterations=1,
-        MinimumBlobArea=1,
-        MaximumCtOfRectsWanted=3,
+        minimum_blob_area=1,
+        maximum_ct_of_rects_wanted=3,
     ):
-        # print("FindColorBlobs()", self, rect, hsvspec)
+        # print("find_color_blobs()", self, rect, hsvspec)
         if rect is None:
             im_cropped = self
         else:
-            im_cropped = self.Crop(rect)
-        im_hsv = im_cropped.ImAsHSV()
-        im_masked = ColorMaskOneHue(im_hsv, hsvspec)
-        # print("FindColorBlobs() Cropped " + ReprOpenCv(im_masked))
+            im_cropped = self.crop(rect)
+        im_hsv = im_cropped.im_as_hsv()
+        im_masked = color_mask_one_hue(im_hsv, hsvspec)
+        # print("find_color_blobs() Cropped " + repr_opencv(im_masked))
         kernel = np.ones((kernel_dim, kernel_dim), np.uint8)
         im_dilated = cv2.dilate(im_masked, kernel, iterations=iterations)
         cont2, contours, hierarchy = cv2.findContours(
             im_dilated.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
         )
-        rotated_rect_list = ContoursExtract(
+        rotated_rect_list = contours_extract(
             contours,
             hierarchy,
-            MinimumArea=MinimumBlobArea,
-            MaximumCtOfRectsWanted=MaximumCtOfRectsWanted,
+            minimum_area=minimum_blob_area,
+            maximum_ct_of_rects_wanted=maximum_ct_of_rects_wanted,
         )
         next_hsv_spec = None
         if (rotated_rect_list is not None) and (len(rotated_rect_list) > 0):
             # use im_masked because im_dilated includes out of range hsv values
-            next_hsv_spec = NextHsvSpec(
+            next_hsv_spec = next_hsv_spec_fn(
                 im_hsv, mask=im_masked, rect=rotated_rect_list[0]
             )
             if rect is not None:
                 for this in rotatated_rect_list:  # adjust to original image coordinates
                     this.center_x += rect.x_min
                     this.center_y += rect.y_min
-        print("FindColorBlobs()", rotated_rect_list)
+        print("find_color_blobs()", rotated_rect_list)
         return rotated_rect_list, next_hsv_spec
 
 
-def ImageFromPicamera(picam_image, format, file_path=None):
+def image_from_picamera(picam_image, format, file_path=None):
     # format is picamera style format
     img = Image()
     img.file_path = file_path
     if format == "bgr":
-        img.ReplaceImage(picam_image.array, IM_BGR)
+        img.replace_image(picam_image.array, IM_BGR)
     elif format == "rgb":
-        img.ReplaceImage(picam_image.array, IM_RGB)
+        img.replace_image(picam_image.array, IM_RGB)
     elif format == "yuv":
-        img.ReplaceImage(picam_image.array, IM_YUV)
+        img.replace_image(picam_image.array, IM_YUV)
     return img
 
 
@@ -385,19 +385,19 @@ FLAG_ISBASE = "isbase"
 FLAG_SLIDERS = "sliders"
 
 
-class ImageFilterCollection(object):
+class ImageFilterCollection:
     image_filters = {}
     image_filter_names = []
 
 
-class ImageFilter(object):
+class ImageFilter:
     __slots__ = ("annotate_code", "clsdata", "flags", "code", "name", "parms")
 
-    def __init__(self, name, code, parms, Flags=None):
+    def __init__(self, name, code, parms, flags=None):
         self.name = name
         self.code = code
         self.parms = parms  # a list of vdata.DataAttrib() and descendent objects
-        self.flags = Flags  # a list of string flag names
+        self.flags = flags  # a list of string flag names
         self.annotate_code = None
         self.clsdata = ImageFilterCollection
         self.clsdata.image_filters[name] = self
@@ -411,12 +411,12 @@ class ImageFilter(object):
 # 	xstep is the current ProcessStep() with exec_im set to None.
 #
 ImageFilter(
-    FILTER_NAME_IMAGE, "{x_output_im} = xstep.source_im.copy()", [], Flags=[FLAG_ISBASE]
+    FILTER_NAME_IMAGE, "{x_output_im} = xstep.source_im.copy()", [], flags=[FLAG_ISBASE]
 )
 
 ImageFilter(
     FILTER_NAME_COLORMASK_MULTI,
-    "{x_output_im} = oc.Image(oc.ColorMask(im_in.ImAsHSV(), colors=[{colors}], huerange={hueRange},"
+    "{x_output_im} = oc.Image(oc.color_mask(im_in.im_as_hsv(), colors=[{colors}], huerange={hueRange},"
     + " saturation={saturation}, saturationrange={saturationRange},"
     + " value={value}, valuerange={valueRange})",
     [
@@ -438,7 +438,7 @@ ImageFilter(
         ),
         vdata.DataAttribStr("colorcode", IM_HSV),
     ],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
@@ -447,7 +447,7 @@ ImageFilter(
     + " hue={hue}, huerange={hueRange},"
     + " saturation={saturation}, saturationrange={saturationRange},"
     + " value={value}, valuerange={valueRange})\n"
-    '{x_output_im} = oc.Image(oc.ColorMaskOneHue(im_in.ImAsAny("{colorcode}"), {x_output_hsvspec}),'
+    '{x_output_im} = oc.Image(oc.color_mask_one_hue(im_in.im_as_any("{colorcode}"), {x_output_hsvspec}),'
     + "	colorcode=oc.IM_GRAY)",
     [
         vdata.DataAttribInt(
@@ -470,58 +470,58 @@ ImageFilter(
         ),
         vdata.DataAttribStr("colorcode", IM_HSV),
     ],
-    Flags=[FLAG_SLIDERS],
+    flags=[FLAG_SLIDERS],
 )
 
 image_filter = ImageFilter(
     FILTER_NAME_CROPPP,
-    "{x_output_rect} = im_in.RightRectFromSymbolicPP({p1}, {p2})\n"
-    + "{x_output_im} = im_in.Crop({x_output_rect})\n"
+    "{x_output_rect} = im_in.right_rect_from_symbolic_pp({p1}, {p2})\n"
+    + "{x_output_im} = im_in.crop({x_output_rect})\n"
     + "print(im_in.shape, {x_output_rect})\n",
     [
         vdata.DataAttribPointSym("p1", "m-50,m+50"),
         vdata.DataAttribPointSym("p2", "-100,e"),
     ],
-    Flags=[],
+    flags=[],
 )
 image_filter.annotate_code = (
     "{x_output_annotated} = im_base.copy()\n"
-    + "{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
+    + "{x_output_annotated}.draw_rectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
 )
 
 image_filter = ImageFilter(
     "CropYX",
-    "{x_output_rect} = im_in.RightRectFromSymbolicYX({y_range}, {x_range})\n"
-    + "{x_output_im} = im_in.Crop({x_output_rect})\n"
+    "{x_output_rect} = im_in.right_rect_from_symbolic_yx({y_range}, {x_range})\n"
+    + "{x_output_im} = im_in.crop({x_output_rect})\n"
     + "print(im_in.shape, {x_output_rect})\n",
     [
         vdata.DataAttribPointSym("y_range", "-100,"),
         vdata.DataAttribPointSym("x_range", "m-50,m+50"),
     ],
-    Flags=[],
+    flags=[],
 )
 image_filter.annotate_code = (
     "{x_output_annotated} = im_base.copy()\n"
-    + "{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
+    + "{x_output_annotated}.draw_rectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
 )
 
-ImageFilter("Gray", "{x_output_im} = im_in.CopyAsGray()", [], Flags=[])
+ImageFilter("Gray", "{x_output_im} = im_in.copy_as_gray()", [], flags=[])
 
 ImageFilter(
     "Blur",
     "{x_output_im} = oc.Image(im=cv2.blur(im_in.im, {ksize}), colorcode=im_in.colorcode)",
     [vdata.DataAttribPoint("ksize", "3,3")],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
     "Cameraman",
-    '{x_output_im} = oc.Cameraman(im_in, "{path}", "{fn}")',
+    '{x_output_im} = oc.cameraman_snapshot(im_in, "{path}", "{fn}")',
     [
         vdata.DataAttribStr("path", "./scripts"),
         vdata.DataAttribStr("fn", "test.cam"),
     ],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
@@ -532,7 +532,7 @@ ImageFilter(
         vdata.DataAttribInt("sigmaColor", "17"),
         vdata.DataAttribInt("sigmaSpace", "17"),
     ],
-    Flags=[],
+    flags=[],
 )
 # diameter > 5 is very slow, use 5 for real time processing or 9 for off-line heavy image_filtering
 # the two sigma values are often the same value. <10 doesn't do much, >150 is cartoonish
@@ -541,42 +541,42 @@ ImageFilter(
     "BlurGaussian",
     "{x_output_im} = oc.Image(im=cv2.GaussianBlur(im_in.im, {ksize}, {sigmaX}), colorcode=im_in.colorcode)",
     [vdata.DataAttribPoint("ksize", "3,3"), vdata.DataAttribFloat("sigmaX", "0.0")],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
     "BlurMedian",
     "{x_output_im} = oc.Image(im=cv2.medianBlur(im_in.im, {ksize}), colorcode=im_in.colorcode)",
     [vdata.DataAttribInt("ksize", "3")],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
     "Canny",
-    "{x_output_im} = oc.Image(im=cv2.Canny(im_in.ImAsGray(), {threshold1}, {threshold2}), colorcode=oc.IM_GRAY)",
+    "{x_output_im} = oc.Image(im=cv2.Canny(im_in.im_as_gray(), {threshold1}, {threshold2}), colorcode=oc.IM_GRAY)",
     [
         vdata.DataAttribFloat("threshold1", "100"),
         vdata.DataAttribFloat("threshold2", "300"),
     ],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
     "CannyAuto",
-    "{x_output_im} = oc.Image(im=oc.AutoCanny(im_in.ImAsGray(), {sigma}), colorcode=oc.IM_GRAY)",
+    "{x_output_im} = oc.Image(im=oc.auto_canny(im_in.im_as_gray(), {sigma}), colorcode=oc.IM_GRAY)",
     [vdata.DataAttribFloat("sigma", "0.33")],
-    Flags=[],
+    flags=[],
 )
 
 image_filter = ImageFilter(
-    "ChaseLine", "line_points = im_base.ChaseLine(hsvspec_in, rect_in)", [], Flags=[]
+    "ChaseLine", "line_points = im_base.chase_line(hsvspec_in, rect_in)", [], flags=[]
 )
 # ChaseLine depends on previous rect and hsvspec. These probably changed im_in to a
 # black and while image from HueMaskSingle or similar. This therefore uses
 # im_base to reset to the original color image
 image_filter.annotate_code = (
     "{x_output_annotated} = im_base.copy()\n"
-    + "{x_output_annotated}.DrawLinePoints(line_points, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
+    + "{x_output_annotated}.draw_line_points(line_points, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
 )
 
 
@@ -584,7 +584,7 @@ ImageFilter(
     "ColorBalance",
     "{x_output_im} = oc.simplest_cb(im, {pct})",
     [vdata.DataAttribInt("pct", "20")],
-    Flags=[],
+    flags=[],
 )
 #
 # Morphing Filters
@@ -602,7 +602,7 @@ ImageFilter(
     + "{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_CLOSE, kernel, iterations={iterations}),\n"
     + "			colorcode=im_in.colorcode)\n",
     [vdata.DataAttribInt("kernel_dim", "5"), vdata.DataAttribInt("iterations", "1")],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
@@ -611,7 +611,7 @@ ImageFilter(
     + "{x_output_im} = oc.Image(im=cv2.dilate(im_in.im, kernel, iterations={iterations}),\n"
     + "			colorcode=im_in.colorcode)\n",
     [vdata.DataAttribInt("kernel_dim", "5"), vdata.DataAttribInt("iterations", "1")],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
@@ -620,7 +620,7 @@ ImageFilter(
     + "{x_output_im} = oc.Image(im=cv2.erode(im_in.im, kernel, iterations={iterations}),\n"
     + "			colorcode=im_in.colorcode)\n",
     [vdata.DataAttribInt("kernel_dim", "5"), vdata.DataAttribInt("iterations", "1")],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
@@ -629,7 +629,7 @@ ImageFilter(
     + "{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_GRADIENT, kernel, iterations={iterations}),\n"
     + "			colorcode=im_in.colorcode)\n",
     [vdata.DataAttribInt("kernel_dim", "5"), vdata.DataAttribInt("iterations", "1")],
-    Flags=[],
+    flags=[],
 )
 
 ImageFilter(
@@ -638,7 +638,7 @@ ImageFilter(
     + "{x_output_im} = oc.Image(im=cv2.morphologyEx(im_in._im, cv2.MORPH_OPEN, kernel, iterations={iterations}),\n"
     + "			colorcode=im_in.colorcode)\n",
     [vdata.DataAttribInt("kernel_dim", "5"), vdata.DataAttribInt("iterations", "1")],
-    Flags=[],
+    flags=[],
 )
 
 #
@@ -646,71 +646,71 @@ ImageFilter(
 #
 # findContours modifies the soure image. The image is assumed to be binary, ususally from canny
 # somewhere along line cont2 eliminated
-#'cont2, {x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
+#'cont2, {x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.im_as_gray(copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n',
 image_filter = ImageFilter(
     "ContoursFind",
-    "{x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.ImAsGray(Copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n",
+    "{x_output_contours}, {x_output_hierarchy} = cv2.findContours(im_in.im_as_gray(copy=True), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)\n",
     [
         vdata.DataAttribInt("MaxLevel", "-1"),
     ],
-    Flags=[],
+    flags=[],
 )
-# image_filter.annotate_code = '{x_output_annotated} = im_base.CopyAsGray().CopyAsBGR()\n' \
+# image_filter.annotate_code = '{x_output_annotated} = im_base.copy_as_gray().copy_as_bgr()\n' \
 # 				+ 'print("Contour", len({x_output_contours}))\n' \
 # 				+ 'for i in range(0, len({x_output_contours})):\n' \
 # 				+ '    color = (np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255))\n' \
 # 				+ '    cv2.drawContours({x_output_annotated}._im, {x_output_contours}, i, color, 3)\n' \
 #                               + 'print("Contour", color)\n'
-# 			+ 'oc.ContoursToLineVectors({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy})\n' \
-# 			+ 'oc.CrayolaContours({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy}, MaxLevel={MaxLevel})\n' \
+# 			+ 'oc.contours_to_line_vectors({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy})\n' \
+# 			+ 'oc.crayola_contours({x_output_annotated}.im, {x_output_contours}, {x_output_hierarchy}, max_level={MaxLevel})\n' \
 # 			+ 'cv2.drawContours({x_output_annotated}.im, {x_output_contours}, -1, oc.DRAW_BGR_RED, 1)\n' \
 
 image_filter.annotate_code = (
-    "{x_output_annotated} = im_in.CopyAsBGR()\n"
+    "{x_output_annotated} = im_in.copy_as_bgr()\n"
     + "cv2.drawContours({x_output_annotated}._im, {x_output_contours}, -1, (0, 0, 255), 3)\n"
 )
 # 			+ 'print("Contour", len(contours_in))\n' \
 
 ImageFilter(
     "EqualizeHistogram",
-    "{x_output_im} = oc.Image(im=cv2.equalizeHist(im_in.ImAsGray()), colorcode=oc.IM_GRAY)",
+    "{x_output_im} = oc.Image(im=cv2.equalizeHist(im_in.im_as_gray()), colorcode=oc.IM_GRAY)",
     [],
-    Flags=[],
+    flags=[],
 )
 
-ImageFilter("HistogramCB", "oc.Histogram_CB(im)", [], Flags=[])
+ImageFilter("HistogramCB", "oc.histogram_cb(im)", [], flags=[])
 
 image_filter = ImageFilter(
     FILTER_NAME_ANALYZER,
-    "r = im_base.RightRectFromSymbolicPP({p1}, {p2})\n",
+    "r = im_base.right_rect_from_symbolic_pp({p1}, {p2})\n",
     [
         vdata.DataAttribPointSym("p1", "m-3,m-3"),
         vdata.DataAttribPointSym("p2", "p+3,p+3"),
     ],
-    Flags=[],
+    flags=[],
 )
 image_filter.annotate_code = (
     "{x_output_annotated} = im_base.copy()\n"
-    + "{x_output_annotated}.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
-    + 'xstep.SetInfo(0, "Hue", im_base.Crop(r).AverageHue())\n'
+    + "{x_output_annotated}.draw_rectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
+    + 'xstep.SetInfo(0, "Hue", im_base.crop(r).average_hue())\n'
 )
 
 image_filter = ImageFilter(
     "HoughLinesP",
-    "{x_output_objects} = oc.HoughLinesP(im_in, minLineLength={MinLineLength}, maxLineGap={MaxLineGap})",
+    "{x_output_objects} = oc.hough_lines_p(im_in, min_line_length={MinLineLength}, max_line_gap={MaxLineGap})",
     [vdata.DataAttribInt("MinLineLength", "30"), vdata.DataAttribInt("MaxLineGap", 10)],
-    Flags=[""],
+    flags=[""],
 )
 image_filter.annotate_code = (
     "{x_output_annotated} = im_base.copy()\n"
-    + "print({x_output_objects})\n"
-    + "oc.InitColor()\n"
+    + "print(f'HoughLinesP: {{len({x_output_objects})}} lines')\n"
+    + "oc.init_color()\n"
     + "for this in {x_output_objects}:\n"
-    + "    this.Annotate({x_output_annotated})\n"
+    + "    this.annotate({x_output_annotated})\n"
 )
 
 ImageFilter(
-    "Map", "cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))", [], Flags=[]
+    "Map", "cv2.warpPerspective(im, transform, (int(w*3), int(h*4)))", [], flags=[]
 )
 
 
@@ -721,11 +721,11 @@ ImageFilter(
 # automatically set threshold using technique from
 # http://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
 # just saw URL, and have seen it before, so that's re-assuring that I like it
-def AutoCanny(grayscale_im, AutoCanny_sigma):
+def auto_canny(grayscale_im, auto_canny_sigma):
     grayscale_im_median = np.median(grayscale_im)
-    lower_canny_thresh = int(max(0, (1 - AutoCanny_sigma) * grayscale_im_median))
-    upper_canny_thresh = int(min(255, (1 + AutoCanny_sigma) * grayscale_im_median))
-    # print("AutoCanny()", grayscale_im_median, lower_canny_thresh, upper_canny_thresh)
+    lower_canny_thresh = int(max(0, (1 - auto_canny_sigma) * grayscale_im_median))
+    upper_canny_thresh = int(min(255, (1 + auto_canny_sigma) * grayscale_im_median))
+    # print("auto_canny()", grayscale_im_median, lower_canny_thresh, upper_canny_thresh)
     # lower_canny_thresh = 100
     # upper_canny_thresh = 130
     return cv2.Canny(grayscale_im, lower_canny_thresh, upper_canny_thresh)
@@ -735,17 +735,17 @@ def AutoCanny(grayscale_im, AutoCanny_sigma):
 # BGR / RGB Conversions
 # thanks to https://www.scivision.co/numpy-image-bgr-to-rgb/
 #
-def BGR2RGB(bgr):
+def bgr2rgb(bgr):
     # OpenCV image to Matplotlib or Pillow Image.fromarray()
     return bgr[..., ::-1]
 
 
-def RGB2BGR(rgb):
+def rgb2bgr(rgb):
     # image to OpenCV
     return rgb[..., ::-1]
 
 
-def BGR2GRAY(bgr):
+def bgr2gray(bgr):
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
 
@@ -764,7 +764,7 @@ def apply_threshold(channel, low_value, high_value):
     return channel
 
 
-def Cameraman(im, path, fn):
+def cameraman_snapshot(im, path, fn):
     exfn = os.path.join(path, fn)
     with open(exfn, "r") as f:
         src = f.read()
@@ -778,7 +778,7 @@ def Cameraman(im, path, fn):
     return loc["display_image"]
 
 
-def Histogram_CB(img):
+def histogram_cb(img):
     channels = cv2.split(img)
     out_channels = []
     for channel in channels:
@@ -838,12 +838,12 @@ def simplest_cb(img, percentile):
     return cv2.merge(out_channels)
 
 
-def InitColor():
+def init_color():
     global color_ix
     color_ix = -1
 
 
-def NextColor():
+def next_color():
     global color_ix
     color_ix += 1
     if color_ix >= len(DRAW_COLORS):
@@ -851,27 +851,27 @@ def NextColor():
     return DRAW_COLORS[color_ix]
 
 
-def ListOfRotatedRectAsListOfDicts(in_list):
+def list_of_rotated_rect_as_list_of_dicts(in_list):
     # Takes list of RotatedRect and converts to a JSON serializable
-    # list of dicts. The list is from Image.ChaseLine() or similar.
+    # list of dicts. The list is from Image.chase_line() or similar.
     res = []
     for this in in_list:
-        res.append(ObjectAsDict(this))
+        res.append(object_as_dict(this))
     return res
 
 
-def ListOfRotatedRectFromListofDicts(in_list):
+def list_of_rotated_rect_from_list_of_dicts(in_list):
     # Takes a list of dicts and convert to a list
     # of RotatedRect
     if in_list is None:
         return []
     res = []
     for this in in_list:
-        res.append(RotatedRectFromDict(this))
+        res.append(rotated_rect_from_dict(this))
     return res
 
 
-def SlopeOfListOfRotatedRect(list_of_rects):
+def slope_of_list_of_rotated_rect(list_of_rects):
     [vx, vy, x, y] = cv2.fitLine(points, cv2.DIST_L1, 0, 0.01, 0.01)
     print("slope", float(vy / vx))
     left_y = int((-x * vy / vx) + y)
@@ -881,21 +881,21 @@ def SlopeOfListOfRotatedRect(list_of_rects):
         vert_line = ((width - 1, right_y), (0, left_y))
 
 
-def RotatedRectFromDict(d):
-    # print("RotatedRectFromDict()", d)
+def rotated_rect_from_dict(d):
+    # print("rotated_rect_from_dict()", d)
     return RotatedRect(
         ((d["center_x"], d["center_y"]), (d["width"], d["height"]), d["angle"])
     )
 
 
-def ObjectAsDict(src):
+def object_as_dict(src):
     res = {}
     for this in src.__slots__:
         res[this] = getattr(src, this)
     return res
 
 
-class RotatedRect(object):
+class RotatedRect:
     __slots__ = ("angle", "center_x", "center_y", "height", "width")
 
     def __init__(self, rect):  # rect from cv2.minAreaRect() ((x, y), (w, h), angle)
@@ -916,13 +916,13 @@ class RotatedRect(object):
             angle=self.angle,
         )
 
-    def BoxPointsList(self):
-        return cv2.boxPoints(self.AsRotatedRect()).tolist()  # returns array of 4 [x, y]
+    def box_points_list(self):
+        return cv2.boxPoints(self.as_rotated_rect()).tolist()  # returns array of 4 [x, y]
 
-    def AsRotatedRect(self):
+    def as_rotated_rect(self):
         return [[self.center_x, self.center_y], [self.width, self.height], angle]
 
-    def TopY(self, x):
+    def top_y(self, x):
         # This is incomplete. Need to consider angle.
         # Return y coordinate of top line at position x.
         top = self.center_y - (self.height / 2.0)
@@ -949,7 +949,7 @@ class RotatedRect(object):
         return (int(self.center_x + half_width), int(self.center_y + half_width))
 
 
-def RotatedRectFromOpenCvImage(im):
+def rotated_rect_from_opencv_image(im):
     shape = im.shape
     height = shape[0]
     width = shape[1]
@@ -958,7 +958,7 @@ def RotatedRectFromOpenCvImage(im):
     return RotatedRect((center, dims, 0.0))
 
 
-def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3):
+def contours_extract(contours, hierarchy, minimum_area=1, maximum_ct_of_rects_wanted=3):
     # returns a list of the largest contours as minimum sized RotatedRect
     if hierarchy is None:
         return None
@@ -970,26 +970,26 @@ def ContoursExtract(contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3
         h = hierarchy[0, h_ix]
         cnt = contours[h_ix]
         area = cv2.contourArea(cnt)
-        if area >= MinimumArea:
-            print("KEEP", area, MinimumArea)
+        if area >= minimum_area:
+            print("KEEP", area, minimum_area)
             areas.append((area, h_ix))
         else:
-            print("DISC", area, MinimumArea)
+            print("DISC", area, minimum_area)
             discarded_contour_count = 0
         h_ix = h[0]
     areas.sort(reverse=True)  # sort from largest to smallest)
     rotated_rect_list = []
-    for this in areas[: MaximumCtOfRectsWanted + 1]:
+    for this in areas[: maximum_ct_of_rects_wanted + 1]:
         h_ix = this[1]
         cnt = contours[h_ix]
         rect = RotatedRect(cv2.minAreaRect(cnt))  # ((x, y), (w, h), angle)
         rotated_rect_list.append(rect)
-    print("ContoursExtract()", rotated_rect_list)
+    print("contours_extract()", rotated_rect_list)
     return rotated_rect_list
 
 
-def ContoursToLineVectors(
-    img, contours, hierarchy, MinimumArea=1, MaximumCtOfRectsWanted=3
+def contours_to_line_vectors(
+    img, contours, hierarchy, minimum_area=1, maximum_ct_of_rects_wanted=3
 ):
     # This only looks at top level of hierarchy.
     # This analyzes contours and draws them on thee image -- modifying the image.
@@ -1006,11 +1006,11 @@ def ContoursToLineVectors(
         h = hierarchy[0, h_ix]
         cnt = contours[h_ix]
         area = cv2.contourArea(cnt)
-        if area >= MinimumArea:
+        if area >= minimum_area:
             areas.append((area, h_ix))
         h_ix = h[0]
     areas.sort(reverse=True)  # sort from largest to smallest)
-    for this in areas[:MaximumCtOfRectsWanted]:
+    for this in areas[:maximum_ct_of_rects_wanted]:
         h_ix = this[1]
         cnt = contours[h_ix]
         rect = cv2.minAreaRect(cnt)
@@ -1045,7 +1045,7 @@ def ContoursToLineVectors(
     print("^^^^^^^^^")
 
 
-def CrayolaContours(img, contours, hierarchy, MaxLevel=-1):
+def crayola_contours(img, contours, hierarchy, max_level=-1):
     def ColorBranch(ix, c, this_level, max_level):
         h = hierarchy[0, ix]
         c = NextColorIx(c)
@@ -1054,7 +1054,7 @@ def CrayolaContours(img, contours, hierarchy, MaxLevel=-1):
         child_ix = h[2]
         cnt = contours[ix]
         cv2.drawContours(img, [cnt], 0, color, -1)
-        if (MaxLevel < 0) or (this_level < max_level):
+        if (max_level < 0) or (this_level < max_level):
             while child_ix >= 0:
                 child_ix = ColorBranch(child_ix, c, this_level + 1, max_level)
                 c = NextColorIx(c)
@@ -1065,12 +1065,12 @@ def CrayolaContours(img, contours, hierarchy, MaxLevel=-1):
     h_ix = 0
     h_color = -1
     while h_ix >= 0:
-        h_ix = ColorBranch(h_ix, h_color, 1, MaxLevel)
+        h_ix = ColorBranch(h_ix, h_color, 1, max_level)
         h_color = NextColorIx(h_color)
     return img
 
 
-class ColorBalance(object):
+class ColorBalance:
     def __init__(self, low_vals=None, high_vals=None):
         self.low_vals = low_vals
         self.high_vals = high_vals
@@ -1127,7 +1127,7 @@ class ColorBalance(object):
         return cv2.merge(out_channels)
 
 
-def ColorKey(img):
+def color_key(img):
     channels = cv2.split(img)
     print("CK channels:", len(channels))
     threshold = 200
@@ -1178,18 +1178,18 @@ def _thinningIteration(im, iter):
     return I & ~M
 
 
-def ColorMaskWhite(hsvChannels, threshold=50):
+def color_mask_white(hsv_channels, threshold=50):
     minValue = 255 - threshold
     maxSaturation = threshold
     ret, saturationMask = cv2.threshold(
-        hsvChannels[1], maxSaturation, 255, cv2.THRESH_BINARY_INV
+        hsv_channels[1], maxSaturation, 255, cv2.THRESH_BINARY_INV
     )
-    ret, valueMask = cv2.threshold(hsvChannels[2], minValue, 255, cv2.THRESH_BINARY)
+    ret, valueMask = cv2.threshold(hsv_channels[2], minValue, 255, cv2.THRESH_BINARY)
     image_filterMask = cv2.bitwise_and(saturationMask, valueMask)
     return image_filterMask
 
 
-class HsvSpec(object):
+class HsvSpec:
     __slots__ = (
         "hue",
         "huerange",
@@ -1225,7 +1225,7 @@ class HsvSpec(object):
             self.valuerange,
         )
 
-    def AsPayload(self):
+    def as_payload(self):
         p = {}
         for this in self.__slots__:
             p[this] = getattr(self, this)
@@ -1242,7 +1242,7 @@ class HsvSpec(object):
         )
 
 
-def HsvSpecFromPayload(payload):
+def hsv_spec_from_payload(payload):
     if not ("hue" in payload):
         return None
     hue = int(payload["hue"])
@@ -1276,13 +1276,13 @@ def HsvSpecFromPayload(payload):
     )
 
 
-def NextHsvSpec(hsvImage, mask=None, rotated_rect=None, minrange=20):
+def next_hsv_spec_fn(hsvImage, mask=None, rotated_rect=None, minrange=20):
     # hsvImage is an OpenCvImage. rotated_rect is an RotatedRect.
     # Creates an HsvSpec based on the upper part of this image.
     # It considers only the center x and y from center to top.
     # Optionally considers only image pixels hilighted (>0) by mask.
     # Looks at either center of image or center of optional rect.
-    # Used by Image.ChaseLine()
+    # Used by Image.chase_line()
     def CalcRange(hist):
         # check if rng reasonable, avg close to hist[0], colorwrap
         avg = int((int(hist[1]) + int(hist[2])) / 2)
@@ -1291,19 +1291,19 @@ def NextHsvSpec(hsvImage, mask=None, rotated_rect=None, minrange=20):
             rng = minrange
         return avg, rng
 
-    # print("NextHsvSpec()", ReprOpenCv(hsvImage), ReprOpenCv(mask), rotated_rect)
+    # print("next_hsv_spec_fn()", repr_opencv(hsvImage), repr_opencv(mask), rotated_rect)
     value_ct = 0
     values = []
     values.append([0, 255, 0])  # sum, min value, max value)
     values.append([0, 255, 0])  # sum, min value, max value)
     values.append([0, 255, 0])  # sum, min value, max value)
     if rotated_rect is None:
-        rotated_rect = RotatedRectFromOpenCvImage(hsvImage)
+        rotated_rect = rotated_rect_from_opencv_image(hsvImage)
     x = int(rotated_rect.center_x)
     y = int(rotated_rect.center_y)
-    top_y = int(rotated_rect.TopY(x))
+    top_y = int(rotated_rect.top_y(x))
     for this_y in range(y, top_y, -1):
-        # print("NextHsvSpec() Loop", this_y, x, hueMask[this_y, x], hsvImage[this_y, x])
+        # print("next_hsv_spec_fn() Loop", this_y, x, hueMask[this_y, x], hsvImage[this_y, x])
         if (mask is None) or (mask[this_y, x] > 0):
             value_ct += 1
             hsv = hsvImage[this_y, x]
@@ -1314,23 +1314,23 @@ def NextHsvSpec(hsvImage, mask=None, rotated_rect=None, minrange=20):
                 if this_byte > values[ix][2]:
                     values[ix][2] = this_byte
     if value_ct < 3:
-        # print("NextHsvSpec()", value_ct, None, values)
+        # print("next_hsv_spec_fn()", value_ct, None, values)
         return None
     hsv_spec = HsvSpec(0)
     hsv_spec.hue, hsv_spec.huerange = CalcRange(values[0])
     hsv_spec.saturation, hsv_spec.saturationrange = CalcRange(values[1])
     hsv_spec.value, hsv_spec.valuerange = CalcRange(values[2])
-    # print("NextHsvSpec()", value_ct, hsv_spec, values)
+    # print("next_hsv_spec_fn()", value_ct, hsv_spec, values)
     return hsv_spec
 
 
-def ColorMaskOneHue(hsvImage, hsvspec):
+def color_mask_one_hue(hsv_image, hsvspec):
     # In literature, hue space goes from 0 to 360 degrees, but OpenCV rescales the range to 0 up to HSV_MAX_HUE,
     # because 360 does not fit in a single byte. There is another mode where 0..360 is rescaled to 0..255 but this isn't as common.
     # Red color, value 0,  is one of the special case where our selection range wraps 0/HSV_MAX_HUE.
     assert (hsvspec.hue >= 0) and (hsvspec.hue <= HSV_MAX_HUE)
 
-    if hsvImage is None:
+    if hsv_image is None:
         return None
 
     hue_min = hsvspec.hue - hsvspec.huerange
@@ -1360,15 +1360,15 @@ def ColorMaskOneHue(hsvImage, hsvspec):
     if value_max > 255:
         value_max = 255
 
-    # print("ColorMaskOneHue()", hue_min, hue_max, saturation_min, saturation_max, value_min, value_max)
+    # print("color_mask_one_hue()", hue_min, hue_max, saturation_min, saturation_max, value_min, value_max)
     hueMask = cv2.inRange(
-        hsvImage,
+        hsv_image,
         np.array([hue_min, saturation_min, value_min], np.uint8),
         np.array([hue_max, saturation_max, value_max], np.uint8),
     )
     if hue_min_2 is not None:
         hueMask_2 = cv2.inRange(
-            hsvImage,
+            hsv_image,
             np.array([hue_min_2, saturation_min, value_min], np.uint8),
             np.array([hue_max_2, saturation_max, value_max], np.uint8),
         )
@@ -1377,8 +1377,8 @@ def ColorMaskOneHue(hsvImage, hsvspec):
     return hueMask
 
 
-def ColorMask(
-    hsvImage,
+def color_mask(
+    hsv_image,
     colors=[0],
     huerange=25,
     saturation=205,
@@ -1388,12 +1388,12 @@ def ColorMask(
 ):
     # adapted from http://stackoverflow.com/questions/35866411/opencv-how-to-detect-lines-of-a-specific-colour
     # input is an HSV image. Output is a monochrome image
-    # print("ColorMask()", colors, huerange)
+    # print("color_mask()", colors, huerange)
 
     result = None
     for this_hue in colors:
         if this_hue < 0:
-            this_result = ColorMaskWhite(hsvChannels, threshold=wthreshold)
+            this_result = color_mask_white(hsvChannels, threshold=wthreshold)
         else:
             hsvspec = HsvSpec(
                 this_hue,
@@ -1403,7 +1403,7 @@ def ColorMask(
                 value=value,
                 valuerange=valuerange,
             )
-            this_result = ColorMaskOneHue(hsvImage, hsvspec)
+            this_result = color_mask_one_hue(hsv_image, hsvspec)
         if result is None:
             result = this_result
         else:
@@ -1411,7 +1411,7 @@ def ColorMask(
     return result
 
 
-def ROI(img, x1, y1, x2, y2):
+def roi(img, x1, y1, x2, y2):
     # extract a region of interest, accepting "normal order" coordinates
     # (x1, y1) is the upper/left corner, (x2, y2) is the lower/right corner
     # origin is upper/left of image
@@ -1450,7 +1450,7 @@ def thinning_example(src):
     cv2.waitKey()
 
 
-def DrawContourLines(img, contours, color):
+def draw_contour_lines(img, contours, color):
     h, w, channels = img.shape
     origin_x = int(w / 2)
     origin_y = 0
@@ -1463,14 +1463,14 @@ def DrawContourLines(img, contours, color):
         rect = cv2.minAreaRect(this_c)
         # rect: center (x,y), (width, height), angle of rotation
         print("R", rect)
-        line = CalcRectCenterline(rect, w, h)
+        line = calc_rect_centerline(rect, w, h)
         cv2.line(img, line[0], line[1], color, 2)
     return img
 
 
-def ContourLines(img, gray, Drawlines=False, DrawBoth=False):
+def contour_lines(img, gray, drawlines=False, draw_both=False):
     # canny edge detection
-    # bw_edged = AutoCanny(gray, 0.33)
+    # bw_edged = auto_canny(gray, 0.33)
     bw_edged = cv2.Canny(gray, 30, 200)
     cont2, contours, hierarchy = cv2.findContours(
         bw_edged.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
@@ -1480,16 +1480,16 @@ def ContourLines(img, gray, Drawlines=False, DrawBoth=False):
         cropped_height, cropped_width = img.shape
     else:
         cropped_height, cropped_width, cropped_channels = img.shape
-    (tiny, vertical, horizontal) = CreateContours(
+    (tiny, vertical, horizontal) = create_contours(
         contours, cropped_width, cropped_height
     )
-    if Drawlines or DrawBoth:
-        contoured_image = DrawContourLines(img.copy(), tiny, (128, 128, 0))
-        contoured_image = DrawContourLines(contoured_image, vertical, (128, 128, 0))
-        contoured_image = DrawContourLines(contoured_image, horizontal, (128, 128, 0))
+    if drawlines or draw_both:
+        contoured_image = draw_contour_lines(img.copy(), tiny, (128, 128, 0))
+        contoured_image = draw_contour_lines(contoured_image, vertical, (128, 128, 0))
+        contoured_image = draw_contour_lines(contoured_image, horizontal, (128, 128, 0))
     else:
         contoured_image = img.copy()
-    if (not Drawlines) or DrawBoth:
+    if (not drawlines) or draw_both:
         contoured_image = cv2.drawContours(
             contoured_image.copy(), tiny, -1, (128, 0, 128), 1
         )
@@ -1499,7 +1499,7 @@ def ContourLines(img, gray, Drawlines=False, DrawBoth=False):
         contoured_image = cv2.drawContours(
             contoured_image.copy(), horizontal, -1, (255, 0, 0), 1
         )
-    DumpContours(contours)
+    dump_contours(contours)
     return bw_edged, contoured_image
 
 
@@ -1509,7 +1509,7 @@ def ContourLines(img, gray, Drawlines=False, DrawBoth=False):
 #
 
 
-def DrawContourFilled(img, contours):
+def draw_contour_filled(img, contours):
     image_shape = img.shape
     mask_shape = (image_shape[0], image_shape[1], 1)
     final = img.copy()
@@ -1545,7 +1545,7 @@ def DrawContourFilled(img, contours):
     return final
 
 
-def CrayolaFilter2(im, bw_threshold=20, mix_threshold=50):
+def crayola_filter2(im, bw_threshold=20, mix_threshold=50):
     # im = simplest_cb(im, 20)
     hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
     mask = np.asarray([224, 224, 224], dtype=np.uint8)
@@ -1555,7 +1555,7 @@ def CrayolaFilter2(im, bw_threshold=20, mix_threshold=50):
     out = cv2.bitwise_and(hsv, mask)
     im = cv2.cvtColor(out, cv2.COLOR_HSV2BGR)
     bw = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-    canny_image = AutoCanny(bw, 0.33)
+    canny_image = auto_canny(bw, 0.33)
     (imgxx, opencv_contours, hierarchy) = cv2.findContours(
         canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -1564,7 +1564,7 @@ def CrayolaFilter2(im, bw_threshold=20, mix_threshold=50):
     return im
 
 
-def CrayolaFilter(im, bw_threshold=20, mix_threshold=50):
+def crayola_filter(im, bw_threshold=20, mix_threshold=50):
     color_map = {
         "b": np.asarray([0, 0, 0], dtype=np.uint8),
         "w": np.asarray([255, 255, 255], dtype=np.uint8),
@@ -1579,7 +1579,7 @@ def CrayolaFilter(im, bw_threshold=20, mix_threshold=50):
     for y in range(height):
         for x in range(width):
             color = im[y, x]  # BGR
-            t = ColorString(
+            t = color_string(
                 color, bw_threshold=bw_threshold, mix_threshold=mix_threshold
             )
             tc = t[0]
@@ -1592,7 +1592,7 @@ def CrayolaFilter(im, bw_threshold=20, mix_threshold=50):
     return out_im
 
 
-def ColorString(color, bw_threshold=20, mix_threshold=50):
+def color_string(color, bw_threshold=20, mix_threshold=50):
     # bw_sthreshold of 30 was about right for white line
     min_v = min(color)
     max_v = max(color)
@@ -1616,7 +1616,7 @@ def ColorString(color, bw_threshold=20, mix_threshold=50):
     return c + " " + repr(color)
 
 
-def FilterContours(img, contours, SelectColors="r"):
+def filter_contours(img, contours, select_colors="r"):
     image_shape = img.shape
     mask_shape = (image_shape[0], image_shape[1], 1)
     final = img.copy()
@@ -1631,10 +1631,10 @@ def FilterContours(img, contours, SelectColors="r"):
         mask = cv2.drawContours(mask, contours, i, 255, -1)  # draw contour on mask
         avg_color = cv2.mean(img, mask)
         avg_color = (int(avg_color[0]), int(avg_color[1]), int(avg_color[2]))
-        color_str = ColorString(avg_color)
+        color_str = color_string(avg_color)
         this_c = contours[i]
         area = cv2.contourArea(this_c)
-        if color_str[0] in SelectColors:
+        if color_str[0] in select_colors:
             continue
         if area < area_threshold:
             continue
@@ -1650,7 +1650,7 @@ def mean(numbers):
     return sum(numbers) / len(numbers)
 
 
-class ReflexEntities(object):
+class ReflexEntities:
     def __init__(self, image, process="CY", colors="WRY"):
         color_list = []
         for this in colors:
@@ -1670,8 +1670,8 @@ class ReflexEntities(object):
                 # print("simplest_cb")
                 self.image = simplest_cb(self.image.copy(), 20)
             elif this == "C":
-                # print("ColorMask", color_list)
-                self.image = ColorMask(
+                # print("color_mask", color_list)
+                self.image = color_mask(
                     self.image.copy(),
                     colors=color_list,
                     threshold=RACE_THRESHOLD,
@@ -1682,10 +1682,10 @@ class ReflexEntities(object):
             elif this == "G":
                 self.image = cv2.GaussianBlur(self.image.copy(), (5, 5), 0)
             elif this == "W":
-                self.image = BGR2GRAY(self.image)
+                self.image = bgr2gray(self.image)
             elif this == "Y":
                 # print("Canny")
-                self.image = AutoCanny(self.image.copy(), 0.1)  # ben's sigma was 0.33
+                self.image = auto_canny(self.image.copy(), 0.1)  # ben's sigma was 0.33
         self.h_lines = cv2.HoughLinesP(
             self.image, 1, np.pi / 180, 15, minLineLength=30, maxLineGap=10
         )
@@ -1696,7 +1696,7 @@ class ReflexEntities(object):
         self.map_lines = []
         self.avg_slope = 0
 
-    def ProcessLines(self):
+    def process_lines(self):
         VERTICAL_SLOPE = 9999
         h_color = (0, 0, 255)  # blue
         h_width = 1
@@ -1755,7 +1755,7 @@ class ReflexEntities(object):
         else:
             return None
 
-    def AnnotateFullImage(self, image, linect=10, x1=0, y1=0, color=None):
+    def annotate_full_image(self, image, linect=10, x1=0, y1=0, color=None):
         if color is None:
             color = (0, 255, 0)  # green
         a_width = 5
@@ -1764,7 +1764,7 @@ class ReflexEntities(object):
             p2 = (this[6][0] + x1, this[6][1] + y1)
             cv2.line(image, p1, p2, color, a_width)
 
-    def AnalyzeLines(self):
+    def analyze_lines(self):
         cum_slope = 0
         ct_slope = 0
         if len(self.map_lines) < 1:
@@ -1801,7 +1801,7 @@ class ReflexEntities(object):
 #               p: relative to index p1, used to specify end index as an offset (ususally lenght/width)
 #
 #   ext: (extent) maximum index value for that axis (integer)
-def ResolveSymbolicIndex(c, ext, p1=None):
+def resolve_symbolic_index(c, ext, p1=None):
     def Raw_ResolveSymbolicIndex(c, ext, p1=None):
         # print('Raw_ResolveSymbolicIndex', repr(c), ext, p1)
         if isinstance(c, str):
@@ -1847,30 +1847,35 @@ def ResolveSymbolicIndex(c, ext, p1=None):
     return res
 
 
-def HoughLinesP(im, minLineLength=30, maxLineGap=10):
-    cv_lines = cv2.HoughLinesP(
-        im.im, 1, np.pi / 180, 15, minLineLength=minLineLength, maxLineGap=maxLineGap
-    )
+def hough_lines_p(im, min_line_length=30, max_line_gap=10):
+    try:
+        cv_lines = cv2.HoughLinesP(
+            im.im, 1, np.pi / 180, 15, minLineLength=min_line_length, maxLineGap=max_line_gap
+        )
+    except cv2.error:
+        print("HoughLinesP requires a grayscale (single-channel) image. Convert to gray first.")
+        return []
     object_list = []
-    for this in cv_lines:
-        for x1, y1, x2, y2 in this:
-            object_list.append(LineObject(x1, y1, x2, y2))
+    if cv_lines is not None:
+        for this in cv_lines:
+            for x1, y1, x2, y2 in this:
+                object_list.append(LineObject(x1, y1, x2, y2))
     return object_list
 
 
-class LineObject(object):
+class LineObject:
     __slots__ = ("x1", "y1", "x2", "y2")
 
     def __init__(self, x1, y1, x2, y2):
         self.x1 = x1
         self.y1 = y1
-        self.x2 = y2
+        self.x2 = x2
         self.y2 = y2
 
-    def Annotate(self, im, color=None, width=1):
+    def annotate(self, im, color=None, width=1):
         if color is None:
-            color = NextColor()
-        cv2.line(im.im, self.P1, self.P2, color, width)
+            color = next_color()
+        cv2.line(im.im, self.p1, self.p2, color, width)
 
     @property
     def p1(self):
@@ -1881,7 +1886,7 @@ class LineObject(object):
         return (self.x2, self.y2)
 
 
-class RightRect(object):
+class RightRect:
     # This is a right rectangle. See RotatedRect for rotated rectangle.
     __slots__ = ("y_min", "y_max", "x_min", "x_max")
 
@@ -1902,7 +1907,7 @@ class RightRect(object):
         res = RightRect(self.y_min, self.y_max, self.x_min, self.x_max)
         return res
 
-    def AsPayload(self):
+    def as_payload(self):
         p = {}
         for this in self.__slots__:
             p[this] = getattr(self, this)
@@ -1932,16 +1937,16 @@ class RightRect(object):
     def p2(self):
         return (self.x_max, self.y_max)
 
-    def TopY(self, x=None):
+    def top_y(self, x=None):
         return self.y_min
 
 
-def RightRectFromOpenCvImage(im):
+def right_rect_from_opencv_image(im):
     shape = im.shape
     return RightRect(0, shape[0], 0, shape[1])
 
 
-def RightFromPayload(payload):
+def right_from_payload(payload):
     if "y_min" in payload:
         y_min = int(payload["y_min"])
         y_max = int(payload["y_max"])
@@ -1957,12 +1962,12 @@ def RightFromPayload(payload):
     return RightRect(y_min, y_max, x_min, x_max)
 
 
-def RightRectFromSymbolicYX(im, y_range, x_range):
+def right_rect_from_symbolic_yx(im, y_range, x_range):
     height, width, channels = im.shape
-    y_min = ResolveSymbolicIndex(y_range[0], height)
-    y_max = ResolveSymbolicIndex(y_range[1], height)
-    x_min = ResolveSymbolicIndex(x_range[0], width)
-    x_max = ResolveSymbolicIndex(x_range[1], width)
+    y_min = resolve_symbolic_index(y_range[0], height)
+    y_max = resolve_symbolic_index(y_range[1], height)
+    x_min = resolve_symbolic_index(x_range[0], width)
+    x_max = resolve_symbolic_index(x_range[1], width)
     if x_min > x_max:
         x_min, x_max = x_max, x_min
     if y_min > y_max:
@@ -1970,7 +1975,7 @@ def RightRectFromSymbolicYX(im, y_range, x_range):
     return RightRect(y_min, y_max, x_min, x_max)
 
 
-def RightRectFromSymbolicPP(im, p1, p2):
+def right_rect_from_symbolic_pp(im, p1, p2):
     if im is None:
         return None
     if len(im.shape) > 2:
@@ -1978,10 +1983,10 @@ def RightRectFromSymbolicPP(im, p1, p2):
     else:
         height, width = im.shape
         channels = 1
-    x_min = ResolveSymbolicIndex(p1[0], width)
-    y_min = ResolveSymbolicIndex(p1[1], height)
-    x_max = ResolveSymbolicIndex(p2[0], width, x_min)
-    y_max = ResolveSymbolicIndex(p2[1], height, y_min)
+    x_min = resolve_symbolic_index(p1[0], width)
+    y_min = resolve_symbolic_index(p1[1], height)
+    x_max = resolve_symbolic_index(p2[0], width, x_min)
+    y_max = resolve_symbolic_index(p2[1], height, y_min)
     if x_min > x_max:
         x_min, x_max = x_max, x_min
     if y_min > y_max:
@@ -1989,7 +1994,7 @@ def RightRectFromSymbolicPP(im, p1, p2):
     return RightRect(y_min, y_max, x_min, x_max)
 
 
-class Robogames(object):
+class Robogames:
     def __init__(self, image, colors):
         # im is an OpenCV BGR image object
         self.original = image
@@ -2013,13 +2018,13 @@ class Robogames(object):
             image = image[c_y:height, c_x : c_x + c_w]
         self.annotated = image.copy()
         # image = simplest_cb(self.original, 20)
-        image = ColorMask(image, colors=colors)
+        image = color_mask(image, colors=colors)
         # bw_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         # bw_image = cv2.blur(bw_image.copy(), (5,5))
         if RACE_BLUR:
             image = cv2.GaussianBlur(image.copy(), (5, 5), 0)
         if RACE_CANNY:
-            image = AutoCanny(image, 0.33)
+            image = auto_canny(image, 0.33)
         # (imgxx, opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         self.h_lines = cv2.HoughLinesP(
             image, 1, np.pi / 180, 15, minLineLength=50, maxLineGap=30
@@ -2027,7 +2032,7 @@ class Robogames(object):
         self.map_lines = []
         self.avg_slope = 0
 
-    def ProcessLines(self):
+    def process_lines(self):
         VERTICAL_SLOPE = 9999
         h_color = (0, 0, 255)  # blue
         h_width = 1
@@ -2072,7 +2077,7 @@ class Robogames(object):
                     )
             self.map_lines.sort()
 
-    def FilterLines(self):
+    def filter_lines(self):
         cum_slope = 0
         ct_slope = 0
         # print("MAP", h, m, w)
@@ -2088,7 +2093,7 @@ class Robogames(object):
             middleX = int((p1[0] + p2[0]) / 2)
             self.filtered_lines.append((middleX, this))
 
-    def SelectLines(self):
+    def select_lines(self):
         print("FILTERED", len(self.filtered_lines))
         self.rectangles = []
         self.selectedLines = []
@@ -2097,9 +2102,9 @@ class Robogames(object):
             this = thisX[1]
             points = [this[5], this[6]]
             Allpoints += points
-        self.MakeRec(Allpoints)
+        self.make_rec(Allpoints)
 
-    def SelectCone(self):
+    def select_cone(self):
         self.selectedLines = []
         if len(self.filtered_lines) >= 2:
             # we need two lines to form a cone
@@ -2112,13 +2117,13 @@ class Robogames(object):
                 if (slope1 > 0) and (slope2 < 0):
                     self.selectedLines.append((l1, l2))
 
-    def MakeConeRec(self):
+    def make_cone_rec(self):
         self.rectangles = []
         for this in self.selectedLines:
             points = [this[0][5], this[0][6], this[1][5], this[1][6]]
-            self.MakeRec(points)
+            self.make_rec(points)
 
-    def MakeRec(self, points):
+    def make_rec(self, points):
         if len(points) < 1:
             return
         a_width = 1
@@ -2143,32 +2148,32 @@ class Robogames(object):
         print("RECT", llp, urp)
 
 
-class ImageAnalyzer(object):
+class ImageAnalyzer:
     def __init__(
         self,
         fpath=None,
-        Crop=None,
-        CroppedHeight=None,
-        CannyMethod=1,
-        ContourFill="b",
-        ContourOutline=True,
-        DoFilterContours=True,
-        ColorBalance="c",
-        Blur="x",
+        crop=None,
+        cropped_height=None,
+        canny_method=1,
+        contour_fill="b",
+        contour_outline=True,
+        do_filter_contours=True,
+        color_balance="c",
+        blur="x",
     ):
         self.img_fpath = fpath
-        self.img_crop = Crop
-        self.img_cropped_height = CroppedHeight
-        self.img_blur_method = Blur
-        self.img_canny_method = CannyMethod
-        self.img_color_balance_method = ColorBalance
+        self.img_crop = crop
+        self.img_cropped_height = cropped_height
+        self.img_blur_method = blur
+        self.img_canny_method = canny_method
+        self.img_color_balance_method = color_balance
         self.img_annotated = None  # OpenCV annotated image object
         self.img_source_dir = ""
         self.img_fname_suffix = ""
-        self.annotate_fill_method = ContourFill
-        self.annotate_contour_outline = ContourOutline
+        self.annotate_fill_method = contour_fill
+        self.annotate_contour_outline = contour_outline
         self.annotate_opencv_contours = True
-        self.do_image_filter_contours = DoFilterContours
+        self.do_image_filter_contours = do_filter_contours
         self.img_contour_colors = "r"
         self.img_contour_colors = "wy"
         self.snap_shots = []
@@ -2177,19 +2182,19 @@ class ImageAnalyzer(object):
         self.vert_line = None
         self.horz_line = None
 
-    def FindLines(self, image=None):
+    def find_lines(self, image=None):
         if image is None:
             fpath = os.path.join(
                 self.img_source_dir, self.img_fpath + self.img_fname_suffix + ".jpg"
             )
             print(fpath)
             image = cv2.imread(fpath)
-        DrawGrid(self.Snapshot(image, "Original"))
+        draw_grid(self.snapshot(image, "Original"))
 
         start_clock = time.clock()
         if self.img_color_balance_method == "c":
             image = simplest_cb(image, 20)
-        self.Snapshot(image, "ColorBalanced")
+        self.snapshot(image, "ColorBalanced")
 
         # crop
         if (self.img_crop is not None) or (self.img_cropped_height is not None):
@@ -2209,29 +2214,29 @@ class ImageAnalyzer(object):
                 % (width, height, c_x, c_y, c_w)
             )
             cropped_image = image[c_y:height, c_x : c_x + c_w]
-            self.Snapshot(cropped_image, "Cropped")
+            self.snapshot(cropped_image, "Cropped")
         else:
             cropped_image = image.copy()
 
         # bw img
         bw_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
-        self.Snapshot(bw_image, "BW")
+        self.snapshot(bw_image, "BW")
         if self.img_blur_method == "g":
             bw_image = cv2.Gaussianself.img_blur_method(bw_image, (21, 21), 0)
         elif self.img_blur_method == "b":
             bw_image = cv2.blur(bw_image.copy(), (5, 5))  # or maybe (3,3)
         elif self.img_blur_method == "c":
-            bw_image = ColorKey(bw_image)
+            bw_image = color_key(bw_image)
         elif self.img_blur_method == "f":
             bw_image = cv2.bilateralFilter(bw_image.copy(), 11, 17, 17)
         elif self.img_blur_method == "h":
             bw_image = cv2.equalizeHist(bw_image.copy())
         elif self.img_blur_method == "z":
             bw_image = simplest_cb(bw_image.copy(), 20)
-        self.Snapshot(bw_image, "Blurred")
+        self.snapshot(bw_image, "Blurred")
 
         if self.img_canny_method == 1:
-            canny_image = AutoCanny(bw_image, 0.33)
+            canny_image = auto_canny(bw_image, 0.33)
         elif self.img_canny_method == 2:
             # based on pyimagesearch method
             canny_image = cv2.Canny(bw_image, 30, 200)
@@ -2240,16 +2245,16 @@ class ImageAnalyzer(object):
         )
         print("Contour Ct:", len(opencv_contours))
 
-        print("FindLines() elapsed time:", time.clock() - start_clock)
+        print("find_lines() elapsed time:", time.clock() - start_clock)
         if self.do_image_filter_contours:
-            contours = FilterContours(
-                cropped_image, opencv_contours, SelectColors=self.img_contour_colors
+            contours = filter_contours(
+                cropped_image, opencv_contours, select_colors=self.img_contour_colors
             )
             print("Filtered Contour Ct:", len(contours))
-            self.ClassifyContours(cropped_image, contours)
+            self.classify_contours(cropped_image, contours)
         else:
             contours = opencv_contours
-        print("FindLines() elapsed time:", time.clock() - start_clock)
+        print("find_lines() elapsed time:", time.clock() - start_clock)
 
         annotated_cropped_image = cropped_image.copy()
         outline_color = (0, 255, 0)  # green
@@ -2278,23 +2283,23 @@ class ImageAnalyzer(object):
                 2,
             )
 
-        print("FindLines() elapsed time:", time.clock() - start_clock)
+        print("find_lines() elapsed time:", time.clock() - start_clock)
         if self.annotate_fill_method == "b":
-            self.AnnotateContourBoxes(annotated_cropped_image, contours)
+            self.annotate_contour_boxes(annotated_cropped_image, contours)
         elif self.annotate_fill_method == "f":
-            self.DrawContourFilled(annotated_cropped_image, contours)
+            self.draw_contour_filled(annotated_cropped_image, contours)
 
-        print("FindLines() elapsed time:", time.clock() - start_clock)
+        print("find_lines() elapsed time:", time.clock() - start_clock)
         if self.annotate_contour_outline:
             outline_color = (0, 255, 0)  # green
             cv2.drawContours(annotated_cropped_image, contours, -1, outline_color, 1)
-        self.img_annotated = self.Snapshot(annotated_cropped_image, "Annotated")
+        self.img_annotated = self.snapshot(annotated_cropped_image, "Annotated")
 
-        self.WriteSnapshots()
+        self.write_snapshots()
 
         return self.img_annotated
 
-    def WriteSnapshots(self):
+    def write_snapshots(self):
         if not self.do_save_snaps:
             return
         delete_pattern = self.img_fpath + "_D*.jpg"
@@ -2311,7 +2316,7 @@ class ImageAnalyzer(object):
             fpath = os.path.join(self.img_source_dir, fn)
             cv2.imwrite(fpath, image)
 
-    def ClassifyContours(self, img, contours):
+    def classify_contours(self, img, contours):
         height, width = img.shape[:2]
         vert = []
         vert_contours = []
@@ -2322,7 +2327,7 @@ class ImageAnalyzer(object):
             print(rect)
             # rect: center (x,y), (width, height), angle of rotation
             angle = int(rect[2])
-            ctr_line = CalcRectCenterline(rect)
+            ctr_line = calc_rect_centerline(rect)
             print("Ctr Line:", ctr_line)
             if angle <= -60:
                 vert.append(angle)
@@ -2368,9 +2373,9 @@ class ImageAnalyzer(object):
             ):
                 self.horz_line = ((width - 1, right_y), (0, left_y))
 
-    def Snapshot(self, image, title="image"):
+    def snapshot(self, image, title="image"):
         """
-        Snapshot() makes and saves a copy of the image. In operational mode,
+        snapshot() makes and saves a copy of the image. In operational mode,
         the save can be globally turned off. The copy is still made so
         clients can use this as a general image copy function, even if
         the save operation is off.
@@ -2381,7 +2386,7 @@ class ImageAnalyzer(object):
             self.snap_titles.append(title)
         return snap
 
-    def AnnotateContourBoxes(self, img, cnts):
+    def annotate_contour_boxes(self, img, cnts):
         area_threshold = 1  # minimum area sized contour to draw
         for this_c in cnts:
             area = cv2.contourArea(this_c)
@@ -2395,7 +2400,7 @@ class ImageAnalyzer(object):
             cv2.drawContours(img, [box], 0, (0, 0, 255), 2)
 
 
-def CalcRectCenterline(cvRect):
+def calc_rect_centerline(cvRect):
     # Box2D: center (x,y), (width, height), angle of rotation
     box_x = cvRect[0][0]
     box_y = cvRect[0][1]
@@ -2412,7 +2417,7 @@ def CalcRectCenterline(cvRect):
     )
 
 
-def CreateContours(src, w, h):
+def create_contours(src, w, h):
     origin_x = int(w / 2)
     origin_y = 0
     horizon_x = origin_x
@@ -2437,7 +2442,7 @@ def CreateContours(src, w, h):
         rect = cv2.minAreaRect(this_c)
         # rect: center (x,y), (width, height), angle of rotation
         print("R", rect)
-        print(CalcRectCenterline(rect, w, h))
+        print(calc_rect_centerline(rect, w, h))
         x = rect[0][0]
         y = rect[0][1]
         w = rect[1][0]
@@ -2459,7 +2464,7 @@ def CreateContours(src, w, h):
     return (tiny, vertical, horizontal)
 
 
-def DumpContours(contours):
+def dump_contours(contours):
     c_l = len(contours)
     print("Contours len: ", c_l)
     for ix, this_c in enumerate(contours):
@@ -2467,7 +2472,7 @@ def DumpContours(contours):
             print("C[%d-%d] %s" % (ix, iy, this_vertex))
 
 
-def FindVertices(contour):
+def find_vertices(contour):
     ul = contour[0]
     ur = contour[0]
     ll = contour[0]
@@ -2477,7 +2482,7 @@ def FindVertices(contour):
             pass
 
 
-def DrawGrid(img):
+def draw_grid(img):
     grid_incr = 25
     height, width, channels = img.shape
     for x in range(grid_incr, width, grid_incr):
@@ -2491,7 +2496,7 @@ def test_old():
     fn = "R20170325021241_2_0001.jpeg"
     im = cv2.imread("temp/" + fn)
     p = Race(im)
-    p.ProcessLines()
+    p.process_lines()
     sys, exit(0)
 
     start_time = time.clock()
@@ -2519,24 +2524,24 @@ def test_old():
     brain.img_fname_suffix = "_s"
     brain.do_image_filter_contours = True
     brain.do_image_filter_contours = False
-    brain.FindLines()
+    brain.find_lines()
     stop_time = time.clock()
     print("Elapsed Time:", (stop_time - start_time))
 
 
-def test_ColorMask():
+def test_color_mask():
     fn = "test_images/red_strap.jpeg"
     fn = "test_images/red_strap_box.jpeg"
     fn = "test_images/white_line.jpeg"
     im = cv2.imread(fn)
-    bw = ColorMask(im, colors=[HSV_WHITE, HSV_RED], wthreshold=5)  # red, yellow
+    bw = color_mask(im, colors=[HSV_WHITE, HSV_RED], wthreshold=5)  # red, yellow
 
     cv2.imshow("c", im)
     cv2.imshow("bw", bw)
     cv2.waitKey()
 
 
-def test_Cone():
+def test_cone():
     # Setup SimpleBlobDetector parameters.
     params = cv2.SimpleBlobDetector_Params()
 
@@ -2573,12 +2578,12 @@ def test_Cone():
     fn = "samples/cone_s.jpeg"
     im = cv2.imread(fn)
     r = Robogames(im)
-    r.ProcessLines()
+    r.process_lines()
     bw = r.annotated
 
-    # bw = ColorMask(im, colors=[HSV_RED], threshold=150)
+    # bw = color_mask(im, colors=[HSV_RED], threshold=150)
     # bw = np.bitwise_xor(bw, 255)
-    # canny_image = AutoCanny(bw, 0.33)
+    # canny_image = auto_canny(bw, 0.33)
     # edges, im = HoughLines(im, bw)
     # (imgxx, opencv_contours, hierarchy) = cv2.findContours(bw.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     # (opencv_contours, hierarchy) = cv2.findContours(canny_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -2607,6 +2612,6 @@ def test_Cone():
 
 
 if __name__ == "__main__":
-    # test_ColorMask()
-    # test_Cone()
+    # test_color_mask()
+    # test_cone()
     pass

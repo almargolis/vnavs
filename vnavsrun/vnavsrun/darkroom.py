@@ -43,7 +43,7 @@ SRC_BOT_CAMERA = "bot"
 SHOW_ANNOTATION = "ShowAnnotation"
 
 
-class ProcessStep(object):
+class ProcessStep:
     __slots__ = (
         "cv_filter_name",
         "cv_specs",
@@ -91,33 +91,33 @@ class ProcessStep(object):
     imports.append(("oc", oc, "oc"))
     imports.append(("cameraman", None, None))
 
-    def __init__(self, FilterName=None, Where=None, Parms={}):
+    def __init__(self, filter_name=None, where=None, parms={}):
         self.ix = len(self.steps)
         self.exec_im = None  # this is an oc.Image produced by the filter
         self.steps.append(self)
         self.cv_filter_name = None  # this gets set by NewFilter()
 
-        self.parm_values = Parms  # key is FilterParm.name
+        self.parm_values = parms  # key is FilterParm.name
         self.tab_title = f"Step {self.ix}"
-        self.tab = self.app.notebook.AddTab(self.tab_title, Where=Where)
-        self.input_panel = self.tab.AddLabelFrame("Input")
-        self.output_panel = self.tab.AddLabelFrame("Output")
+        self.tab = self.app.notebook.add_tab(self.tab_title, where=where)
+        self.input_panel = self.tab.add_label_frame("Input")
+        self.output_panel = self.tab.add_label_frame("Output")
         self.zoom_popup = None
         #
         # input_panel
         #
-        self.filter_selection = self.input_panel.AddListbox(
+        self.filter_selection = self.input_panel.add_listbox(
             "Filters",
             oc.ImageFilterCollection.image_filter_names,
-            Selection=FilterName,
-            command=self.NewFilter,
+            selection=filter_name,
+            command=self.new_filter,
             rowspan=4,
         )
         self.info_data = []
         self.info_widgets = []
         for ix in range(6):
-            info_label = self.input_panel.AddLabel("", row=NEXT_ROW, col=LEFT_COL)
-            info_value = self.input_panel.AddLabel("", row=SAME_ROW, col=NEXT_COL)
+            info_label = self.input_panel.add_label("", row=NEXT_ROW, col=LEFT_COL)
+            info_value = self.input_panel.add_label("", row=SAME_ROW, col=NEXT_COL)
             self.info_widgets.append((info_label, info_value))
         self.parm_widgets = []
         for ix in range(8):
@@ -128,61 +128,61 @@ class ProcessStep(object):
                 parm_row = NEXT_ROW
                 parm_col = self.parm_widgets[0][1].col
             parm_caption = f"Parm{ix + 1}"
-            entry_label = self.input_panel.AddLabel(
+            entry_label = self.input_panel.add_label(
                 parm_caption, row=parm_row, col=parm_col
             )
-            entry_box = self.input_panel.AddEntryField(
-                row=SAME_ROW, col=NEXT_COL, OnDoubleClick=self.OnPickPoint
+            entry_box = self.input_panel.add_entry_field(
+                row=SAME_ROW, col=NEXT_COL, on_double_click=self.on_pick_point
             )
-            entry_slider = self.input_panel.AddSliderField(col=OVERLAY_COL)
-            entry_checkbox = self.input_panel.AddCheckbox(col=OVERLAY_COL)
+            entry_slider = self.input_panel.add_slider_field(col=OVERLAY_COL)
+            entry_checkbox = self.input_panel.add_checkbox(col=OVERLAY_COL)
             self.parm_widgets.append(
                 [entry_box, entry_label, entry_box, entry_slider, entry_checkbox]
             )
-        self.input_panel.AddButton("Run", command=self.OnExecuteStep, col=parm_col)
-        self.input_panel.AddButton(
-            "Delete Step", command=self.OnDeleteStep, row=SAME_ROW, col=NEXT_COL
+        self.input_panel.add_button("Run", command=self.on_execute_step, col=parm_col)
+        self.input_panel.add_button(
+            "Delete Step", command=self.on_delete_step, row=SAME_ROW, col=NEXT_COL
         )
         #
         # output_panel
         #
-        self.image_widget = self.output_panel.AddCanvas(
-            OnClick=self.OnImageClick, rowspan=2
+        self.image_widget = self.output_panel.add_canvas(
+            on_click=self.on_image_click, rowspan=2
         )
-        self.execution_time = self.output_panel.AddLabel(row=FIRST_ROW, col=NEXT_COL)
-        self.deposition = self.output_panel.AddLabel(row=NEXT_ROW, col=SAME_COL)
-        self.thumbnail = self.app.thumbnailFrame.AddLabelImage(
+        self.execution_time = self.output_panel.add_label(row=FIRST_ROW, col=NEXT_COL)
+        self.deposition = self.output_panel.add_label(row=NEXT_ROW, col=SAME_COL)
+        self.thumbnail = self.app.thumbnail_frame.add_label_image(
             thumbnailof=self.image_widget, row=0, col=NEXT_COL
         )
-        self.thumbnail.tkw.bind("<Button-1>", self.SelectTab)
+        self.thumbnail.tkw.bind("<Button-1>", self.select_tab)
         self.source_im = None  # captured image
         self.source_path = None
         self.point_target = None
-        self.SetFilter()
+        self.set_filter()
 
     #
     # info_data are display fields under the image.
     # They are generally outputs from the step processing.
     #
-    def ClearInfo(self):
+    def clear_info(self):
         self.info_data = []
 
-    def AddInfo(self, label, value):
+    def add_info(self, label, value):
         ix = len(self.info_data)
         self.info_data.append((label, value))
         return ix
 
-    def AddInfoSliders(self):
+    def add_info_sliders(self):
         for ix, this in enumerate(self.parm_widgets):
             if (ix < len(self.parms_specs)) and (self.parms_specs[ix].use_slider):
-                self.AddInfo(self.parms_specs[ix].caption, this[0].Value())
+                self.add_info(self.parms_specs[ix].caption, this[0].value())
 
-    def SetInfo(self, ix, label, value):
+    def set_info(self, ix, label, value):
         while len(self.info_data) < (ix + 1):
             self.info_data.append(("", ""))
         self.info_data[ix] = (label, value)
 
-    def OnPickPoint(self, event):
+    def on_pick_point(self, event):
         # This configures OnImageClick() to save the clicked point in a parm.
         # event.widget is the tkw object. We could use that to use this
         # method for multiple points.
@@ -195,27 +195,27 @@ class ProcessStep(object):
                     # that can be slected by clicking on the image.
                     self.point_target = this[0]
         if self.point_target is not None:
-            self.point_target.ReplaceValue("<click image>")
+            self.point_target.replace_value("<click image>")
 
-    def OnExecuteStep(self):
+    def on_execute_step(self):
         # Click this to refresh after changing a parameter. We don't automatically do
         # that in case intermediate updates might fail when make several changes.
-        self.SetFilter()  # This saves the parameter values
+        self.set_filter()  # This saves the parameter values
         self.app.step_execution_needed = True
 
-    def OnDeleteStep(self):
+    def on_delete_step(self):
         # This event is here because it is associated with the step and
         # identifies which event is to be deleted. We can't do the
         # actual deletion here because because we also need to delete
         # this ProcessStep() instance.
         self.app.delete_process_step_ix = self.ix
 
-    def SelectTab(self, event):
+    def select_tab(self, event):
         # This is called as both a TK event and a general method.
         # Event is None if called as a general method.
         self.app.notebook.tkw.select(self.tab.tkw)
 
-    def OnImageClick(self, event):
+    def on_image_click(self, event):
         # The image has been clicked. What we do depends on the filter and
         # other state values.
         print("OnImageClick() *************")
@@ -234,46 +234,46 @@ class ProcessStep(object):
         if self.point_target is not None:
             # save the point as a parm
             v = f"{int(x)},{int(y)}"
-            self.point_target.ReplaceValue(v)
+            self.point_target.replace_value(v)
             self.point_target = None
             return
         # Default action: pop-up a window with a larger image.
         print("ZOOM IM", self.exec_im.__class__.__name__)
-        self.exec_im.Write("zoom.jpeg")
+        self.exec_im.write("zoom.jpeg")
         # Reference to popup must be maintained or image gets lost in garbage collection.
-        self.zoom_popup = self.app.tk.MakePopupWindow(self.cv_filter_name)
-        self.zoom_popup.AddLabel("Sum Thing")
-        canvas = self.zoom_popup.AddCanvas(width=800, height=400)
-        canvas.UpdateImage(pil_fn="zoom.jpeg")
+        self.zoom_popup = self.app.tk.make_popup_window(self.cv_filter_name)
+        self.zoom_popup.add_label("Sum Thing")
+        canvas = self.zoom_popup.add_canvas(width=800, height=400)
+        canvas.update_image(pil_fn="zoom.jpeg")
 
     @classmethod
-    def ExecuteAllSteps(cls):
+    def execute_all_steps(cls):
         for this_step in cls.steps:
-            this_step.ExecuteStep()
+            this_step.execute_step()
 
-    def SaveParameters(self):
+    def save_parameters(self):
         for ix, this_widget in enumerate(self.parm_widgets):
             if this_widget[0].parm_id is not None:
                 # save prior value
-                self.parm_values[this_widget[0].parm_id] = this_widget[0].Value()
+                self.parm_values[this_widget[0].parm_id] = this_widget[0].value()
 
-    def NewFilter(self, *args):
+    def new_filter(self, *args):
         # TK callbacks seem to incude *args
-        self.SetFilter()
+        self.set_filter()
         self.app.step_execution_needed = True
 
-    def SetFilter(self, FilterName=None, NewParms=None):
-        self.SaveParameters()
-        if NewParms is not None:
-            for key, value in NewParms.items():
-                self.parm_values[FilterName + "_" + key] = value
-        if FilterName is None:
-            new_filter_name = self.filter_selection.Value()
+    def set_filter(self, filter_name=None, new_parms=None):
+        self.save_parameters()
+        if new_parms is not None:
+            for key, value in new_parms.items():
+                self.parm_values[filter_name + "_" + key] = value
+        if filter_name is None:
+            new_filter_name = self.filter_selection.value()
         else:
-            new_filter_name = FilterName
+            new_filter_name = filter_name
         # print("SetFilter()", new_filter_name,  self.cv_filter_name)
         if new_filter_name != self.cv_filter_name:
-            self.filter_selection.ReplaceValue(new_filter_name)
+            self.filter_selection.replace_value(new_filter_name)
             self.cv_filter_name = new_filter_name
             self.cv_specs = oc.ImageFilterCollection.image_filters[self.cv_filter_name]
             self.parms_specs = self.cv_specs.parms
@@ -324,14 +324,14 @@ class ProcessStep(object):
                     parm_caption = "Parm" + str(ix + 1)
                     parm_value = ""
                     this_widget[0] = this_widget[2]  # use entry box widget
-                print("SetFilter() parm", ix, parm_caption, parms_specs)
-                this_widget[1].ReplaceValue(parm_caption)  # parameter label
+                # print("set_filter() parm", ix, parm_caption, parms_specs)
+                this_widget[1].replace_value(parm_caption)  # parameter label
                 this_widget[0].tkw.lift()  # make active control visible (top of stack)
-                this_widget[0].ReplaceValue(parm_value)
+                this_widget[0].replace_value(parm_value)
                 this_widget[0].parm_id = parm_name
 
     @classmethod
-    def WriteProgram(cls, py_fn):
+    def write_program(cls, py_fn):
         f = codecs.open(py_fn, "w", encoding="utf-8")
         f.write("\n")
 
@@ -358,7 +358,7 @@ class ProcessStep(object):
 
         for ix, this in enumerate(cls.steps[1:]):
             f.write(f"#\n# Step {this.ix} - {this.cv_filter_name}\n#\n")
-            code_str = this.GetCodeStr(Script=True)
+            code_str = this.get_code_str(script=True)
             f.write(code_str)
 
         if cls.steps[-1].cv_specs.annotate_code is None:
@@ -373,7 +373,7 @@ class ProcessStep(object):
         f.close()
 
     @classmethod
-    def WriteCameraman(cls, cam_fn):
+    def write_cameraman(cls, cam_fn):
         # Writes a snipet of code that will be used for compile/exec in cameraman
         # All imports will be provided via the global parameter:
         # 	cv2, oc (oc)
@@ -387,7 +387,7 @@ class ProcessStep(object):
         f.write("im_in = im_base.copy()\n")
 
         for ix, this in enumerate(cls.steps[1:]):
-            code_str = this.GetCodeStr(Script=True)
+            code_str = this.get_code_str(script=True)
             f.write(code_str)
 
         if cls.steps[-1].cv_specs.annotate_code is None:
@@ -397,18 +397,18 @@ class ProcessStep(object):
 
         f.close()
 
-    def GetCodeStr(self, Script=True):
-        self.SaveParameters()
+    def get_code_str(self, script=True):
+        self.save_parameters()
         code_substitutions = {}
         show_annotation = False
         for this_parm in self.parms_specs:
             raw_value = self.parm_values[self.cv_filter_name + "_" + this_parm.name]
             translated_value = this_parm.GetValue(raw_value)
             code_substitutions[this_parm.name] = translated_value
-            print("GetCodeStr() parms", this_parm.name, raw_value, translated_value)
+            # print("get_code_str() parms", this_parm.name, raw_value, translated_value)
             if this_parm.name == SHOW_ANNOTATION:
                 show_annotation = translated_value
-        if Script:
+        if script:
             code_substitutions["x_output_annotated"] = "annotated"
             code_substitutions["x_output_contours"] = "contours_in"
             code_substitutions["x_output_hierarchy"] = "hierarchy_in"
@@ -427,7 +427,7 @@ class ProcessStep(object):
         code = self.cv_specs.code
         if code[-1:] != "\n":
             code += "\n"
-        if Script and (oc.FLAG_ISBASE in self.cv_specs.flags):
+        if script and (oc.FLAG_ISBASE in self.cv_specs.flags):
             code += "im_base = im_in\n"
         if self.cv_specs.annotate_code is not None:
             if show_annotation:
@@ -437,7 +437,7 @@ class ProcessStep(object):
             return exec_code_str
         return ""
 
-    def ExecuteStep(self):
+    def execute_step(self):
         execution_start = time.time()
         #
         # Collect output from prior steps
@@ -486,15 +486,15 @@ class ProcessStep(object):
         for ix, this in enumerate(self.info_widgets):
             if ix < len(self.info_data):
                 try:
-                    this[0].ReplaceValue(self.info_data[ix][0])
-                    this[1].ReplaceValue(self.info_data[ix][1])
+                    this[0].replace_value(self.info_data[ix][0])
+                    this[1].replace_value(self.info_data[ix][1])
                 except:
                     # tried to execute deleted step
                     print("ExecuteStep()", self.ix, self.tab_title)
                     # raise
             else:
-                this[0].ReplaceValue("")
-                this[1].ReplaceValue("")
+                this[0].replace_value("")
+                this[1].replace_value("")
 
         trace = None
         self.exec_annotated = None
@@ -505,8 +505,8 @@ class ProcessStep(object):
         self.exec_objects = None
         self.exec_rect = None
         deposition = ""
-        self.deposition.ReplaceValue(deposition)
-        exec_code_str = self.GetCodeStr(Script=False)
+        self.deposition.replace_value(deposition)
+        exec_code_str = self.get_code_str(script=False)
         if exec_code_str != "":
             # print("EXEC", exec_code_str)
             if "im_in" in exec_global_vars:
@@ -524,10 +524,10 @@ class ProcessStep(object):
         #
         if trace is not None:
             deposition = trace + "\n\n" + deposition
-            self.deposition.ReplaceValue(deposition)
+            self.deposition.replace_value(deposition)
         if oc.FLAG_SLIDERS in self.cv_specs.flags:
-            self.ClearInfo()
-            self.AddInfoSliders()
+            self.clear_info()
+            self.add_info_sliders()
         if self.exec_annotated is not None:
             step_display_image = self.exec_annotated
         else:
@@ -539,8 +539,8 @@ class ProcessStep(object):
                 step_display_image = self.exec_im
         if step_display_image is not None:
             # This can happen while steps are being changed
-            self.image_widget.UpdateImage(source_im=step_display_image.im)
-        self.execution_time.ReplaceValue(
+            self.image_widget.update_image(source_im=step_display_image.im)
+        self.execution_time.replace_value(
             f"{(time.time() - execution_start) / 1000:f}ms"
         )
         return
@@ -552,7 +552,7 @@ class Darkroom(vmqtt.VnavsNode):
         "camera_last_filename",
         "camera_shutter_speed",
         "delete_process_step_ix",
-        "downloadDir",
+        "download_dir",
         "file_client",
         "gui_update_mode",
         "image",
@@ -572,11 +572,11 @@ class Darkroom(vmqtt.VnavsNode):
         "pic_fn",
         "pic_needed",
         "pic_source",
-        "scriptsDir",
+        "scripts_dir",
         "source_widget",
-        "statusFrame",
+        "status_frame",
         "step_execution_needed",
-        "thumbnailFrame",
+        "thumbnail_frame",
         "tk",
     )
 
@@ -584,7 +584,7 @@ class Darkroom(vmqtt.VnavsNode):
         super().__init__(
             subscriptions=[
                 vmqtt.Subscription(
-                    vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady
+                    vconst.cameraman_pic_ready_topic, handler=self.do_cameraman_pic_ready
                 )
             ],
             single_threaded=True,
@@ -597,11 +597,11 @@ class Darkroom(vmqtt.VnavsNode):
         self.load_process_file_name = None
         self.delete_process_step_ix = None
         self.file_client = vnavs_file_xfer_client.FileClient(verbose=False)
-        self.downloadDir = self.config.get("FileClient", "DownloadDir")
-        self.downloadDir = os.path.expanduser(
-            self.downloadDir
+        self.download_dir = self.config.get("FileClient", "DownloadDir")
+        self.download_dir = os.path.expanduser(
+            self.download_dir
         )  # this expands tilde in path
-        self.scriptsDir = self.config.get("MissionControl", "Scripts")
+        self.scripts_dir = self.config.get("MissionControl", "Scripts")
 
         self.load_filter_name = None
         self.load_parms = {}
@@ -622,13 +622,13 @@ class Darkroom(vmqtt.VnavsNode):
         self.gui_update_mode = True
         self.tk = easytk.EasyTk()
         self.tk.tkw.title("VNAVS OpenCV Visualizer")
-        self.statusFrame = self.tk.AddLabelFrame("Status", row=1)
-        self.thumbnailFrame = self.tk.AddLabelFrame("Thumbnails", row=2)
-        self.notebook = self.tk.AddNotebook(row=3, OnTabSelected=self.OnTabSelected)
-        plus = self.notebook.AddTab("+")
+        self.status_frame = self.tk.add_label_frame("Status", row=1)
+        self.thumbnail_frame = self.tk.add_label_frame("Thumbnails", row=2)
+        self.notebook = self.tk.add_notebook(row=3, on_tab_selected=self.on_tab_selected)
+        plus = self.notebook.add_tab("+")
         self.notebook_add_id = self.notebook.tkw.tabs()[-1]
-        self.camera_iso = self.statusFrame.AddEntryField("ISO", value=800)
-        self.camera_shutter_speed = self.statusFrame.AddEntryField(
+        self.camera_iso = self.status_frame.add_entry_field("ISO", value=800)
+        self.camera_shutter_speed = self.status_frame.add_entry_field(
             "Shutter Speed", value=10000, row=SAME_ROW, col=NEXT_COL
         )
         self.camera_last_filename = ""
@@ -641,54 +641,54 @@ class Darkroom(vmqtt.VnavsNode):
         self.pic_fn = None
         self.pic_source = None
 
-        self.source_widget = self.statusFrame.AddDropdown(
+        self.source_widget = self.status_frame.add_dropdown(
             s_items=[SRC_LOCAL_CAMERA, SRC_BOT_CAMERA],
-            command=self.OnSelectSource,
+            command=self.on_select_source,
             row=SAME_ROW,
             col=NEXT_COL,
         )
-        self.statusFrame.AddButton(
-            "Capture", command=self.OnCaptureImage, row=SAME_ROW, col=NEXT_COL
+        self.status_frame.add_button(
+            "Capture", command=self.on_capture_image, row=SAME_ROW, col=NEXT_COL
         )
-        self.statusFrame.AddButton(
-            "Continuous", command=self.OnContinuousImage, row=SAME_ROW, col=NEXT_COL
+        self.status_frame.add_button(
+            "Continuous", command=self.on_continuous_image, row=SAME_ROW, col=NEXT_COL
         )
-        self.statusFrame.AddButton(
-            "Open File", command=self.OnOpenImageFile, row=SAME_ROW, col=NEXT_COL
+        self.status_frame.add_button(
+            "Open File", command=self.on_open_image_file, row=SAME_ROW, col=NEXT_COL
         )
-        self.statusFrame.AddButton(
-            "Open Process", command=self.OpenProcessFile, row=SAME_ROW, col=NEXT_COL
+        self.status_frame.add_button(
+            "Open Process", command=self.open_process_file, row=SAME_ROW, col=NEXT_COL
         )
-        self.statusFrame.AddButton(
-            "Save Process", command=self.SaveProcessFile, row=SAME_ROW, col=NEXT_COL
+        self.status_frame.add_button(
+            "Save Process", command=self.save_process_file, row=SAME_ROW, col=NEXT_COL
         )
 
         ProcessStep.app = self
         self.new_step = None
         self.gui_update_mode = False
 
-    def ConfigureCamera(self):
+    def configure_camera(self):
         print("ConfigureCamera", self.pic_source, SRC_BOT_CAMERA)
         payload = {}
-        payload["iso"] = self.camera_iso.Value()
-        payload["shutter_speed"] = self.camera_shutter_speed.Value()
+        payload["iso"] = self.camera_iso.value()
+        payload["shutter_speed"] = self.camera_shutter_speed.value()
         if self.pic_source == SRC_BOT_CAMERA:
             print(payload)
             self.publish(vconst.cameraman_orders_topic, payload)
 
-    def ConfigureImageSource(
+    def configure_image_source(
         self, path=None, new_image=None, iso=None, shutter_speed=None, colorcode=None
     ):
         new_parms = {}
         if len(ProcessStep.steps) == 0:
             ProcessStep(
                 oc.FILTER_NAME_IMAGE,
-                Parms=new_parms,
-                Where=self.notebook_add_id,
+                parms=new_parms,
+                where=self.notebook_add_id,
             )
         else:
-            ProcessStep.steps[0].SetFilter(
-                FilterName=oc.FILTER_NAME_IMAGE, NewParms=new_parms
+            ProcessStep.steps[0].set_filter(
+                filter_name=oc.FILTER_NAME_IMAGE, new_parms=new_parms
             )
         if (new_image is None) and (path is not None):
             new_image = cv2.imread(path)
@@ -699,20 +699,20 @@ class Darkroom(vmqtt.VnavsNode):
         else:
             ProcessStep.steps[0].source_im = oc.Image(im=new_image, colorcode=colorcode)
             ProcessStep.steps[0].source_path = path
-        ProcessStep.steps[0].ClearInfo()
+        ProcessStep.steps[0].clear_info()
         if path is not None:
-            ProcessStep.steps[0].AddInfo("Path", path)
+            ProcessStep.steps[0].add_info("Path", path)
         if iso is not None:
-            ProcessStep.steps[0].AddInfo("ISO", iso)
+            ProcessStep.steps[0].add_info("ISO", iso)
         if shutter_speed is not None:
-            ProcessStep.steps[0].AddInfo("Shutter", shutter_speed)
+            ProcessStep.steps[0].add_info("Shutter", shutter_speed)
         if colorcode is not None:
-            ProcessStep.steps[0].AddInfo("Colorcode", colorcode)
+            ProcessStep.steps[0].add_info("Colorcode", colorcode)
         self.step_execution_needed = True
 
-    def OpenProcessFile(self):
-        self.load_process_file_name = self.statusFrame.DoFileNameDialog(
-            Dir=self.scriptsDir, FileTypes=ProcessStep.process_file_types
+    def open_process_file(self):
+        self.load_process_file_name = self.status_frame.do_file_name_dialog(
+            directory=self.scripts_dir, file_types=ProcessStep.process_file_types
         )
 
     # While interacting with the process the parms dictionary can get
@@ -720,7 +720,7 @@ class Darkroom(vmqtt.VnavsNode):
     # is intentional because it lets you go back to previous filter with the
     # parms you had set. Save/LoadProcessFile keep thse dirty values. There
     # is something to be said to filter the parts based on the current step.
-    def LoadProcessFile(self, fn):
+    def load_process_file(self, fn):
         # load_filter_name, load_parms and load_new_filter_ct are essentially local variables.
         # They are made instance properties so they can be modified by AssignFilter()
         self.load_filter_name = None
@@ -736,14 +736,14 @@ class Darkroom(vmqtt.VnavsNode):
             self.load_new_filter_ct += 1
             print("ASSIGN", self.load_filter_name, self.load_new_filter_ct)
             if self.load_new_filter_ct <= len(ProcessStep.steps):
-                ProcessStep.steps[self.load_new_filter_ct - 1].SetFilter(
-                    FilterName=self.load_filter_name, NewParms=self.load_parms
+                ProcessStep.steps[self.load_new_filter_ct - 1].set_filter(
+                    filter_name=self.load_filter_name, new_parms=self.load_parms
                 )
             else:
                 ProcessStep(
-                    FilterName=self.load_filter_name,
-                    Parms=self.load_parms,
-                    Where=self.notebook_add_id,
+                    filter_name=self.load_filter_name,
+                    parms=self.load_parms,
+                    where=self.notebook_add_id,
                 )
             self.load_filter_name = None
             self.load_parms = {}
@@ -773,18 +773,18 @@ class Darkroom(vmqtt.VnavsNode):
             # The old process had more steps than the current, get rid of the old steps.
             ix = len(ProcessStep.steps) - 1
             print("XXXX", ix)
-            self.DeleteProcessStep(ix)
-        self.source_widget.ReplaceValue(
+            self.delete_process_step(ix)
+        self.source_widget.replace_value(
             SRC_LOCAL_CAMERA
         )  # temporary - needs more options
         self.step_execution_needed = True
         self.loading = False
 
-    def SaveProcessFile(self):
-        drk_fn = self.statusFrame.DoFileSaveAsNameDialog(
-            Dir=self.scriptsDir,
-            FileName=self.load_process_file_name,
-            FileTypes=ProcessStep.process_file_types,
+    def save_process_file(self):
+        drk_fn = self.status_frame.do_file_save_as_name_dialog(
+            directory=self.scripts_dir,
+            file_name=self.load_process_file_name,
+            file_types=ProcessStep.process_file_types,
         )
         fn_root, fn_ext = os.path.splitext(drk_fn)
         drk_f = open(drk_fn, "w")
@@ -795,38 +795,38 @@ class Darkroom(vmqtt.VnavsNode):
         drk_f.close()
         cam_fn = fn_root + "." + ProcessStep.cameraman_file_extension
         py_fn = fn_root + "." + ProcessStep.python_file_extension
-        ProcessStep.WriteCameraman(cam_fn)
-        ProcessStep.WriteProgram(py_fn)
+        ProcessStep.write_cameraman(cam_fn)
+        ProcessStep.write_program(py_fn)
 
-    def OnCaptureImage(self):
+    def on_capture_image(self):
         print("OnCaptureImage()")
         self.pic_needed = True
         self.pic_continuous = False
-        if self.source_widget.Value() is None:
+        if self.source_widget.value() is None:
             print("On Capture update source")
-            self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
-        self.ConfigureCamera()  # we don't wait for this to take effect
+            self.source_widget.replace_value(SRC_LOCAL_CAMERA)
+        self.configure_camera()  # we don't wait for this to take effect
 
-    def OnContinuousImage(self):
+    def on_continuous_image(self):
         self.pic_continuous = True
-        if self.source_widget.Value() is None:
-            self.source_widget.ReplaceValue(SRC_LOCAL_CAMERA)
-        self.ConfigureCamera()  # we don't wait for this to take effect
+        if self.source_widget.value() is None:
+            self.source_widget.replace_value(SRC_LOCAL_CAMERA)
+        self.configure_camera()  # we don't wait for this to take effect
 
-    def OnOpenImageFile(self):
+    def on_open_image_file(self):
         self.pic_continuous = False
         self.pic_needed = False
-        fn = self.statusFrame.DoFileNameDialog()
-        self.ConfigureImageSource(path=fn)
+        fn = self.status_frame.do_file_name_dialog()
+        self.configure_image_source(path=fn)
 
-    def OnSelectSource(self, *args):
-        self.pic_source = self.source_widget.Value()
+    def on_select_source(self, *args):
+        self.pic_source = self.source_widget.value()
         if self.pic_source == SRC_LOCAL_CAMERA:
             self.local_cam = cameraman.MacbookCamera()
         elif self.pic_source == SRC_BOT_CAMERA:
             self.connect_to_mqtt_server()
 
-    def OnTabSelected(self, x):
+    def on_tab_selected(self, x):
         # This ends up with the initial view being a default filter tab created here
         # and the plus tab to add filters. When the page is initialialy displayed, the
         # only tab that exists is the plus. It is automatically selected by TK, which
@@ -851,23 +851,23 @@ class Darkroom(vmqtt.VnavsNode):
             # We want the new tab to be selected but TK ignores select() here,
             # because this is an on_select() callback. To get around this,
             # we set self.new_step and make the selection within update loop.
-            self.new_step = ProcessStep(Where=tabid)
+            self.new_step = ProcessStep(where=tabid)
 
-    def DoCameramanPicReady(self, payload):
+    def do_cameraman_pic_ready(self, payload):
         # Do as little as possible here in mqtt thread.
         # Process image in tk thread.
         # print("rmsg_cameraman_pic_ready()", payload)
         self.last_pic_payload = payload
 
-    def DeleteProcessStep(self, ix):
+    def delete_process_step(self, ix):
         # Don't forget that there is one more tab than there
         # are processing steps because of the add tab (self.notebook_add_id)
         #
         target_step = ProcessStep.steps[ix]
         print("darkroom.DeleteProcessStep() BEGIN", ix)
         self.gui_update_mode = True
-        self.notebook.DeleteTab(ix)
-        target_step.thumbnail.Destroy()
+        self.notebook.delete_tab(ix)
+        target_step.thumbnail.destroy()
         ProcessStep.steps.pop(ix)
         for adjust_ix, this_step in enumerate(ProcessStep.steps[ix:]):
             this_step.ix = ix + adjust_ix
@@ -876,7 +876,7 @@ class Darkroom(vmqtt.VnavsNode):
             self.notebook.tkw.tab(this_step.ix, text=this_step.tab_title)
         self.step_execution_needed = True
         self.gui_update_mode = False
-        ProcessStep.steps[ix - 1].SelectTab(None)
+        ProcessStep.steps[ix - 1].select_tab(None)
         print("darkroom.DeleteProcessStep() END", len(ProcessStep.steps))
 
     #
@@ -892,16 +892,16 @@ class Darkroom(vmqtt.VnavsNode):
             return
 
         if self.delete_process_step_ix is not None:
-            self.DeleteProcessStep(self.delete_process_step_ix)
+            self.delete_process_step(self.delete_process_step_ix)
         self.delete_process_step_ix = None
 
         if self.load_process_file_name is not None:
             # print("LOAD PROCESS", len(ProcessStep.steps))
-            self.LoadProcessFile(self.load_process_file_name)
+            self.load_process_file(self.load_process_file_name)
         self.load_process_file_name = None
 
         if self.new_step is not None:
-            self.new_step.SelectTab(None)
+            self.new_step.select_tab(None)
             self.new_step = None
 
         #
@@ -929,7 +929,7 @@ class Darkroom(vmqtt.VnavsNode):
                         self.last_pic_payload
                     )  # capture payload because self.last_pic_payload is updated asynchronously
                     self.pic_fn = payload["filename"]
-                    path = os.path.join(self.downloadDir, self.pic_fn)
+                    path = os.path.join(self.download_dir, self.pic_fn)
                     # print("DoLoop() GetFile: ", path)
                     if not self.file_client.get_file("i", self.pic_fn, path=path):
                         print("Unable to fetch PIC", self.pic_fn)
@@ -943,7 +943,7 @@ class Darkroom(vmqtt.VnavsNode):
                 # clicked or if this loop is running faster than new images are published in
                 # continuous SRC_BOT_CAMERA mode.
                 # print("DoLoop() process image ", path, new_image is not None)
-                self.ConfigureImageSource(
+                self.configure_image_source(
                     path=path,
                     new_image=new_image,
                     iso=iso,
@@ -957,10 +957,10 @@ class Darkroom(vmqtt.VnavsNode):
             # controls. Especially sliders.
             self.step_execution_needed = True
         if self.step_execution_needed:
-            ProcessStep.ExecuteAllSteps()
+            ProcessStep.execute_all_steps()
             self.step_execution_needed = False
             self.last_process_time = time.time()
-        self.tk.Update()
+        self.tk.update()
         # when tk is destroyed by close window, self.disconnect()	# stop mqtt client loop
 
 

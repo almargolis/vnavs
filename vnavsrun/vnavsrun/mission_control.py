@@ -4,8 +4,8 @@ import os
 
 if (len(sys.argv) >= 2) and (sys.argv[1] == "gui"):
     from PIL import ImageTk, Image
-    import easytk
-    from easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
+    from vnavslib import easytk
+    from vnavslib.easytk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
 else:
     ImageTk = None
     Image = None
@@ -67,60 +67,60 @@ class MissionControl(vmqtt.VnavsNode):
             subscriptions=[
                 vmqtt.Subscription(
                     vconst.cameraman_pic_ready_topic,
-                    handler=self.DoCameramanPicReady,
+                    handler=self.do_cameraman_pic_ready,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.engineer_1_gps_topic,
-                    handler=self.DoEngineer1Gps,
+                    handler=self.do_engineer1_gps,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.engineer_1_imu_topic,
-                    handler=self.DoEngineer1Imu,
+                    handler=self.do_engineer1_imu,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.helmsman_orders_topic,
-                    handler=self.DoHelmsmanOrders,
+                    handler=self.do_helmsman_orders,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_mark_topic,
-                    handler=self.DoMissionMark,
+                    handler=self.do_mission_mark,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_init_topic,
-                    handler=self.DoMissionInit,
+                    handler=self.do_mission_init,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_loaded_topic,
-                    handler=self.DoMissionStatus,
+                    handler=self.do_mission_status,
                     handler_needs_topic=True,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_stage_started_topic,
-                    handler=self.DoMissionStatus,
+                    handler=self.do_mission_status,
                     handler_needs_topic=True,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_stage_completed_topic,
-                    handler=self.DoMissionStatus,
+                    handler=self.do_mission_status,
                     handler_needs_topic=True,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.navigator_plot_topic,
-                    handler=self.DoNavigatorPlot,
+                    handler=self.do_navigator_plot,
                     LatestOnly=True,
                 ),
                 vmqtt.Subscription(
                     vconst.process_result_topic,
-                    handler=self.DoProcessResult,
+                    handler=self.do_process_result,
                     LatestOnly=True,
                 ),
             ],
@@ -131,12 +131,12 @@ class MissionControl(vmqtt.VnavsNode):
             verbose=verbose,
         )
 
-        self.downloadDir = self.config.get("FileClient", "DownloadDir")
-        self.downloadDir = os.path.expanduser(
-            self.downloadDir
+        self.download_dir = self.config.get("FileClient", "DownloadDir")
+        self.download_dir = os.path.expanduser(
+            self.download_dir
         )  # this expands tilde in path
 
-        self.scriptsDir = self.config.get("MissionControl", "Scripts")
+        self.scripts_dir = self.config.get("MissionControl", "Scripts")
         # The default BuifferLen is 4096 which I settled on at some time in the past while working on FastMqtt.
         # That involved some testing, but not rigorously. I just figured out it was taking 2 seconds to
         # transfer a 130K image from the bot to mission control. I then changed the buffer on the client end
@@ -148,9 +148,9 @@ class MissionControl(vmqtt.VnavsNode):
 
         self.tk = easytk.EasyTk(debug=True)
         self.tk.tkw.title("VNAVS Mission Control")
-        self.statusFrame = self.tk.AddLabelFrame("Status", row=1)
-        self.thumbnailFrame = self.tk.AddLabelFrame("Thumbnails", row=2)
-        self.notebook = self.tk.AddNotebook(row=3)
+        self.status_frame = self.tk.add_label_frame("Status", row=1)
+        self.thumbnail_frame = self.tk.add_label_frame("Thumbnails", row=2)
+        self.notebook = self.tk.add_notebook(row=3)
 
         self.image = oc.ImageAnalyzer()
         self.image.img_crop = (300, 200)
@@ -164,112 +164,112 @@ class MissionControl(vmqtt.VnavsNode):
         self.image.do_save_snaps = False
         self.speed = 0
 
-        mission_tab = self.notebook.AddTab("Mission")
+        mission_tab = self.notebook.add_tab("Mission")
 
-        nother_frame = _frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        self.mission_stage_entry = nother_frame.AddDropdown(
+        nother_frame = _frame = mission_tab.add_frame(colspan=COL_SPAN_ALL)
+        self.mission_stage_entry = nother_frame.add_dropdown(
             caption="Mode",
             s_items=DISPLAY_MODES,
-            Selection=DISPLAY_MODE_LIVE,
+            selection=DISPLAY_MODE_LIVE,
             row=SAME_ROW,
             col=NEXT_COL,
         )
-        self.mission_id_entry = nother_frame.AddEntryField(
+        self.mission_id_entry = nother_frame.add_entry_field(
             "Mission ID", width=15, value=""
         )
-        self.local_mission_entry = nother_frame.AddDropdown(
+        self.local_mission_entry = nother_frame.add_dropdown(
             caption="Local Missions", row=SAME_ROW, col=NEXT_COL
         )
-        nother_frame.AddButton(
-            "Replay", command=self.OnReplayLocal, row=SAME_ROW, col=NEXT_COL
+        nother_frame.add_button(
+            "Replay", command=self.on_replay_local, row=SAME_ROW, col=NEXT_COL
         )
-        nother_frame.AddButton(
-            ">", command=self.OnReplayLocalFrame, width=1, row=SAME_ROW, col=NEXT_COL
+        nother_frame.add_button(
+            ">", command=self.on_replay_local_frame, width=1, row=SAME_ROW, col=NEXT_COL
         )
-        nother_frame.AddButton(
-            "<", command=self.OnReplayLocalBack, width=1, row=SAME_ROW, col=NEXT_COL
+        nother_frame.add_button(
+            "<", command=self.on_replay_local_back, width=1, row=SAME_ROW, col=NEXT_COL
         )
-        self.bot_mission_entry = nother_frame.AddDropdown(
+        self.bot_mission_entry = nother_frame.add_dropdown(
             caption="Bot Missions", row=SAME_ROW, col=NEXT_COL
         )
-        nother_frame.AddButton(
-            "Download", command=self.OnReplayDownload, row=SAME_ROW, col=NEXT_COL
+        nother_frame.add_button(
+            "Download", command=self.on_replay_download, row=SAME_ROW, col=NEXT_COL
         )
 
-        mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        self.mission_name_entry = mission_frame.AddEntryField(
+        mission_frame = mission_tab.add_frame(colspan=COL_SPAN_ALL)
+        self.mission_name_entry = mission_frame.add_entry_field(
             "Mission", width=15, value="gps2"
         )
-        mission_frame.AddButton(
-            "Load", command=self.OnMissionLoad, row=SAME_ROW, col=NEXT_COL
+        mission_frame.add_button(
+            "Load", command=self.on_mission_load, row=SAME_ROW, col=NEXT_COL
         )
-        self.mission_stage_entry = mission_frame.AddDropdown(
+        self.mission_stage_entry = mission_frame.add_dropdown(
             caption="Stage", row=SAME_ROW, col=NEXT_COL
         )
-        mission_frame.AddButton(
-            "Execute", command=self.OnStageExecute, row=SAME_ROW, col=NEXT_COL
+        mission_frame.add_button(
+            "Execute", command=self.on_stage_execute, row=SAME_ROW, col=NEXT_COL
         )
-        self.mission_status = mission_frame.AddLabel(
+        self.mission_status = mission_frame.add_label(
             "Ready", row=SAME_ROW, col=NEXT_COL
         )
 
-        buttonframe = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        buttonframe.AddButton(
-            "Cancel", command=self.OnCancelMission, row=SAME_ROW, col=NEXT_COL
+        buttonframe = mission_tab.add_frame(colspan=COL_SPAN_ALL)
+        buttonframe.add_button(
+            "Cancel", command=self.on_cancel_mission, row=SAME_ROW, col=NEXT_COL
         )
-        buttonframe.AddButton(
-            "+", command=self.OnSpeedPlus, width=1, row=SAME_ROW, col=NEXT_COL
+        buttonframe.add_button(
+            "+", command=self.on_speed_plus, width=1, row=SAME_ROW, col=NEXT_COL
         )
-        buttonframe.AddButton(
-            "-", command=self.OnSpeedMinus, width=1, row=SAME_ROW, col=NEXT_COL
+        buttonframe.add_button(
+            "-", command=self.on_speed_minus, width=1, row=SAME_ROW, col=NEXT_COL
         )
-        buttonframe.AddButton(
-            "Stop", command=self.OnSpeedStop, row=SAME_ROW, col=NEXT_COL
+        buttonframe.add_button(
+            "Stop", command=self.on_speed_stop, row=SAME_ROW, col=NEXT_COL
         )
-        # buttonframe.AddButton('Clear Waypoints', command=self.ClearWaypoints, row=SAME_ROW, col=NEXT_COL)
-        # buttonframe.AddButton('Mark Waypoint', command=self.MarkWaypoint, row=SAME_ROW, col=NEXT_COL)
-        # buttonframe.AddButton('Save Waypoints', command=self.SaveWaypoints, row=SAME_ROW, col=NEXT_COL)
-        # buttonframe.AddButton('Map Waypoints', command=self.MapWaypoints, row=SAME_ROW, col=NEXT_COL)
-        mission_frame = mission_tab.AddFrame(colspan=COL_SPAN_ALL)
-        mission_image_frame = mission_frame.AddFrame()
-        mission_info_frame = mission_frame.AddFrame(row=SAME_ROW, col=NEXT_COL)
+        # buttonframe.add_button('Clear Waypoints', command=self.clear_waypoints, row=SAME_ROW, col=NEXT_COL)
+        # buttonframe.add_button('Mark Waypoint', command=self.mark_waypoint, row=SAME_ROW, col=NEXT_COL)
+        # buttonframe.add_button('Save Waypoints', command=self.save_waypoints, row=SAME_ROW, col=NEXT_COL)
+        # buttonframe.add_button('Map Waypoints', command=self.map_waypoints, row=SAME_ROW, col=NEXT_COL)
+        mission_frame = mission_tab.add_frame(colspan=COL_SPAN_ALL)
+        mission_image_frame = mission_frame.add_frame()
+        mission_info_frame = mission_frame.add_frame(row=SAME_ROW, col=NEXT_COL)
         #
-        image_info_frame = mission_image_frame.AddFrame()
-        self.f1_fname = image_info_frame.AddLabel("fname")
-        self.f1_fps = image_info_frame.AddLabel("fps", row=SAME_ROW, col=NEXT_COL)
-        self.f1_img1 = mission_image_frame.AddLabelImage()
+        image_info_frame = mission_image_frame.add_frame()
+        self.f1_fname = image_info_frame.add_label("fname")
+        self.f1_fps = image_info_frame.add_label("fps", row=SAME_ROW, col=NEXT_COL)
+        self.f1_img1 = mission_image_frame.add_label_image()
         #
-        self.gps_position = mission_info_frame.AddLabelInfo("GPS Position:")
-        self.gps_speed = mission_info_frame.AddLabelInfo("GPS Speed:")
-        self.imu_heading = mission_info_frame.AddLabelInfo("IMU Heading:")
-        self.waypoint_position = mission_info_frame.AddLabelInfo("Waypoint Position:")
-        self.waypoint_heading = mission_info_frame.AddLabelInfo("Waypoint Heading:")
-        self.waypoint_distance = mission_info_frame.AddLabelInfo("Waypoint Distance:")
-        self.helmsman_speed = mission_info_frame.AddLabelInfo("Helmsman Speed:")
-        self.helmsman_steer = mission_info_frame.AddLabelInfo("Helmsman Steering:")
-        self.helmsman_p_error = mission_info_frame.AddLabelInfo("Helmsman P_Error:")
-        self.helmsman_i_accumulator = mission_info_frame.AddLabelInfo(
+        self.gps_position = mission_info_frame.add_label_info("GPS Position:")
+        self.gps_speed = mission_info_frame.add_label_info("GPS Speed:")
+        self.imu_heading = mission_info_frame.add_label_info("IMU Heading:")
+        self.waypoint_position = mission_info_frame.add_label_info("Waypoint Position:")
+        self.waypoint_heading = mission_info_frame.add_label_info("Waypoint Heading:")
+        self.waypoint_distance = mission_info_frame.add_label_info("Waypoint Distance:")
+        self.helmsman_speed = mission_info_frame.add_label_info("Helmsman Speed:")
+        self.helmsman_steer = mission_info_frame.add_label_info("Helmsman Steering:")
+        self.helmsman_p_error = mission_info_frame.add_label_info("Helmsman P_Error:")
+        self.helmsman_i_accumulator = mission_info_frame.add_label_info(
             "Helmsman I_Accumulator:"
         )
-        self.helmsman_derivative = mission_info_frame.AddLabelInfo(
+        self.helmsman_derivative = mission_info_frame.add_label_info(
             "Helmsman Derivative:"
         )
 
-        self.message_tab = self.notebook.AddTab("Message")
-        self.mt_file_name = self.message_tab.AddEntryField("Script File", width=25)
-        self.message_tab.AddButton(
-            "Open", command=self.OpenScriptFile, row=SAME_ROW, col=NEXT_COL
+        self.message_tab = self.notebook.add_tab("Message")
+        self.mt_file_name = self.message_tab.add_entry_field("Script File", width=25)
+        self.message_tab.add_button(
+            "Open", command=self.open_script_file, row=SAME_ROW, col=NEXT_COL
         )
-        self.mt_script = self.message_tab.AddScrolledEntryField(
+        self.mt_script = self.message_tab.add_scrolled_entry_field(
             "Script", width=25, height=5, row=NEXT_ROW, col=NEXT_COL
         )
-        self.message_tab.AddButton(
-            "Send Message", command=self.SendMessage, row=NEXT_ROW, col=NEXT_COL
+        self.message_tab.add_button(
+            "Send Message", command=self.send_message, row=NEXT_ROW, col=NEXT_COL
         )
 
-        self.alert_tab = self.notebook.AddTab("Alerts")
-        # self.alert_text = self.alert_tab.AddScrolledEntryField('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
-        self.alert_text = self.alert_tab.AddTable(
+        self.alert_tab = self.notebook.add_tab("Alerts")
+        # self.alert_text = self.alert_tab.add_scrolled_entry_field('Script', width=25, height=5, row=NEXT_ROW, col=NEXT_COL)
+        self.alert_text = self.alert_tab.add_table(
             "Script", width=400, height=200, row=NEXT_ROW, col=NEXT_COL
         )
 
@@ -293,18 +293,18 @@ class MissionControl(vmqtt.VnavsNode):
         self.replay_log_lines = None
         self.replay_log_payloads = None
         self.replay_frames = -1  # ct of frames to replay, -1 is continuous
-        self.UpdateLocalMissionList()
+        self.update_local_mission_list()
 
-    def OpenScriptFile(self):
-        fn = self.message_tab.DoFileNameDialog(Dir=self.scriptsDir)
-        self.mt_file_name.ReplaceValue(fn)
+    def open_script_file(self):
+        fn = self.message_tab.do_file_name_dialog(directory=self.scripts_dir)
+        self.mt_file_name.replace_value(fn)
         s_f = open(fn, "r")
         s = s_f.read()
         s_f.close()
-        self.mt_script.ReplaceValue(s)
+        self.mt_script.replace_value(s)
 
-    def SendMessage(self):
-        s = self.mt_script.Value()
+    def send_message(self):
+        s = self.mt_script.value()
         lines = s.split("\n")
         contents = {}
         for this in lines:
@@ -323,7 +323,7 @@ class MissionControl(vmqtt.VnavsNode):
         topic = contents["Head"]["Topic"]
         self.publish(topic, contents["Payload"])
 
-    def ImageCv2(self, path):
+    def image_cv2(self, path):
         im = cv2.imread(path)
         if im is None:
             return None
@@ -331,14 +331,14 @@ class MissionControl(vmqtt.VnavsNode):
         mapped_width = w
         mapped_height = h
         # mapped_im = cv2.warpPerspective(im, BOT_1_H, (mapped_width, mapped_height))
-        mapped_im = self.image.FindLines(image=im)
+        mapped_im = self.image.find_lines(image=im)
         return Image.fromarray(mapped_im)
 
-    def ImagePillow(self, path):
+    def image_pillow(self, path):
         try:
             im = Image.open(path)
         except IOError:
-            print("ImagePillow() ERROR", path)
+            print("image_pillow() ERROR", path)
             im = None
         return im
 
@@ -350,34 +350,34 @@ class MissionControl(vmqtt.VnavsNode):
             new_payload[k] = v
         return new_payload
 
-    def ClearWaypoints(self):
+    def clear_waypoints(self):
         payload = {}
         payload["request"] = "ClearWaypoints"
         self.publish(vconst.navigator_service_topic, payload)
 
-    def MarkWaypoint(self):
+    def mark_waypoint(self):
         payload = {}
         payload["request"] = "MarkWaypoint"
         self.publish(vconst.navigator_service_topic, payload)
 
-    def SaveWaypoints(self):
+    def save_waypoints(self):
         payload = {}
         payload["request"] = "SaveWaypoints"
         payload["missionName"] = self.mission_name.get()
         self.publish(vconst.navigator_service_topic, payload)
 
-    def MapWaypoints(self):
+    def map_waypoints(self):
         payload = {}
         payload["request"] = "MakeWaypointMap"
         payload["missionName"] = self.mission_name.get()
         self.publish(vconst.navigator_service_topic, payload)
 
-    def OnMissionLoad(self):
+    def on_mission_load(self):
         # This loads mission here and sends it to navigator.
         # This is an error checking step. It does not execute mission.
         # This needs to be enhanced to do and display mission syntax checking.
-        mission_name = self.mission_name_entry.Value()
-        fp = os.path.join(self.scriptsDir, mission_name + ".mis")
+        mission_name = self.mission_name_entry.value()
+        fp = os.path.join(self.scripts_dir, mission_name + ".mis")
         f = open(fp, "r")
         mission_script = f.read()
         f.close()
@@ -386,24 +386,24 @@ class MissionControl(vmqtt.VnavsNode):
         )
         if len(self.mission.stages_list) > 0:
             self.mission.stages_list.sort()
-            self.mission_stage_entry.ReplaceChoices(self.mission.stages_list)
-            self.mission_stage_entry.ReplaceValue(self.mission.stages_list[0])
+            self.mission_stage_entry.replace_choices(self.mission.stages_list)
+            self.mission_stage_entry.replace_value(self.mission.stages_list[0])
         else:
-            self.mission_stage_entry.ReplaceChoices(["None"])
+            self.mission_stage_entry.replace_choices(["None"])
         payload = {}
         payload["mission_name"] = mission_name
         payload["mission_script"] = mission_script
         self.publish(vconst.mission_load_topic, payload)
         print("STARTNAV", payload)
 
-    def OnReplayLocal(self):
-        self.replay_mission_id = self.local_mission_entry.Value()
-        self.ConfigureReplay(Mkdir=False)
-        self.OpenReplayLog()
+    def on_replay_local(self):
+        self.replay_mission_id = self.local_mission_entry.value()
+        self.configure_replay(mkdir=False)
+        self.open_replay_log()
         self.display_mode = DISPLAY_MODE_REPLAY
         self.replay_frames = -1
 
-    def OnReplayLocalBack(self):
+    def on_replay_local_back(self):
         # Most of the time, when we get here we have been in single step
         # mode, with self.replay_log_ix pointing to data following the
         # frame currently being displayed. Since data can arrive
@@ -426,29 +426,29 @@ class MissionControl(vmqtt.VnavsNode):
                     break
         self.replay_frames = 1
 
-    def OnReplayLocalFrame(self):
+    def on_replay_local_frame(self):
         self.replay_frames = 1
 
-    def OnReplayDownload(self):
+    def on_replay_download(self):
         self.replay_log_transfer_wanted = True
-        log_file_name = self.bot_mission_entry.Value()
+        log_file_name = self.bot_mission_entry.value()
         dot = log_file_name.rfind(".")
         self.replay_mission_id = log_file_name[:dot]
-        print("OnReplayDownload()", self.replay_mission_id)
+        print("on_replay_download()", self.replay_mission_id)
 
-    def OnSpeedStop(self):
+    def on_speed_stop(self):
         self.speed = 0
         payload = {}
         payload[helmsman.HELMSMAN_SPEED] = self.speed
         self.publish(vconst.helmsman_orders_topic, payload)
 
-    def OnSpeedPlus(self):
+    def on_speed_plus(self):
         self.speed += 1
         payload = {}
         payload[helmsman.HELMSMAN_SPEED] = self.speed
         self.publish(vconst.helmsman_orders_topic, payload)
 
-    def OnSpeedMinus(self):
+    def on_speed_minus(self):
         self.speed -= 1
         if self.speed < 0:
             self.speed = 0
@@ -456,23 +456,23 @@ class MissionControl(vmqtt.VnavsNode):
         payload[helmsman.HELMSMAN_SPEED] = self.speed
         self.publish(vconst.helmsman_orders_topic, payload)
 
-    def OnStageExecute(self):
-        this_stage = self.mission_stage_entry.Value()
+    def on_stage_execute(self):
+        this_stage = self.mission_stage_entry.value()
         payload = {}
         payload["mission_name"] = self.mission.mission_name
         payload["mission_stage"] = this_stage
         self.publish(vconst.mission_sync_event_topic, payload)
         next_stage_ix = self.mission.stages_list.index(this_stage) + 1
         if next_stage_ix < len(self.mission.stages_list):
-            self.mission_stage_entry.ReplaceValue(
+            self.mission_stage_entry.replace_value(
                 self.mission.stages_list[next_stage_ix]
             )
 
-    def OnCancelMission(self):
-        print("OnCancelMission()")
+    def on_cancel_mission(self):
+        print("on_cancel_mission()")
         self.publish(vconst.process_log_list_topic, {})
         payload = {}
-        payload["mission_name"] = self.mission_name_entry.Value()
+        payload["mission_name"] = self.mission_name_entry.value()
         self.publish(vconst.mission_cancel_topic, payload)
         #
         payload = {}
@@ -483,15 +483,15 @@ class MissionControl(vmqtt.VnavsNode):
     # Message Handlers
     #
 
-    def DoCameramanPicReady(self, payload, Replay=False):
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_cameraman_pic_ready(self, payload, replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
         self.pic_next_payload = payload  # always remember latest available image
 
-    def DoEngineer1Gps(self, payload, Replay=False):
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_engineer1_gps(self, payload, replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
-        self.gps_speed.ReplaceValue(payload[engineer_1.GPS_SPEED])
+        self.gps_speed.replace_value(payload[engineer_1.GPS_SPEED])
         latitude = None
         longitude = None
         if engineer_1.GPS_LATITUDE in payload:
@@ -500,46 +500,46 @@ class MissionControl(vmqtt.VnavsNode):
             longitude = payload[engineer_1.GPS_LONGITUDE]
         if (latitude is not None) and (longitude is not None):
             position = "{},{}".format(latitude, longitude)
-            self.gps_position.ReplaceValue(position)
+            self.gps_position.replace_value(position)
 
-    def DoEngineer1Imu(self, payload, Replay=False):
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_engineer1_imu(self, payload, replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
-        self.imu_heading.ReplaceValue(payload[engineer_1.IMU_YAW])
+        self.imu_heading.replace_value(payload[engineer_1.IMU_YAW])
 
-    def DoMissionInit(self, payload, Replay=False):
-        print("mission/init", Replay, payload)
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_mission_init(self, payload, replay=False):
+        print("mission/init", replay, payload)
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
         self.mission_id = payload["mission_id"]
-        self.mission_id_entry.ReplaceValue(self.mission_id)
-        print("DoMissionInit()", self.mission_id, payload)
+        self.mission_id_entry.replace_value(self.mission_id)
+        print("do_mission_init()", self.mission_id, payload)
 
-    def DoMissionMark(self, payload, Replay=False):
-        print("mission/mark", Replay, payload)
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_mission_mark(self, payload, replay=False):
+        print("mission/mark", replay, payload)
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
-        self.line_rect = oc.RectFromPayload(payload)
-        print("DoMissionMark()", self.line_rect, payload)
+        self.line_rect = oc.right_from_payload(payload)
+        print("do_mission_mark()", self.line_rect, payload)
 
-    def DoMissionStatus(self, topic, payload, Replay=False):
-        print("DoMissionStatus()", Replay, payload)
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_mission_status(self, topic, payload, replay=False):
+        print("do_mission_status()", replay, payload)
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
         if not "mission_id" in payload:
             payload["mission_id"] = "XXX"  # normal for mission/loaded, else an error
         if not "mission_stage" in payload:
             payload["mission_stage"] = "XXX"  # normal for mission/loaded, else an error
         status = "{mission_id} {mission_stage} {_topic}".format(**payload)
-        self.mission_status.ReplaceValue(status)
+        self.mission_status.replace_value(status)
 
-    def DoNavigatorPlot(self, payload, Replay=False):
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_navigator_plot(self, payload, replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
-        self.waypoint_heading.ReplaceValue(
+        self.waypoint_heading.replace_value(
             payload[navigator.NAVIGATOR_WAYPOINT_HEADING]
         )
-        self.waypoint_distance.ReplaceValue(
+        self.waypoint_distance.replace_value(
             payload[navigator.NAVIGATOR_WAYPOINT_DISTANCE]
         )
         latitude = None
@@ -550,45 +550,45 @@ class MissionControl(vmqtt.VnavsNode):
             longitude = payload[navigator.NAVIGATOR_WAYPOINT_LONGITUDE]
         if (latitude is not None) and (longitude is not None):
             position = "{},{}".format(latitude, longitude)
-            self.waypoint_position.ReplaceValue(position)
+            self.waypoint_position.replace_value(position)
 
-    def DoProcessResult(self, payload, Replay=False):
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_process_result(self, payload, replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
         log_list = payload["log_list"]
         log_list.sort()
-        self.bot_mission_entry.ReplaceChoices(log_list)
+        self.bot_mission_entry.replace_choices(log_list)
 
-    def DoHelmsmanOrders(self, payload, Replay=False):
-        if (self.display_mode != DISPLAY_MODE_LIVE) and (not Replay):
+    def do_helmsman_orders(self, payload, replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
         if helmsman.HELMSMAN_SPEED in payload:
             speed = payload[helmsman.HELMSMAN_SPEED]
-            self.helmsman_speed.ReplaceValue(speed)
+            self.helmsman_speed.replace_value(speed)
         if helmsman.HELMSMAN_HEADING in payload:
             steer = payload[helmsman.HELMSMAN_HEADING]
-            self.helmsman_steer.ReplaceValue(steer)
+            self.helmsman_steer.replace_value(steer)
         if helmsman.HELMSMAN_P_ERROR in payload:
             p_error = payload[helmsman.HELMSMAN_P_ERROR]
-            self.helmsman_p_error.ReplaceValue(p_error)
+            self.helmsman_p_error.replace_value(p_error)
         if helmsman.HELMSMAN_I_ACCUMULATOR in payload:
             i_accumulator = payload[helmsman.HELMSMAN_I_ACCUMULATOR]
-            self.helmsman_i_accumulator.ReplaceValue(i_accumulator)
+            self.helmsman_i_accumulator.replace_value(i_accumulator)
         if helmsman.HELMSMAN_DERIVATIVE in payload:
             derivative = payload[helmsman.HELMSMAN_DERIVATIVE]
-            self.helmsman_derivative.ReplaceValue(derivative)
+            self.helmsman_derivative.replace_value(derivative)
 
     #
-    # DoLoop() and closely related
+    # client_loop_code() and closely related
     #
 
-    def ProcessImage(self):
+    def process_image(self):
         im = oc.Image(opencv_fn=self.pic_path)
         if "center_line" in self.pic_payload:
             line_at = self.pic_payload["center_line"]
-            list_of_RotatedRect = oc.ListOfRotatedRectFromListofDicts(line_at)
-            # print("ProcessImage() center_line ", list_of_RotatedRect)
-            im.DrawLinePoints(list_of_RotatedRect)
+            list_of_RotatedRect = oc.list_of_rotated_rect_from_list_of_dicts(line_at)
+            # print("process_image() center_line ", list_of_RotatedRect)
+            im.draw_line_points(list_of_RotatedRect)
         if self.line_rect is not None:
             cv2.line(
                 im._im,
@@ -600,42 +600,42 @@ class MissionControl(vmqtt.VnavsNode):
             ctr = self.line_rect.center
             fwd = (ctr[0], ctr[1] - 10)
             cv2.line(im._im, ctr, fwd, oc.DRAW_BGR_WHITE, 5)
-        self.f1_img1.UpdateImage(source_im=im.im)
-        self.f1_fname.ReplaceValue(self.pic_fn)
-        self.f1_fps.ReplaceValue("{} fps".format(self.pic_payload["capture_fps"]))
+        self.f1_img1.update_image(source_im=im.im)
+        self.f1_fname.replace_value(self.pic_fn)
+        self.f1_fps.replace_value("{} fps".format(self.pic_payload["capture_fps"]))
 
-    def ConfigureImageLocation(self, payload, image_dir, TransferNeeded=True):
-        if TransferNeeded:
+    def configure_image_location(self, payload, image_dir, transfer_needed=True):
+        if transfer_needed:
             self.transfer_type = TRANSFER_TYPE_IMAGE
         self.pic_fn = payload["filename"]
         self.pic_path = os.path.join(image_dir, self.pic_fn)
         self.pic_payload = payload
-        # print("ConfigureImageLocation()", self.pic_fn, self.pic_path, TransferNeeded)
+        # print("configure_image_location()", self.pic_fn, self.pic_path, transfer_needed)
 
-    def UpdateLocalMissionList(self):
+    def update_local_mission_list(self):
         mission_id_list = []
-        dlist = os.listdir(self.downloadDir)
+        dlist = os.listdir(self.download_dir)
         for this in dlist:
             # look for download subdirectories with corresponding log file
-            dpath = os.path.join(self.downloadDir, this)
+            dpath = os.path.join(self.download_dir, this)
             if os.path.isdir(dpath):
                 log_path = os.path.join(dpath, this + fastmqttserver.FMQTT_LOG_EXTENSION)
                 if os.path.isfile(log_path):
                     mission_id_list.append(this)
         mission_id_list.sort()
-        self.local_mission_entry.ReplaceChoices(mission_id_list)
+        self.local_mission_entry.replace_choices(mission_id_list)
 
-    def ConfigureReplay(self, Mkdir=True):
+    def configure_replay(self, mkdir=True):
         self.replay_log_fn = self.replay_mission_id + ".nav"
-        self.replay_mission_dir = os.path.join(self.downloadDir, self.replay_mission_id)
-        if Mkdir:
+        self.replay_mission_dir = os.path.join(self.download_dir, self.replay_mission_id)
+        if mkdir:
             try:
                 os.mkdir(self.replay_mission_dir)
             except FileExistsError:
                 pass
         self.replay_log_path = os.path.join(self.replay_mission_dir, self.replay_log_fn)
 
-    def OpenReplayLog(self):
+    def open_replay_log(self):
         f = open(self.replay_log_path, "r")
         d = f.read()
         f.close()
@@ -647,7 +647,7 @@ class MissionControl(vmqtt.VnavsNode):
                 payload = json.loads(parts[2])
                 self.replay_log_payloads.append(payload)
         self.replay_log_ix = 0
-        self.mission_status.ReplaceValue(
+        self.mission_status.replace_value(
             "{} {} {} LOADED".format(
                 self.replay_log_fn, len(d), len(self.replay_log_lines)
             )
@@ -658,19 +658,19 @@ class MissionControl(vmqtt.VnavsNode):
             # Checking the transfer reports completion and does some transfering if not complete
             if self.file_client.check_transfer():
                 # Transfer is complete
-                # print("DoLoop() Transfer Complete", self.transfer_type)
+                # print("client_loop_code() Transfer Complete", self.transfer_type)
                 if self.transfer_type == TRANSFER_TYPE_LOG:
-                    self.OpenReplayLog()
+                    self.open_replay_log()
                     self.display_mode = DISPLAY_MODE_DOWNLOAD
                 else:  # TRANSFER_TYPE_IMAGE
-                    self.ProcessImage()
+                    self.process_image()
                 self.transfer_type = TRANSFER_TYPE_NONE
         if self.transfer_type == TRANSFER_TYPE_NONE:
             # No transfer in progress, see if one is ready to start
             if self.replay_log_transfer_wanted:
                 self.transfer_type = TRANSFER_TYPE_LOG
                 self.replay_log_transfer_wanted = False
-                self.ConfigureReplay()
+                self.configure_replay()
                 transfer_fn = self.replay_log_fn
                 transfer_path = self.replay_log_path
             elif self.display_mode in [DISPLAY_MODE_DOWNLOAD, DISPLAY_MODE_REPLAY]:
@@ -687,26 +687,26 @@ class MissionControl(vmqtt.VnavsNode):
                     self.replay_log_ix += 1
                     if topic == vconst.cameraman_pic_ready_topic:
                         if self.display_mode == DISPLAY_MODE_DOWNLOAD:
-                            self.ConfigureImageLocation(
+                            self.configure_image_location(
                                 payload, self.replay_mission_dir
                             )
                         else:
-                            self.ConfigureImageLocation(
-                                payload, self.replay_mission_dir, TransferNeeded=False
+                            self.configure_image_location(
+                                payload, self.replay_mission_dir, transfer_needed=False
                             )
-                            self.ProcessImage()
+                            self.process_image()
                         if self.replay_frames > 0:
                             self.replay_frames -= 1
                         break
                     elif topic in self.subscriptions:
                         sub = self.subscriptions[topic]
                         if sub.handler_needs_topic:
-                            sub.handler_method(topic, payload, Replay=True)
+                            sub.handler_method(topic, payload, replay=True)
                         else:
-                            sub.handler_method(payload, Replay=True)
+                            sub.handler_method(payload, replay=True)
                         break
             elif self.pic_next_payload is not None:
-                self.ConfigureImageLocation(self.pic_next_payload, self.downloadDir)
+                self.configure_image_location(self.pic_next_payload, self.download_dir)
                 self.pic_next_payload = None
             if self.transfer_type != TRANSFER_TYPE_NONE:
                 if self.transfer_type == TRANSFER_TYPE_IMAGE:
@@ -715,19 +715,19 @@ class MissionControl(vmqtt.VnavsNode):
                 self.file_client.start_transfer(
                     self.transfer_type, transfer_fn, path=transfer_path
                 )
-                # print("DoLoop() Start Transfer", self.transfer_type, transfer_fn)
-        self.tk.Update()
-        # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
+                # print("client_loop_code() Start Transfer", self.transfer_type, transfer_fn)
+        self.tk.update()
+        # when tk is destroyed by close window, self.disconnect()	# stop mqtt client loop
 
 
-def RunGps(waypoint):
+def run_gps(waypoint):
     gps_device = engineer_1.GpsDevice()
     # gps_device.DetectBaudrate()
     # return
     # gps_device.IncreaseUpdateRate()
     start_position = None
     if waypoint is not None:
-        print("RunGps() requesting waypoint", waypoint)
+        print("run_gps() requesting waypoint", waypoint)
         payload = {}
         payload["key"] = waypoint
         value_payload = vmqtt.Publish(
@@ -758,7 +758,7 @@ def RunGps(waypoint):
             )
 
 
-def LocateGps():
+def locate_gps():
     stop_time = None
     location_name = None
     if len(sys.argv) > 2:
@@ -818,7 +818,7 @@ def LocateGps():
         data.Put(location_name, center_position, key_group=key_group)
 
 
-def DistanceGps():
+def distance_gps():
     data = vdata.PersistentData()
     goal_key_group = sys.argv[2]
     goal_name = sys.argv[3]
@@ -862,7 +862,7 @@ def DistanceGps():
             print(new_position.DMS(), dw.distance_to_waypoint)
 
 
-def CopyLocalDataToNavigator():
+def copy_local_data_to_navigator():
     data = vdata.PersistentData()
     key_group = sys.argv[2]
     key = sys.argv[3]
@@ -872,7 +872,7 @@ def CopyLocalDataToNavigator():
     vmqtt.Publish(vconst.data_save_topic, payload)
 
 
-def CopyLocalGpsPositionToNavigator():
+def copy_local_gps_position_to_navigator():
     data = vdata.PersistentData()
     key_group = sys.argv[2]
     key = sys.argv[3]
@@ -882,7 +882,7 @@ def CopyLocalGpsPositionToNavigator():
     vmqtt.Publish(vconst.data_save_topic, payload)
 
 
-def SaveLocalData():
+def save_local_data():
     data = vdata.PersistentData()
     key_group = sys.argv[2]
     key = sys.argv[3]
@@ -890,7 +890,7 @@ def SaveLocalData():
     data.Put(key, value, key_group=key_group)
 
 
-def ShowLocalData():
+def show_local_data():
     data = vdata.PersistentData()
     key_group = sys.argv[2]
     key = sys.argv[3]
@@ -898,7 +898,7 @@ def ShowLocalData():
     print(value.__class__.__name__, value)
 
 
-def SaveGps(waypoint):
+def save_gps(waypoint):
     gps_device = engineer_1.GpsDevice()
     gps_readings = []
     while len(gps_readings) < 1:
@@ -921,19 +921,19 @@ if __name__ == "__main__":
             waypoint = sys.argv[2]
         else:
             waypoint = None
-        RunGps(waypoint)
+        run_gps(waypoint)
     elif sys.argv[1] == "loc":
-        LocateGps()
+        locate_gps()
     elif sys.argv[1] == "dist":
-        DistanceGps()
+        distance_gps()
     elif sys.argv[1] == "save":
         waypoint = sys.argv[2]
-        SaveGps(waypoint)
+        save_gps(waypoint)
     elif sys.argv[1] == "copy_local_data_to_navigator":
-        CopyLocalDataToNavigator()
+        copy_local_data_to_navigator()
     elif sys.argv[1] == "copy_local_gps_position_to_navigator":
-        CopyLocalGpsPositionToNavigator()
+        copy_local_gps_position_to_navigator()
     elif sys.argv[1] == "save_local_data":
-        SaveLocalData()
+        save_local_data()
     elif sys.argv[1] == "show_local_data":
-        ShowLocalData()
+        show_local_data()

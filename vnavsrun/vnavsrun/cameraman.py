@@ -62,7 +62,7 @@ class CameramanOrdersDict(vdata.Dict):
         self.AddAttrib(vdata.DataAttribInt("shutter_speed", 0))
 
 
-class cameraman(vmqtt.VnavsNode):
+class Cameraman(vmqtt.VnavsNode):
     __slots__ = (
         "burst_fps_ct",
         "burst_fps_rate",
@@ -95,8 +95,8 @@ class cameraman(vmqtt.VnavsNode):
         "shutter_speed",
     )
 
-    # ### PostProcess() and post_processes are deprecated?
-    # ### self.MakerFaire2018 deprecated
+    # ### post_process() and post_processes are deprecated?
+    # ### self.maker_faire_2018 deprecated
 
     def __init__(self, verbose=True):
         global picamera
@@ -105,32 +105,32 @@ class cameraman(vmqtt.VnavsNode):
                 vmqtt.Subscription(
                     vconst.cameraman_mark_topic,
                     async_delivery=True,
-                    handler=self.OnCameramanMark,
+                    handler=self.on_cameraman_mark,
                 ),
                 vmqtt.Subscription(
                     vconst.cameraman_orders_topic,
                     async_delivery=True,
-                    handler=self.OnCameramanOrders,
+                    handler=self.on_cameraman_orders,
                 ),
                 vmqtt.Subscription(
                     vconst.cameraman_process_topic,
                     async_delivery=True,
-                    handler=self.OnCameramanProcess,
+                    handler=self.on_cameraman_process,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_init_topic,
                     async_delivery=True,
-                    handler=self.OnMissionInit,
+                    handler=self.on_mission_init,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_log_start_topic,
                     async_delivery=True,
-                    handler=self.OnMissionLogStart,
+                    handler=self.on_mission_log_start,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_log_stop_topic,
                     async_delivery=True,
-                    handler=self.OnMissionLogStop,
+                    handler=self.on_mission_log_stop,
                 ),
             ],
             single_threaded=False,
@@ -195,7 +195,7 @@ class cameraman(vmqtt.VnavsNode):
         self.last_fn = ""
         self.last_format = ""
 
-    def OnCameramanProcess(self, payload):
+    def on_cameraman_process(self, payload):
         if payload["Type"] == "clear":
             self.post_processes = []
             self.cam_compiled = None
@@ -207,23 +207,23 @@ class cameraman(vmqtt.VnavsNode):
                 self.cam_script, "cvcode.py", "exec", dont_inherit=True
             )
 
-    def OnCameramanMark(self, payload):
+    def on_cameraman_mark(self, payload):
         print(payload)
-        self.mark_rect = opticchiasm.RectFromPayload(payload)
+        self.mark_rect = opticchiasm.right_from_payload(payload)
         self.mark_payload = payload
 
-    def OnCameramanOrders(self, payload):
+    def on_cameraman_orders(self, payload):
         # capture orders asynchronously so it can be used to tell the
         # burst loop to break in order to apply the new orders.
         self.orders_payload = payload
 
-    def OnMissionInit(self, payload):
+    def on_mission_init(self, payload):
         self.mission_id = payload["mission_id"]
 
-    def OnMissionLogStart(self, payload):
+    def on_mission_log_start(self, payload):
         self.mission_logging = True
 
-    def OnMissionLogStop(self, payload):
+    def on_mission_log_stop(self, payload):
         self.mission_logging = False
 
     def client_loop_code(self):
@@ -232,10 +232,10 @@ class cameraman(vmqtt.VnavsNode):
         if self.orders_payload is not None:
             payload, self.orders_payload = self.orders_payload, None
             self.orders_dict.ValidatePayload(payload, self)
-        self.ImageBurst()
+        self.image_burst()
 
-    # def PostProcess(self, process, Im=None, An=None):
-    def PostProcess(self, im):
+    # def post_process(self, process, Im=None, An=None):
+    def post_process(self, im):
         glb = {}
         glb["cv2"] = cv2
         glb["oc"] = oc
@@ -261,12 +261,12 @@ class cameraman(vmqtt.VnavsNode):
             x2 += c
         if y2 < 0:
             y2 += r
-        roi = opticchiasm.ROI(Im, x1, y1, x2, y2)
+        roi = opticchiasm.roi(Im, x1, y1, x2, y2)
         d = opticchiasm.ReflexEntities(
             roi, process=process["process"], colors=process["colors"]
         )
         mid_x = int((x2 - x1) / 2)
-        sensor_point = d.ProcessLines()
+        sensor_point = d.process_lines()
         if sensor_point is not None:
             # e = sensor_point[0] - mid_x		# guide by x
             e = sensor_point[2]
@@ -281,7 +281,7 @@ class cameraman(vmqtt.VnavsNode):
             self.publish(vconst.helmsman_orders_topic, payload)
         if An is not None:
             cv2.rectangle(An, (x1, y1), (x2, y2), green, thickness=2)
-            d.AnnotateFullImage(An, x1=x1, y1=y1, linect=1, color=blue)
+            d.annotate_full_image(An, x1=x1, y1=y1, linect=1, color=blue)
         return
         fpx = im_fn[:-4]
         im_fn = fpx + "-A.jpeg"
@@ -316,7 +316,7 @@ class cameraman(vmqtt.VnavsNode):
         payload["format"] = self.last_format
         self.publish("last", payload)
 
-    def AutoIso(self, img):
+    def auto_iso(self, img):
         bw = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         hist = cv2.calcHist([bw], [0], None, [256], [0, 256])
         rows, cols = bw.shape
@@ -331,7 +331,7 @@ class cameraman(vmqtt.VnavsNode):
         if self.iso > 800:
             self.iso = 800
 
-    def MakerFaire2018(self, im):
+    def maker_faire_2018(self, im):
         rect_list = []
         if self.mark_rect is None:
             return rect_list
@@ -341,22 +341,22 @@ class cameraman(vmqtt.VnavsNode):
         kernel_dim = 7
         iterations = 1
         box_reps = 10
-        end_y = self.mark_rect.TopY(0) - (self.mark_rect.height * box_reps)
+        end_y = self.mark_rect.top_y(0) - (self.mark_rect.height * box_reps)
         if end_y < 0:
             end_y = 0
 
-        rect_list = im.ChaseLine(
+        rect_list = im.chase_line(
             hsvspec=self.mark_hsv_spec,
             rect=self.mark_rect,
             end_y=end_y,
             kernel_dim=kernel_dim,
             iterations=iterations,
         )
-        list_list = opticchiasm.ListOfOpenCvRectAsListOfDicts(rect_list)
+        list_list = opticchiasm.list_of_rotated_rect_as_list_of_dicts(rect_list)
         # print("MAKER ==>", list_list)
         return list_list
 
-    def ImageBurst(self):
+    def image_burst(self):
         # establish paramters for this burst. Since MQTT is running in a separate thread
         # there is a potential race condition if several conflicting instructions arrive
         # in a short period of time. This window is very small and the results easily
@@ -396,7 +396,7 @@ class cameraman(vmqtt.VnavsNode):
         #
         if self.verbose:
             print(
-                "Cameraman.ImageBurst() Begin Burst",
+                "Cameraman.image_burst() Begin Burst",
                 self.loop_mode,
                 self.loop_format,
                 self.loop_publish,
@@ -421,11 +421,11 @@ class cameraman(vmqtt.VnavsNode):
                 )
                 # print("CAPT", image_fn, self.image_dir)
                 image_path = os.path.join(self.image_dir, image_fn)
-                this_image = opticchiasm.ImageFromPicamera(
+                this_image = opticchiasm.image_from_picamera(
                     burst_dest, self.loop_format, file_path=image_path
                 )
                 if self.capture_publish == "file":
-                    this_image.Write()
+                    this_image.write()
 
                 """
                 if burst_publish == 's':
@@ -459,10 +459,10 @@ class cameraman(vmqtt.VnavsNode):
                 # If an HsvSpec is in the payload, use that. Otherwise create an HsvSpec from
                 # the image at the rectangle.
                 # If the payload has a save parameter, save it in mission persistant data.
-                hsv_spec = opticchiasm.HsvSpecFromPayload(self.mark_payload)
+                hsv_spec = opticchiasm.hsv_spec_from_payload(self.mark_payload)
                 if hsv_spec is None:
-                    self.mark_hsv_spec = opticchiasm.NextHsvSpec(
-                        this_image.ImAsHSV(), rect=self.mark_rect
+                    self.mark_hsv_spec = opticchiasm.next_hsv_spec_fn(
+                        this_image.im_as_hsv(), rotated_rect=self.mark_rect
                     )
                 else:
                     self.mark_hsv_spec = hsv_spec
@@ -470,24 +470,24 @@ class cameraman(vmqtt.VnavsNode):
                     hsv_payload = vcomms.prepare_response(
                         self.mark_payload, conf_request=True
                     )
-                    hsv_payload.update(self.mark_hsv_spec.AsPayload())
+                    hsv_payload.update(self.mark_hsv_spec.as_payload())
                     print("MARK HSV", hsv_payload)
                     hsv_payload[vconst.dname_field_name] = self.mark_payload["save"]
                     self.publish(vconst.data_save_topic, hsv_payload)
                 self.mark_payload = None  # only do the HSV processing once
             """
             if self.cam_compiled is not None:
-                self.PostProcess(img)
+                self.post_process(img)
             if len(self.post_processes) > 0:
                 annotated = img.copy()
                 for this in self.post_processes:
-                    self.PostProcess(this, Im=img, An=annotated)
+                    self.post_process(this, Im=img, An=annotated)
                 pos = image_fn.rfind('.')
                 an_fn = image_fn[:pos] + '-A' + im_fn[pos:]
                 an_path = os.path.join(self.image_dir, an_fn)
                 cv2.imwrite(an_path, annotated)
             else:
-                rect_list = self.MakerFaire2018(this_image)
+                rect_list = self.maker_faire_2018(this_image)
                 annotated = None
             """
             #
@@ -526,7 +526,7 @@ class cameraman(vmqtt.VnavsNode):
                 # print("END IDLE")
                 # need conditional to determin conversion paramter for different formats
                 if self.do_auto_iso:
-                    self.AutoIso(this_image.im)
+                    self.auto_iso(this_image.im)
                 if burst_image_ct >= self.idle_image_max:
                     # idle takes a limited number of images per "burst" to cycle throrugh a limited number of file names.
                     break
@@ -538,5 +538,5 @@ class cameraman(vmqtt.VnavsNode):
 
 if __name__ == "__main__":
     if sys.argv[1] == "node":
-        m = cameraman()
+        m = Cameraman()
         m.main_loop()
