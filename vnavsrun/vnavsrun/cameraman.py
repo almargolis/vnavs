@@ -1,25 +1,25 @@
 import base64
-import cv2
 import io
 import json
-import numpy as np
 import os
-
-picamera = None  # imported below if needed
 import pickle
+import signal
 import sys
 import threading
 import time
 import traceback
 
-from vnavslib import vnavs_comms as vcomms
-from vnavslib import vnavs_node as vmqtt
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_data as vdata
+import cv2
+import numpy as np
 
 from vnavslib import opticchiasm
+from vnavslib import vnavs_comms as vcomms
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_data as vdata
+from vnavslib import vnavs_node as vmqtt
+from vnavslib.macbookcamera import MacbookCamera
 
-import signal
+picamera = None  # imported below if needed
 
 print("CONFIGURING SIGNAL")
 stop_process = False
@@ -98,10 +98,10 @@ class cameraman(vmqtt.VnavsNode):
     # ### PostProcess() and post_processes are deprecated?
     # ### self.MakerFaire2018 deprecated
 
-    def __init__(self, Verbose=True):
+    def __init__(self, verbose=True):
         global picamera
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.cameraman_mark_topic,
                     async_delivery=True,
@@ -133,16 +133,16 @@ class cameraman(vmqtt.VnavsNode):
                     handler=self.OnMissionLogStop,
                 ),
             ],
-            SingleThreaded=False,
-            BrokerType="F",
-            Streamer=False,
-            Verbose=Verbose,
+            single_threaded=False,
+            broker_type="F",
+            streamer=False,
+            verbose=verbose,
         )
         self.burst_fps_rate = 0  # capture speed of last burst
         self.burst_fps_ct = 0
         self.burst_fps_start_time = time.time()
         self.image_ct = 0  # ct of images captured since __init__
-        self.image_dir = self.GetIniDirectory("Cameraman", "imageDir", IsWriteable=True)
+        self.image_dir = self.get_ini_directory("Cameraman", "imageDir", IsWriteable=True)
         self.iso = 100
         self.shutter_speed = 0
         self.camera_resolution = (640, 480)
@@ -161,7 +161,7 @@ class cameraman(vmqtt.VnavsNode):
                 )
                 sys.exit(1)
         else:
-            self.camera = macbook_camera(resolution=self.camera_resolution)
+            self.camera = MacbookCamera(resolution=self.camera_resolution)
         self.camera.vflip = True
         self.camera.vflip = False
         self.camera.hflip = True
@@ -226,8 +226,8 @@ class cameraman(vmqtt.VnavsNode):
     def OnMissionLogStop(self, payload):
         self.mission_logging = False
 
-    def DoLoop(self):
-        # executed repetitively by mqtt_node.Loop() which handles exceptions and proper shutdown.
+    def client_loop_code(self):
+        # executed repetitively by VnavsNode.main_loop() which handles exceptions and proper shutdown.
         # if paused, maybe sleep for a bit or changed os.nice. Not sure if important.
         if self.orders_payload is not None:
             payload, self.orders_payload = self.orders_payload, None
@@ -278,7 +278,7 @@ class cameraman(vmqtt.VnavsNode):
             s = (e - 0.65) * 200
             payload = {}
             payload["heading"] = -s
-            self.Publish(vconst.helmsman_orders_topic, payload)
+            self.publish(vconst.helmsman_orders_topic, payload)
         if An is not None:
             cv2.rectangle(An, (x1, y1), (x2, y2), green, thickness=2)
             d.AnnotateFullImage(An, x1=x1, y1=y1, linect=1, color=blue)
@@ -307,14 +307,14 @@ class cameraman(vmqtt.VnavsNode):
                 directions["heading"] = "RR-" + steering_angle
             else:
                 directions["heading"] = "RL+" + steering_angle
-        self.Publish(vconst.helmsman_orders_topic, directions)
+        self.publish(vconst.helmsman_orders_topic, directions)
         #
         self.last_fn = annotated_fn
         self.last_format = "jpeg"
         payload = {}
         payload["filename"] = self.last_fn
         payload["format"] = self.last_format
-        self.Publish("last", payload)
+        self.publish("last", payload)
 
     def AutoIso(self, img):
         bw = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -467,13 +467,13 @@ class cameraman(vmqtt.VnavsNode):
                 else:
                     self.mark_hsv_spec = hsv_spec
                 if "save" in self.mark_payload:
-                    hsv_payload = vcomms.PrepareResponse(
-                        self.mark_payload, ConfResponse=True
+                    hsv_payload = vcomms.prepare_response(
+                        self.mark_payload, conf_request=True
                     )
                     hsv_payload.update(self.mark_hsv_spec.AsPayload())
                     print("MARK HSV", hsv_payload)
                     hsv_payload[vconst.dname_field_name] = self.mark_payload["save"]
-                    self.Publish(vconst.data_save_topic, hsv_payload)
+                    self.publish(vconst.data_save_topic, hsv_payload)
                 self.mark_payload = None  # only do the HSV processing once
             """
             if self.cam_compiled is not None:
@@ -506,7 +506,7 @@ class cameraman(vmqtt.VnavsNode):
             payload["capture_publish"] = self.capture_publish
             payload["capture_fps"] = self.burst_fps_rate
             payload["center_line"] = rect_list
-            self.Publish(vconst.cameraman_pic_ready_topic, payload)
+            self.publish(vconst.cameraman_pic_ready_topic, payload)
             # print("P", self.mqttc.connected, payload)
             if self.camera.iso != self.iso:
                 # The camera may not use the exact ISO specified. Save the corrected value in
@@ -538,4 +538,5 @@ class cameraman(vmqtt.VnavsNode):
 
 if __name__ == "__main__":
     if sys.argv[1] == "node":
-        vmqtt.LaunchNode(cameraman)
+        m = cameraman()
+        m.main_loop()

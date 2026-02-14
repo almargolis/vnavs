@@ -121,13 +121,13 @@ class Image(object):
 
     def CopyAsBGR(self):
         if self.colorcode == IM_BGR:
-            return self.Copy()
+            return self.copy()
         transform = getattr(cv2, "COLOR_{}2{}".format(self.colorcode, IM_BGR))
         return Image(im=cv2.cvtColor(self._im, transform), colorcode=IM_BGR)
 
     def CopyAsGray(self):
         if self.colorcode == IM_GRAY:
-            return self.Copy()
+            return self.copy()
         transform = getattr(cv2, "COLOR_{}2{}".format(self.colorcode, IM_GRAY))
         return Image(im=cv2.cvtColor(self._im, transform), colorcode=IM_GRAY)
 
@@ -206,7 +206,7 @@ class Image(object):
     def Crop(self, rect, Isolate=False):
         # print("Crop()", rect)
         if rect is None:
-            return self.Copy()
+            return self.copy()
         new_image = Image(
             im=self._im[
                 rect.y_min : rect.y_max + 1, rect.x_min : rect.x_max + 1
@@ -411,7 +411,7 @@ class ImageFilter(object):
 # 	xstep is the current ProcessStep() with exec_im set to None.
 #
 ImageFilter(
-    FILTER_NAME_IMAGE, "{x_output_im} = xstep.source_im.Copy()", [], Flags=[FLAG_ISBASE]
+    FILTER_NAME_IMAGE, "{x_output_im} = xstep.source_im.copy()", [], Flags=[FLAG_ISBASE]
 )
 
 ImageFilter(
@@ -485,7 +485,7 @@ image_filter = ImageFilter(
     Flags=[],
 )
 image_filter.annotate_code = (
-    "{x_output_annotated} = im_base.Copy()\n"
+    "{x_output_annotated} = im_base.copy()\n"
     + "{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
 )
 
@@ -501,7 +501,7 @@ image_filter = ImageFilter(
     Flags=[],
 )
 image_filter.annotate_code = (
-    "{x_output_annotated} = im_base.Copy()\n"
+    "{x_output_annotated} = im_base.copy()\n"
     + "{x_output_annotated}.DrawRectangle({x_output_rect}, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
 )
 
@@ -575,7 +575,7 @@ image_filter = ImageFilter(
 # black and while image from HueMaskSingle or similar. This therefore uses
 # im_base to reset to the original color image
 image_filter.annotate_code = (
-    "{x_output_annotated} = im_base.Copy()\n"
+    "{x_output_annotated} = im_base.copy()\n"
     + "{x_output_annotated}.DrawLinePoints(line_points, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
 )
 
@@ -690,7 +690,7 @@ image_filter = ImageFilter(
     Flags=[],
 )
 image_filter.annotate_code = (
-    "{x_output_annotated} = im_base.Copy()\n"
+    "{x_output_annotated} = im_base.copy()\n"
     + "{x_output_annotated}.DrawRectangle(r, color=oc.DRAW_BGR_GREEN, thickness=2)\n"
     + 'xstep.SetInfo(0, "Hue", im_base.Crop(r).AverageHue())\n'
 )
@@ -702,7 +702,7 @@ image_filter = ImageFilter(
     Flags=[""],
 )
 image_filter.annotate_code = (
-    "{x_output_annotated} = im_base.Copy()\n"
+    "{x_output_annotated} = im_base.copy()\n"
     + "print({x_output_objects})\n"
     + "oc.InitColor()\n"
     + "for this in {x_output_objects}:\n"

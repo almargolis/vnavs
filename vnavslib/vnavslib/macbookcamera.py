@@ -3,7 +3,7 @@ import cv2
 from vnavslib import opticchiasm as oc
 
 
-class MacbookCamera(object):
+class MacbookCamera:
     # This s a wrapper around OpenCv image capture that makes a macbbok
     # built-in camera work like a picamera as closely as I need to.
     # This likely works on the pi too, but is probably slower because it

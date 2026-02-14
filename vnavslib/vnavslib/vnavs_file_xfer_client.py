@@ -1,3 +1,7 @@
+import time
+
+from vnavslib import vnavs_comms as vcomms
+
 FILE_TRANSFER_IDLE = 0
 FILE_TRANSFER_STARTED = 1
 FILE_TRANSFER_COMPLETE = 2
@@ -8,7 +12,7 @@ class FileClient(vcomms.SocketWrapperClient):
         super().__init__(
             buffer_len=buffer_len,
             ini_section="FileClient",
-            IsZeroOneProtocol=False,
+            is_zero_one_protocol=False,
             verbose=verbose,
         )
         self.init_file_client()
@@ -30,7 +34,7 @@ class FileClient(vcomms.SocketWrapperClient):
                 return False
 
     def start_transfer(self, dir_code, filename, path=None):
-        self.Init()
+        self.init_file_client()
         retry_ct = 0
         while (not self.connected) and (retry_ct < 5):
             retry_ct += 1
@@ -47,7 +51,7 @@ class FileClient(vcomms.SocketWrapperClient):
                 self.socket_host,
                 self.socket_port,
             )
-            self.Connect()
+            self.connect()
         # print("FileClient.start_transfer() - CONNECTED", self.socket_host, self.socket_port)
         self.file_name = filename
         if path is None:
@@ -86,7 +90,7 @@ class FileClient(vcomms.SocketWrapperClient):
         if p > 0:
             try:
                 file_len = int(self.buffer[:p])
-            except:
+            except Exception:
                 # need to do something specific here to restart / recover transfer
                 # or neatly notify as not complete.
                 # got an "invalid literal" exception. maybe due to noisy network.

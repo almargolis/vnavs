@@ -2,18 +2,21 @@ import json
 import math
 import os
 import sys
-import traceback
-import types
-from PIL import ImageTk, Image
-
 import threading
 import time
+import traceback
+import types
 
 import cv2
 import numpy as np
+from PIL import ImageTk, Image
 
-from vnavsrun import cameraman
 from vnavslib import easytk
+from vnavslib import opticchiasm as oc
+from vnavslib import vnavs_const as vconst
+from vnavslib import vnavs_data as vdata
+from vnavslib import vnavs_file_xfer_client
+from vnavslib import vnavs_node as vmqtt
 from vnavslib.easytk import (
     FIRST_ROW,
     SAME_ROW,
@@ -25,10 +28,7 @@ from vnavslib.easytk import (
     RIGHT_COL,
     OVERLAY_COL,
 )
-from vnavslib import opticchiasm as oc
-from vnavslib import vnavs_node as vmqtt
-from vnavslib import vnavs_const as vconst
-from vnavslib import vnavs_data as vdata
+from vnavsrun import cameraman
 
 BOT_1_MAP_TRANSPOSE = [
     [-1.30565584e-01, -1.56472861e00, 4.58333935e02],
@@ -98,7 +98,7 @@ class ProcessStep(object):
         self.cv_filter_name = None  # this gets set by NewFilter()
 
         self.parm_values = Parms  # key is FilterParm.name
-        self.tab_title = "Step %d" % (self.ix)
+        self.tab_title = f"Step {self.ix}"
         self.tab = self.app.notebook.AddTab(self.tab_title, Where=Where)
         self.input_panel = self.tab.AddLabelFrame("Input")
         self.output_panel = self.tab.AddLabelFrame("Output")
@@ -127,7 +127,7 @@ class ProcessStep(object):
             else:
                 parm_row = NEXT_ROW
                 parm_col = self.parm_widgets[0][1].col
-            parm_caption = "Parm{0}".format(ix + 1)
+            parm_caption = f"Parm{ix + 1}"
             entry_label = self.input_panel.AddLabel(
                 parm_caption, row=parm_row, col=parm_col
             )
@@ -233,7 +233,7 @@ class ProcessStep(object):
         #
         if self.point_target is not None:
             # save the point as a parm
-            v = "{},{}".format(int(x), int(y))
+            v = f"{int(x)},{int(y)}"
             self.point_target.ReplaceValue(v)
             self.point_target = None
             return
@@ -342,22 +342,22 @@ class ProcessStep(object):
 
         for this in cls.imports:
             if this[2] is None:
-                f.write("import {}\n".format(this[0]))
+                f.write(f"import {this[0]}\n")
             else:
-                f.write("import {} as {}\n".format(this[2], this[0]))
+                f.write(f"import {this[2]} as {this[0]}\n")
 
         f.write("\n")
         source_path = cls.steps[0].source_path
         if source_path is None:
-            f.write("cam = cameraman.macbook_camera()\n")
+            f.write("cam = cameraman.MacbookCamera()\n")
             f.write("im_in = cam.capture_image()\n")
         else:
-            f.write('im_in = oc.Image("opencv_fn={}")\n'.format(source_path))
+            f.write(f'im_in = oc.Image("opencv_fn={source_path}")\n')
         f.write("im_base = im_in.copy()\n")
         f.write("\n")
 
         for ix, this in enumerate(cls.steps[1:]):
-            f.write("#\n# Step {} - {}\n#\n".format(this.ix, this.cv_filter_name))
+            f.write(f"#\n# Step {this.ix} - {this.cv_filter_name}\n#\n")
             code_str = this.GetCodeStr(Script=True)
             f.write(code_str)
 
@@ -367,7 +367,7 @@ class ProcessStep(object):
             display_image = "annotated"
 
         f.write("\n")
-        f.write('cv2.imshow("im_in", {display}.im)\n'.format(display=display_image))
+        f.write(f'cv2.imshow("im_in", {display_image}.im)\n')
         f.write("cv2.waitKey(0)\n")
         f.write("cv2.destroyAllWindows()\n")
         f.close()
@@ -541,7 +541,7 @@ class ProcessStep(object):
             # This can happen while steps are being changed
             self.image_widget.UpdateImage(source_im=step_display_image.im)
         self.execution_time.ReplaceValue(
-            "{:f}ms".format((time.time() - execution_start) / 1000)
+            f"{(time.time() - execution_start) / 1000:f}ms"
         )
         return
 
@@ -582,21 +582,21 @@ class Darkroom(vmqtt.VnavsNode):
 
     def __init__(self):
         super().__init__(
-            Subscriptions=[
+            subscriptions=[
                 vmqtt.Subscription(
                     vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady
                 )
             ],
-            SingleThreaded=True,
-            BrokerType="F",
-            AutomaticallyConnect=False,
-            BlockIfNotConnected=False,
-            SelectTimeoutSecs=0.1,
-            Verbose=False,
+            single_threaded=True,
+            broker_type="F",
+            automatically_connect=False,
+            wait_if_not_connected=False,
+            select_timeout_secs=0.1,
+            verbose=False,
         )
         self.load_process_file_name = None
         self.delete_process_step_ix = None
-        self.file_client = vmqtt.FileClient(Verbose=False)
+        self.file_client = vnavs_file_xfer_client.FileClient(verbose=False)
         self.downloadDir = self.config.get("FileClient", "DownloadDir")
         self.downloadDir = os.path.expanduser(
             self.downloadDir
@@ -674,7 +674,7 @@ class Darkroom(vmqtt.VnavsNode):
         payload["shutter_speed"] = self.camera_shutter_speed.Value()
         if self.pic_source == SRC_BOT_CAMERA:
             print(payload)
-            self.Publish(vconst.cameraman_orders_topic, payload)
+            self.publish(vconst.cameraman_orders_topic, payload)
 
     def ConfigureImageSource(
         self, path=None, new_image=None, iso=None, shutter_speed=None, colorcode=None
@@ -789,9 +789,9 @@ class Darkroom(vmqtt.VnavsNode):
         fn_root, fn_ext = os.path.splitext(drk_fn)
         drk_f = open(drk_fn, "w")
         for this_step in ProcessStep.steps:
-            drk_f.write("/{}\n".format(this_step.cv_filter_name))
+            drk_f.write(f"/{this_step.cv_filter_name}\n")
             for this_key, this_value in this_step.parm_values.items():
-                drk_f.write("parm.{}={}\n".format(this_key, this_value))
+                drk_f.write(f"parm.{this_key}={this_value}\n")
         drk_f.close()
         cam_fn = fn_root + "." + ProcessStep.cameraman_file_extension
         py_fn = fn_root + "." + ProcessStep.python_file_extension
@@ -822,9 +822,9 @@ class Darkroom(vmqtt.VnavsNode):
     def OnSelectSource(self, *args):
         self.pic_source = self.source_widget.Value()
         if self.pic_source == SRC_LOCAL_CAMERA:
-            self.local_cam = cameraman.macbook_camera()
+            self.local_cam = cameraman.MacbookCamera()
         elif self.pic_source == SRC_BOT_CAMERA:
-            self.ConnectToMqttServer()
+            self.connect_to_mqtt_server()
 
     def OnTabSelected(self, x):
         # This ends up with the initial view being a default filter tab created here
@@ -871,7 +871,7 @@ class Darkroom(vmqtt.VnavsNode):
         ProcessStep.steps.pop(ix)
         for adjust_ix, this_step in enumerate(ProcessStep.steps[ix:]):
             this_step.ix = ix + adjust_ix
-            this_step.tab_title = "Step %d" % (this_step.ix)
+            this_step.tab_title = f"Step {this_step.ix}"
             print("darkroom.DeleteProcessStep() rename tab", ix, this_step.tab_title)
             self.notebook.tkw.tab(this_step.ix, text=this_step.tab_title)
         self.step_execution_needed = True
@@ -884,7 +884,7 @@ class Darkroom(vmqtt.VnavsNode):
     # Methods in the Tkinter and VnavsMqtt threads should just set flags
     # and return quickly.
     #
-    def DoLoop(self):
+    def client_loop_code(self):
         if self.loading:
             # This was added in order to avoid crashes due to trying to load images
             # while a new process is being loaded. I am a little surprised that
@@ -931,7 +931,7 @@ class Darkroom(vmqtt.VnavsNode):
                     self.pic_fn = payload["filename"]
                     path = os.path.join(self.downloadDir, self.pic_fn)
                     # print("DoLoop() GetFile: ", path)
-                    if not self.file_client.GetFile("i", self.pic_fn, path=path):
+                    if not self.file_client.get_file("i", self.pic_fn, path=path):
                         print("Unable to fetch PIC", self.pic_fn)
                         return
                     self.last_pic_time = time.time()
@@ -961,9 +961,9 @@ class Darkroom(vmqtt.VnavsNode):
             self.step_execution_needed = False
             self.last_process_time = time.time()
         self.tk.Update()
-        # when tk is destroyed by close window, self.Disconnect()	# stop mqtt client loop
+        # when tk is destroyed by close window, self.disconnect()	# stop mqtt client loop
 
 
 if __name__ == "__main__":
     m = Darkroom()
-    m.Loop()
+    m.main_loop()
