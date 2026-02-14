@@ -49,7 +49,14 @@ Two broker backends share a unified API:
 
 ### Vision Pipeline (vnavslib)
 
-`opticchiasm.py` provides `Image` (OpenCV wrapper tracking color space to prevent conversion bugs), `ImageFilter` (chainable processing step with code template), and `ImageFilterCollection` (registry of all filters). `cvlab.py` is the GUI editor for building filter pipelines.
+The vision system is split across four modules:
+
+- **`opticchiasm.py`** — Core vision primitives: `Image` (OpenCV wrapper tracking color space to prevent conversion bugs), color constants (`HSV_*`, `DRAW_BGR_*`, `IM_*`), geometry classes (`HsvSpec`, `RightRect`, `RotatedRect`, `LineObject`), color masking, Hough line detection, `ReflexEntities` (used by cameraman.py for line-following), and utility functions (`auto_canny`, `simplest_cb`, `roi`, etc.).
+- **`image_filters.py`** — Filter system: `ImageFilter` (chainable processing step with code template), `ImageFilterCollection` (registry), `FILTER_NAME_*`/`FLAG_*` constants, and all 26 built-in filter definitions. Filter code templates are strings executed via `exec()` that reference `oc.` prefixed names from opticchiasm.
+- **`image_analyzer.py`** — `ImageAnalyzer` class for standalone image analysis (line detection, contour classification) plus helper functions (`calc_rect_centerline`, `color_key`, `filter_contours`, etc.).
+- **`cv_notes.py`** — Unused/experimental code kept for reference (Robogames race logic, ColorBalance, thinning algorithms, etc.).
+
+`cvlab.py` (in vnavsrun) is the GUI editor for building filter pipelines using these modules.
 
 ### Key Patterns
 
