@@ -24,17 +24,12 @@ from vnavsrun import helmsman
 WAYPOINT_WINDOW_METERS = 4.0
 STEER_STRAIGHT_HEADING = 10.0
 STEER_SHARP_HEADING = 90.0
-FORWARD_VERY_SLOW = 2
-FORWARD_SLOW = 6  # OK slow for court
-FORWARD_SLOW = 16  # this is what it took to move well on grass at robogames
-FORWARD_SLOW = 4  # too slow for court (maybe depends on battery)
-FORWARD_FAST = 10
-FORWARD_FAST = 14
-FORWARD_FAST = 8
-FORWARD_FAST = 20  # robgames on grass
+FORWARD_VERY_SLOW = 5.0  # cm/sec
+FORWARD_SLOW = 10.0  # cm/sec
+FORWARD_FAST = 25.0  # cm/sec
 FORWARD_FAST_METERS = 10
-REVERSE_SLOW = -4
-STOP_SPEED = 0
+REVERSE_SLOW = -10.0  # cm/sec
+STOP_SPEED = 0.0
 STOP_SECONDS = 2
 MAX_TIMED_MANUEVER_SECONDS = 10
 Y_TURN_LIMIT = 160
@@ -190,21 +185,18 @@ def NavigateTowardWaypoint(
 
     if abs(deltaHeading) < STEER_STRAIGHT_HEADING:
         nav.Init()
-        nav.steering = 0
+        nav.steering = 0.0
         if delta.distance_to_waypoint > 10:
             nav.speed = FORWARD_FAST
         else:
             nav.speed = FORWARD_SLOW
     else:
-        # deltaHeading is +/- 180 degrees, map to +/- 60 steering order.
-        # this should query the helmsman for this bots range instead of assuming 60.
+        # deltaHeading is +/- 180 degrees, convert to rad/sec steering order.
         # The signs of headings and steering command are the same. Negative means
         # the waypoint is to the left, positive is to the right.
-        if True:  # For now, just stear for all turns
-            # if abs(deltaHeading) <= Y_TURN_LIMIT:
-            # make the direct turn
+        if True:  # For now, just steer for all turns
             nav.Init()
-            nav.steering = -int(deltaHeading / 3)
+            nav.steering = -math.radians(deltaHeading / 3)
             if (delta.distance_to_waypoint > 10) and (abs(deltaHeading) < 20):
                 nav.speed = FORWARD_FAST
             else:
@@ -298,9 +290,9 @@ class MissionStep:
         speed_method = "manual"
 
         payload = {}
-        payload[helmsman.HELMSMAN_HEADING] = self.nav.steering
+        payload[helmsman.HELMSMAN_RAD_PER_SEC] = self.nav.steering
         if speed_method != "manual":
-            payload[helmsman.HELMSMAN_SPEED] = self.nav.speed
+            payload[helmsman.HELMSMAN_CM_PER_SEC] = self.nav.speed
         payload[helmsman.HELMSMAN_P_ERROR] = self.nav.p_error
         payload[helmsman.HELMSMAN_I_ACCUMULATOR] = self.nav.i_accumulator
         payload[helmsman.HELMSMAN_DERIVATIVE] = self.nav.derivative
@@ -380,7 +372,7 @@ class StepFollowLinePid(MissionStep):
 
     def DoStageStepRun(self, loop_ct):
         if time.time() > self.next_time:
-            self.nav.steering = self.pid.GetOutputInt(self.navigator.line_x)
+            self.nav.steering = self.pid.GetOutput(self.navigator.line_x)
             self.nav.speed = self.speed
             self.nav.p_error = self.pid.error
             self.nav.i_accumulator = self.pid.i_accumulator
@@ -429,9 +421,7 @@ class StepFollowLineTrace(MissionStep):
             x_error = self.navigator.line_x - self.target_x
             x_steering = float(x_error) * self.sensitivity_x
             path_steering = self.navigator.line_angle - self.base_angle
-            self.nav.steering = int(
-                ((x_steering + path_steering) * self.sensitivity_general)
-            )
+            self.nav.steering = (x_steering + path_steering) * self.sensitivity_general
             self.nav.speed = self.speed
             print(
                 "StepFollowLinePid.DoStageStepRun() LINEtrace",
@@ -1045,8 +1035,8 @@ class NavStep:
         # When we have multiple steps, all the intermediate steps must either have
         # hardKeepSeconds > 0 or untrustedGpsUpdates < 0 with yaw settings to cancel
         # the operation.
-        self.steering = "0"
-        self.speed = 0
+        self.steering = 0.0  # rad/sec
+        self.speed = 0.0  # cm/sec
         self.startingYaw = None
         self.deltaYawGoal = None
         self.dist_max = None
@@ -1243,8 +1233,8 @@ class navigator(vmqtt.VnavsNode):
 
     def EStop(self):
         payload = {}
-        payload[helmsman.HELMSMAN_HEADING] = "0"
-        payload[helmsman.HELMSMAN_SPEED] = 0
+        payload[helmsman.HELMSMAN_RAD_PER_SEC] = 0.0
+        payload[helmsman.HELMSMAN_CM_PER_SEC] = 0.0
         payload[helmsman.HELMSMAN_TIMER] = 6
         self.publish(vconst.helmsman_orders_topic, payload)
 

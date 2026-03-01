@@ -17,6 +17,7 @@ from ezcomms import vnavs_comms as vcomms
 from ezcomms import vnavs_const as vconst
 from ezcomms import vnavs_data as vdata
 from ezcomms import vnavs_node as vmqtt
+from vnavsrun import helmsman
 from cvpipeline.macbookcamera import MacbookCamera
 
 picamera = None  # imported below if needed
@@ -142,7 +143,9 @@ class Cameraman(vmqtt.VnavsNode):
         self.burst_fps_ct = 0
         self.burst_fps_start_time = time.time()
         self.image_ct = 0  # ct of images captured since __init__
-        self.image_dir = self.get_ini_directory("Cameraman", "imageDir", IsWriteable=True)
+        self.image_dir = self.get_ini_directory(
+            "Cameraman", "imageDir", IsWriteable=True
+        )
         self.iso = 100
         self.shutter_speed = 0
         self.camera_resolution = (640, 480)
@@ -277,7 +280,7 @@ class Cameraman(vmqtt.VnavsNode):
                 e = 0.45
             s = (e - 0.65) * 200
             payload = {}
-            payload["heading"] = -s
+            payload[helmsman.HELMSMAN_RAD_PER_SEC] = -s
             self.publish(vconst.helmsman_orders_topic, payload)
         if An is not None:
             cv2.rectangle(An, (x1, y1), (x2, y2), green, thickness=2)

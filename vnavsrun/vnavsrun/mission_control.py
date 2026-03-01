@@ -146,7 +146,9 @@ class MissionControl(vmqtt.VnavsNode):
         # The file server is still 4096, so the problem was all in IOS or Mission Control (TK??).
         # If its ever an issue, maybe something between 4096 and 150K would work as well. I just tried
         # this one value and moved on since there doesn't seem to be any downside.
-        self.file_client = vnavs_file_xfer_client.FileClient(buffer_len=150000, verbose=False)
+        self.file_client = vnavs_file_xfer_client.FileClient(
+            buffer_len=150000, verbose=False
+        )
 
         self.tk = eztk.EasyTk(debug=True)
         self.tk.tkw.title("VNAVS Mission Control")
@@ -164,7 +166,7 @@ class MissionControl(vmqtt.VnavsNode):
         self.image.img_source_dir = "/volumes/pi/projects/vnavs/temp"
         self.image.img_fname_suffix = ""
         self.image.do_save_snaps = False
-        self.speed = 0
+        self.speed = 0.0
 
         mission_tab = self.notebook.add_tab("Mission")
 
@@ -247,8 +249,8 @@ class MissionControl(vmqtt.VnavsNode):
         self.waypoint_position = mission_info_frame.add_label_info("Waypoint Position:")
         self.waypoint_heading = mission_info_frame.add_label_info("Waypoint Heading:")
         self.waypoint_distance = mission_info_frame.add_label_info("Waypoint Distance:")
-        self.helmsman_speed = mission_info_frame.add_label_info("Helmsman Speed:")
-        self.helmsman_steer = mission_info_frame.add_label_info("Helmsman Steering:")
+        self.helmsman_speed = mission_info_frame.add_label_info("Speed (cm/s):")
+        self.helmsman_steer = mission_info_frame.add_label_info("Steering (rad/s):")
         self.helmsman_p_error = mission_info_frame.add_label_info("Helmsman P_Error:")
         self.helmsman_i_accumulator = mission_info_frame.add_label_info(
             "Helmsman I_Accumulator:"
@@ -439,23 +441,23 @@ class MissionControl(vmqtt.VnavsNode):
         print("on_replay_download()", self.replay_mission_id)
 
     def on_speed_stop(self):
-        self.speed = 0
+        self.speed = 0.0
         payload = {}
-        payload[helmsman.HELMSMAN_SPEED] = self.speed
+        payload[helmsman.HELMSMAN_CM_PER_SEC] = self.speed
         self.publish(vconst.helmsman_orders_topic, payload)
 
     def on_speed_plus(self):
-        self.speed += 1
+        self.speed += 5.0
         payload = {}
-        payload[helmsman.HELMSMAN_SPEED] = self.speed
+        payload[helmsman.HELMSMAN_CM_PER_SEC] = self.speed
         self.publish(vconst.helmsman_orders_topic, payload)
 
     def on_speed_minus(self):
-        self.speed -= 1
+        self.speed -= 5.0
         if self.speed < 0:
-            self.speed = 0
+            self.speed = 0.0
         payload = {}
-        payload[helmsman.HELMSMAN_SPEED] = self.speed
+        payload[helmsman.HELMSMAN_CM_PER_SEC] = self.speed
         self.publish(vconst.helmsman_orders_topic, payload)
 
     def on_stage_execute(self):
@@ -478,7 +480,7 @@ class MissionControl(vmqtt.VnavsNode):
         self.publish(vconst.mission_cancel_topic, payload)
         #
         payload = {}
-        payload[helmsman.HELMSMAN_SPEED] = 0
+        payload[helmsman.HELMSMAN_CM_PER_SEC] = 0.0
         self.publish(vconst.helmsman_orders_topic, payload)
 
     #
@@ -564,11 +566,11 @@ class MissionControl(vmqtt.VnavsNode):
     def do_helmsman_orders(self, payload, replay=False):
         if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
             return
-        if helmsman.HELMSMAN_SPEED in payload:
-            speed = payload[helmsman.HELMSMAN_SPEED]
+        if helmsman.HELMSMAN_CM_PER_SEC in payload:
+            speed = payload[helmsman.HELMSMAN_CM_PER_SEC]
             self.helmsman_speed.replace_value(speed)
-        if helmsman.HELMSMAN_HEADING in payload:
-            steer = payload[helmsman.HELMSMAN_HEADING]
+        if helmsman.HELMSMAN_RAD_PER_SEC in payload:
+            steer = payload[helmsman.HELMSMAN_RAD_PER_SEC]
             self.helmsman_steer.replace_value(steer)
         if helmsman.HELMSMAN_P_ERROR in payload:
             p_error = payload[helmsman.HELMSMAN_P_ERROR]
@@ -621,7 +623,9 @@ class MissionControl(vmqtt.VnavsNode):
             # look for download subdirectories with corresponding log file
             dpath = os.path.join(self.download_dir, this)
             if os.path.isdir(dpath):
-                log_path = os.path.join(dpath, this + fastmqttserver.FMQTT_LOG_EXTENSION)
+                log_path = os.path.join(
+                    dpath, this + fastmqttserver.FMQTT_LOG_EXTENSION
+                )
                 if os.path.isfile(log_path):
                     mission_id_list.append(this)
         mission_id_list.sort()
@@ -629,7 +633,9 @@ class MissionControl(vmqtt.VnavsNode):
 
     def configure_replay(self, mkdir=True):
         self.replay_log_fn = self.replay_mission_id + ".nav"
-        self.replay_mission_dir = os.path.join(self.download_dir, self.replay_mission_id)
+        self.replay_mission_dir = os.path.join(
+            self.download_dir, self.replay_mission_id
+        )
         if mkdir:
             try:
                 os.mkdir(self.replay_mission_dir)

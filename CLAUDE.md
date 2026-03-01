@@ -9,6 +9,10 @@ VNAVS (Visually Navigating Autonomous Vehicle System) — a high-performance Pyt
 ## Commands
 
 ```bash
+# Install for development (after cloning)
+pip install -e vnavslib/
+pip install -e vnavsrun/
+
 # Run all tests
 pytest
 
@@ -30,8 +34,9 @@ pylint vnavslib/vnavslib/ vnavsrun/vnavsrun/
 
 ### Package Structure
 
-- **`ezcomms`** (external package, `~/projects/published/ezcomms`) — Communication and data layer: `vnavs_node.py`, `vnavs_comms.py`, `vnavs_mqtt_clients.py`, `vnavs_data.py`, `vnavs_const.py`, `vnavs_file_xfer_client.py`. Installed via `pip install -e`.
-- **`cvpipeline`** (external package) — Vision pipeline: `opticchiasm.py`, `image_filters.py`, `image_analyzer.py`, `macbookcamera.py`, `cvpipeline.py` (GUI editor). Installed via `pip install -e`.
+- **`ezcomms`** ([github](https://github.com/almargolis/ezcomms), `~/projects/published/ezcomms`) — Communication and data layer: `vnavs_node.py`, `vnavs_comms.py`, `vnavs_mqtt_clients.py`, `vnavs_data.py`, `vnavs_const.py`, `vnavs_file_xfer_client.py`. Installed via `pip install -e`.
+- **`cvpipeline`** ([github](https://github.com/almargolis/cvpipeline)) — Vision pipeline: `opticchiasm.py`, `image_filters.py`, `image_analyzer.py`, `macbookcamera.py`, `cvpipeline.py` (GUI editor). Installed via `pip install -e`.
+- **`eztk`** ([github](https://github.com/almargolis/eztk)) — Simplified Tkinter widget framework with grid layout engine. Installed via `pip install -e`.
 - **`vnavslib/vnavslib/`** — Remaining hardware abstraction (cv_notes, joystick, etc.)
 - **`vnavsrun/vnavsrun/`** — Application-level nodes (servers, controllers, GUIs)
 - Tests: cvpipeline has its own tests (25 tests), ezcomms has its own tests (26 tests), eztk has its own tests (52 tests)
@@ -78,7 +83,8 @@ Classes like `ProcessStep` and `CvPipeline` have `__init__` methods that create 
 
 - **PEP 8 snake_case** for all methods and parameters (ongoing modernization from CamelCase)
 - **`class Foo:` not `class Foo(object):`** — Python 3 style
-- Black formatter with 88 char line length
+- Black formatter with 88 char line length; pylint allows up to 100
+- pylint disables: `C0103` (short variable names OK), `R0913` (many arguments OK), `R0914` (many locals OK)
 - eztk widget API parameters (`OnClick`, `OnTabSelected`, `Selection`, `Where`) keep their CamelCase — that's eztk's API, not ours
 - Constants are UPPER_SNAKE_CASE
 - Tests use plain `assert` statements (no unittest classes)

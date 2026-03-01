@@ -1,0 +1,42 @@
+import math
+import sys
+
+from roomba import create
+from vnavsrun import helmsman
+
+
+class HelmsmanCreate(helmsman.Helmsman):
+    def __init__(self):
+        self.robot = None
+        self.current_cm_per_sec = 0.0
+        self.current_rad_per_sec = 0.0
+        super().__init__()
+
+    def vehicle_init(self):
+        self.robot = create.Create()
+        self.speed_max = 50.0  # cm/sec
+        self.steering_max = 4.36  # rad/sec (~250 deg/sec)
+
+    def vehicle_estop(self):
+        self.robot.stop()
+        self.current_cm_per_sec = 0.0
+        self.current_rad_per_sec = 0.0
+
+    def vehicle_set_speed(self, cm_per_sec):
+        self.current_cm_per_sec = cm_per_sec
+
+    def vehicle_set_steering(self, rad_per_sec):
+        self.current_rad_per_sec = rad_per_sec
+
+    def vehicle_tick(self):
+        self.robot.go(self.current_cm_per_sec, math.degrees(self.current_rad_per_sec))
+
+    def vehicle_cleanup(self):
+        self.robot.stop()
+        self.robot.close()
+
+
+if __name__ == "__main__":
+    if sys.argv[1] == "node":
+        m = HelmsmanCreate()
+        m.main_loop()

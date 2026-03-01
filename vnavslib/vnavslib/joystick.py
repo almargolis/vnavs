@@ -7,6 +7,9 @@ import evdev
 from ezcomms import vnavs_const as vconst
 from ezcomms import vnavs_node as vmqtt
 
+SPEED_MAX = 40.0  # cm/sec, max linear velocity for axis mapping
+STEERING_MAX = 3.0  # rad/sec, max angular velocity for axis mapping
+
 
 def PrintCapability(gamepad):
     print(gamepad)
@@ -21,6 +24,15 @@ def PrintCapability(gamepad):
                 print("ABS", thisJoy[0], thisJoy[1].min, thisJoy[1].max)
         else:
             print("XXX", thisType, thisCap)
+
+
+def scale_axis(raw_value, axis_min, axis_max, target_max):
+    """Scale raw axis value to range [-target_max, +target_max]."""
+    axis_range = float(axis_max - axis_min)
+    if axis_range == 0:
+        return 0.0
+    normalized = (float(raw_value - axis_min) / axis_range) * 2.0 - 1.0
+    return normalized * target_max
 
 
 class joystick(vmqtt.VnavsNode):
@@ -102,13 +114,18 @@ class joystick(vmqtt.VnavsNode):
 
     def PublishHelmsman(self):
         payload = {}
-        payload["speed"] = self.speedValue
-        payload["speed_scale_min"] = self.speedAxis.min
-        payload["speed_scale_max"] = self.speedAxis.max
+        cm_per_sec = scale_axis(
+            self.speedValue, self.speedAxis.min, self.speedAxis.max, SPEED_MAX
+        )
+        payload["cm_per_sec"] = cm_per_sec
         if not self.mission_logging:
-            payload["heading"] = self.directionValue
-            payload["heading_scale_min"] = self.directionAxis.min
-            payload["heading_scale_max"] = self.directionAxis.max
+            rad_per_sec = scale_axis(
+                self.directionValue,
+                self.directionAxis.min,
+                self.directionAxis.max,
+                STEERING_MAX,
+            )
+            payload["rad_per_sec"] = rad_per_sec
         self.publish(vconst.helmsman_orders_topic, payload)
         self.helmsmanChanged = False
         print(payload)
