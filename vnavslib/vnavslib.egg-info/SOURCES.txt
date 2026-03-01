@@ -1,6 +1,14 @@
 pyproject.toml
+test/test_botvac.py
+test/test_joystick.py
+test/test_macbookcamera.py
+test/test_opticchiasm.py
+test/test_pololu_maestro.py
 vnavslib/__init__.py
-vnavslib/opticchiasm.py
+vnavslib/botvac.py
+vnavslib/cv_notes.py
+vnavslib/joystick.py
+vnavslib/pololu_maestro.py
 vnavslib.egg-info/PKG-INFO
 vnavslib.egg-info/SOURCES.txt
 vnavslib.egg-info/dependency_links.txt

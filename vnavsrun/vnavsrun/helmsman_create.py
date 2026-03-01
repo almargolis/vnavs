@@ -1,7 +1,6 @@
-import math
 import sys
 
-from roomba import create
+from create_serial import create
 from vnavsrun import helmsman
 
 
@@ -29,7 +28,7 @@ class HelmsmanCreate(helmsman.Helmsman):
         self.current_rad_per_sec = rad_per_sec
 
     def vehicle_tick(self):
-        self.robot.go(self.current_cm_per_sec, math.degrees(self.current_rad_per_sec))
+        self.robot.go_differential(self.current_cm_per_sec, self.current_rad_per_sec)
 
     def vehicle_cleanup(self):
         self.robot.stop()
