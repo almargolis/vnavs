@@ -7,7 +7,6 @@ from vnavsrun import helmsman
 class HelmsmanCreate(helmsman.Helmsman):
     def __init__(self):
         self.robot = None
-        self.current_cm_per_sec = 0.0
         self.current_rad_per_sec = 0.0
         super().__init__()
 
@@ -15,6 +14,8 @@ class HelmsmanCreate(helmsman.Helmsman):
         self.robot = create.Create()
         self.speed_max = 50.0  # cm/sec
         self.steering_max = 4.36  # rad/sec (~250 deg/sec)
+        self.vehicle_steering_type = helmsman.STEERING_TYPE_DIFFERENTIAL
+        self.wheelbase = 26.0  # cm
 
     def vehicle_estop(self):
         self.robot.stop()

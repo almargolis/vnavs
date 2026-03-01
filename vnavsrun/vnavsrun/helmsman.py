@@ -1,3 +1,4 @@
+import math
 import queue
 import sys
 import time
@@ -25,6 +26,12 @@ HELMSMAN_SPEED_CONTROL_DEFAULT = "*"
 HELMSMAN_MAX_SPEED_CONTROL = "max_speed_control"
 HELMSMAN_STEERING_CONTROL = "steering_control"
 HELMSMAN_STEERING_CONTROL_DEFAULT = "*"
+
+STEERING_TYPE_DIFFERENTIAL = "d"
+STEERING_TYPE_ACKERMAN = "a"
+HELMSMAN_STEERING_TYPE = "steering_type"
+HELMSMAN_ANGLE = "angle"
+HELMSMAN_ANGLE_RATE = "angle_rate"
 
 
 class Helmsman(vmqtt.VnavsNode):
@@ -65,6 +72,10 @@ class Helmsman(vmqtt.VnavsNode):
         self.speed_control = HELMSMAN_SPEED_CONTROL_DEFAULT
         self.steering_control = HELMSMAN_STEERING_CONTROL_DEFAULT
         self.state = STATE_DEADMAN
+        self.vehicle_steering_type = None  # subclass sets: "d" or "a"
+        self.wheelbase = 0.0  # cm, subclass sets if differential
+        self.current_cm_per_sec = 0.0  # cached for ackerman->differential recomputation
+        self.current_ackerman_angle = None  # cached angle (radians), None if not active
         self.vehicle_init()
 
     def vehicle_init(self):
@@ -83,6 +94,10 @@ class Helmsman(vmqtt.VnavsNode):
         """Set target angular velocity in rad/sec."""
         raise NotImplementedError
 
+    def vehicle_set_steering_angle(self, angle, angle_rate):
+        """Set target steering angle (radians) and transition rate (radians/sec)."""
+        raise NotImplementedError
+
     def vehicle_tick(self):
         """Periodic call to update hardware with current speed/steering."""
         raise NotImplementedError
@@ -90,6 +105,17 @@ class Helmsman(vmqtt.VnavsNode):
     def vehicle_cleanup(self):
         """Shutdown hardware gracefully."""
         raise NotImplementedError
+
+    def _recompute_differential_from_ackerman(self):
+        if self.wheelbase <= 0:
+            print("HELMSMAN - wheelbase not set, cannot convert ackerman to differential")
+            return
+        rad_per_sec = (
+            self.current_cm_per_sec
+            * math.tan(self.current_ackerman_angle)
+            / self.wheelbase
+        )
+        self.vehicle_set_steering(rad_per_sec)
 
     def ClearOrdersQueue(self):
         while True:
@@ -113,6 +139,8 @@ class Helmsman(vmqtt.VnavsNode):
             new_state = payload[HELMSMAN_STATE]
             if new_state == STATE_ESTOPPED:
                 self.vehicle_estop()
+                self.current_cm_per_sec = 0.0
+                self.current_ackerman_angle = None
                 self.state = STATE_ESTOPPED
                 self.ClearOrdersQueue()
             if new_state in STATES_MOVING:
@@ -141,6 +169,7 @@ class Helmsman(vmqtt.VnavsNode):
                 cm_per_sec = self.governor
             elif cm_per_sec < -self.governor:
                 cm_per_sec = -self.governor
+        self.current_cm_per_sec = cm_per_sec
         self.vehicle_set_speed(cm_per_sec)
 
     def InterpretOrdersHeading(self, payload):
@@ -150,14 +179,47 @@ class Helmsman(vmqtt.VnavsNode):
                     f"HELMSMAN - Unauthorized Steering Order from {payload['_sender']}"
                 )
                 return
+        if self.vehicle_steering_type == STEERING_TYPE_ACKERMAN:
+            print("HELMSMAN - Ackerman robot cannot accept differential steering command")
+            return
         rad_per_sec = float(payload[HELMSMAN_RAD_PER_SEC])
+        self.current_ackerman_angle = None
         self.vehicle_set_steering(rad_per_sec)
+
+    def InterpretOrdersAckerman(self, payload):
+        if self.steering_control != HELMSMAN_STEERING_CONTROL_DEFAULT:
+            if self.steering_control != payload["_sender"]:
+                print(
+                    f"HELMSMAN - Unauthorized Steering Order from {payload['_sender']}"
+                )
+                return
+        angle = float(payload[HELMSMAN_ANGLE])
+        angle_rate = float(payload.get(HELMSMAN_ANGLE_RATE, 1.0))
+        self.current_ackerman_angle = angle
+        if self.vehicle_steering_type == STEERING_TYPE_ACKERMAN:
+            self.vehicle_set_steering_angle(angle, angle_rate)
+        elif self.vehicle_steering_type == STEERING_TYPE_DIFFERENTIAL:
+            self._recompute_differential_from_ackerman()
 
     def InterpretOrders(self, payload):
         if HELMSMAN_CM_PER_SEC in payload:
             self.InterpretOrdersSpeed(payload)
-        if HELMSMAN_RAD_PER_SEC in payload:
-            self.InterpretOrdersHeading(payload)
+        msg_steering_type = payload.get(
+            HELMSMAN_STEERING_TYPE, STEERING_TYPE_DIFFERENTIAL
+        )
+        has_steering = False
+        if msg_steering_type == STEERING_TYPE_ACKERMAN:
+            if HELMSMAN_ANGLE in payload:
+                self.InterpretOrdersAckerman(payload)
+                has_steering = True
+        else:
+            if HELMSMAN_RAD_PER_SEC in payload:
+                self.InterpretOrdersHeading(payload)
+                has_steering = True
+        if not has_steering and HELMSMAN_CM_PER_SEC in payload:
+            if self.current_ackerman_angle is not None:
+                if self.vehicle_steering_type == STEERING_TYPE_DIFFERENTIAL:
+                    self._recompute_differential_from_ackerman()
         if HELMSMAN_TIMER in payload:
             timer = int(payload[HELMSMAN_TIMER])
         else:
@@ -169,9 +231,13 @@ class Helmsman(vmqtt.VnavsNode):
     def client_loop_code(self):
         if not self.mqttc.connected:
             self.vehicle_estop()
+            self.current_cm_per_sec = 0.0
+            self.current_ackerman_angle = None
             return
         if (self.state == STATE_DEADMAN) and (time.time() > self.deadman_time):
             self.vehicle_estop()
+            self.current_cm_per_sec = 0.0
+            self.current_ackerman_angle = None
             self.state = STATE_TIMED_OUT
             self.stats.Count("timeouts")
             return

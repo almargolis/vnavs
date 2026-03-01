@@ -75,6 +75,14 @@ All vnavs modules import from cvpipeline: `from cvpipeline import opticchiasm as
 - **Threading** — Multi-threaded by default; single-threaded mode for Tkinter GUI apps (configured via `single_threaded=True` in VnavsNode).
 - **Configuration** — `~/vnavs.ini` (not versioned); structure defined in `vnavs_const.py`.
 
+### Helmsman Steering Types
+
+The helmsman base class (`helmsman.py`) supports two steering types via `vehicle_steering_type`:
+- **Differential** (`STEERING_TYPE_DIFFERENTIAL = "d"`) — Tank-style steering via `rad_per_sec`. Used by `HelmsmanCreate`. Requires `wheelbase` (cm) for Ackerman-to-differential conversion.
+- **Ackerman** (`STEERING_TYPE_ACKERMAN = "a"`) — Servo-angle steering via `angle` (radians). Used by `HelmsmanFirmata` (default). Calls `vehicle_set_steering_angle(angle, angle_rate)`.
+
+Messages include an optional `steering_type` field (defaults to `"d"` for backward compatibility). The base class handles cross-type conversion: Ackerman commands on differential robots are converted via `speed * tan(angle) / wheelbase`. Ackerman robots reject differential steering commands. Speed-only updates recompute differential steering when an Ackerman angle is cached.
+
 ### Testing Classes With Tkinter Dependencies
 
 Classes like `ProcessStep` and `CvPipeline` have `__init__` methods that create GUI widgets. Tests bypass this using `object.__new__(ClassName)` to allocate without calling `__init__`, then manually set `__slots__` attributes. See `test_cvpipeline.py` for the `make_process_step()` factory pattern and `MockLabel`/`MockCanvas` stand-ins.

@@ -182,17 +182,22 @@ class Vehicle:
 # Adjust per vehicle calibration.
 FIRMATA_CM_PER_SEC_TO_SERVO = 1.0  # cm/sec -> servo speed units
 FIRMATA_RAD_PER_SEC_TO_SERVO_DEG = 30.0  # rad/sec -> servo steering degrees
+FIRMATA_ANGLE_TO_SERVO_DEG = 57.2958  # 180/pi, radians -> degrees
 
 
 class HelmsmanFirmata(helmsman.Helmsman):
-    def __init__(self):
+    def __init__(self, steering_type=helmsman.STEERING_TYPE_ACKERMAN):
         self.v = None
+        self._steering_type = steering_type
         super().__init__()
 
     def vehicle_init(self):
         self.v = Vehicle()
         self.speed_max = 40.0  # cm/sec
         self.steering_max = 3.0  # rad/sec (~172 deg/sec)
+        self.vehicle_steering_type = self._steering_type
+        if self.vehicle_steering_type == helmsman.STEERING_TYPE_DIFFERENTIAL:
+            self.wheelbase = 20.0  # cm, set per vehicle calibration
 
     def vehicle_estop(self):
         self.v.Estop()
@@ -205,6 +210,10 @@ class HelmsmanFirmata(helmsman.Helmsman):
         servo_deg = int(rad_per_sec * FIRMATA_RAD_PER_SEC_TO_SERVO_DEG)
         self.v.NewSteeringGoal(servo_deg)
 
+    def vehicle_set_steering_angle(self, angle, angle_rate):
+        servo_deg = int(angle * FIRMATA_ANGLE_TO_SERVO_DEG)
+        self.v.NewSteeringGoal(servo_deg)
+
     def vehicle_tick(self):
         self.v.MotorTick()
         self.v.SteeringTick()
@@ -215,5 +224,8 @@ class HelmsmanFirmata(helmsman.Helmsman):
 
 if __name__ == "__main__":
     if sys.argv[1] == "node":
-        m = HelmsmanFirmata()
+        steering_type = helmsman.STEERING_TYPE_ACKERMAN
+        if len(sys.argv) > 2:
+            steering_type = sys.argv[2]
+        m = HelmsmanFirmata(steering_type=steering_type)
         m.main_loop()

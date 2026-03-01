@@ -4,7 +4,7 @@
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-**VNAVS** is a high-performance Python framework for autonomous vehicle control and coordination. Designed as a lightweight alternative to ROS (Robot Operating System), VNAVS provides 10-100x faster message passing through a custom protocol while maintaining simplicity and ease of use.
+**VNAVS** is a high-performance Python framework for autonomous vehicle control and coordination. Designed as a lightweight alternative to ROS (Robot Operating System), VNAVS provides 10-100x faster message passing through a custom protocol while maintaining simplicity and ease of use. Unlike ROS, VNAVS runs under macOS as well as Linux and is not tied to any specific Linux distribution. It runs well on lower-performance single-board computers such as Raspberry Pi.
 
 ---
 
@@ -66,7 +66,7 @@ VNAVS is organized as four packages:
 - **`vnavsrun/`** — Application-level nodes:
   - `fastmqttserver.py`: High-performance message broker with archiving
   - `navigator.py`: GPS waypoint navigation with PID steering control
-  - `helmsman.py`: Motor and steering control
+  - `helmsman.py`: Motor and steering control with dual steering support (differential and Ackerman)
   - `cameraman.py`: Multi-camera image capture and streaming
   - `engineer_1.py`: Sensor data collection and processing
   - `mission_control.py`: Coordination and mission sequencing
