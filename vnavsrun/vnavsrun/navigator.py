@@ -36,6 +36,11 @@ Y_TURN_LIMIT = 160
 INITIAL_GPS_WAIT = 3
 OVERSTEER_ADJUSTMENT = 0.5
 
+LINE_LOST_TIMEOUT = 0.5  # seconds before line_x is considered stale
+LINE_LOST_STOP = "stop"
+LINE_LOST_SLOW_HOLD = "slow_hold"
+LINE_LOST_COAST_STRAIGHT = "coast_straight"
+
 NAVIGATOR_WAYPOINT_LATITUDE = "waypoint_latitude"
 NAVIGATOR_WAYPOINT_LONGITUDE = "waypoint_longitude"
 NAVIGATOR_WAYPOINT_HEADING = "waypoint_heading"
@@ -348,13 +353,23 @@ class StepKeyGroup(MissionStep):
 
 
 class StepFollowLinePid(MissionStep):
-    __slots__ = ("next_time", "speed", "pid")
+    __slots__ = (
+        "line_lost_mode",
+        "line_lost_speed",
+        "line_lost_timeout",
+        "next_time",
+        "pid",
+        "speed",
+    )
 
     def __init__(self, stage):
         super().__init__(stage)
         self.next_time = None
         self.pid = PID(SetPoint=285, OutputScale=1.0, KI=0, KD=1)
         self.speed = 4
+        self.line_lost_mode = LINE_LOST_SLOW_HOLD
+        self.line_lost_speed = None
+        self.line_lost_timeout = LINE_LOST_TIMEOUT
 
     def DoStageStepInit(self):
         if "speed" in self.parm_kword:
@@ -365,26 +380,57 @@ class StepFollowLinePid(MissionStep):
             self.pid.i_gain = float(self.parm_kword["Ki"])
         if "Kd" in self.parm_kword:
             self.pid.d_gain = float(self.parm_kword["Kd"])
-        rect = oc.RectFromPayload(self.parm_kword)
+        if "line_lost_mode" in self.parm_kword:
+            self.line_lost_mode = self.parm_kword["line_lost_mode"]
+        if "line_lost_speed" in self.parm_kword:
+            self.line_lost_speed = int(self.parm_kword["line_lost_speed"])
+        if "line_lost_timeout" in self.parm_kword:
+            self.line_lost_timeout = float(self.parm_kword["line_lost_timeout"])
+        if self.line_lost_speed is None:
+            self.line_lost_speed = max(1, self.speed // 2)
+        rect = oc.right_from_payload(self.parm_kword)
         self.pid.target_value = rect.center_x
         self.next_time = 0
         self.pid.Reset()
 
+    def _line_is_stale(self):
+        if self.navigator.line_x is None:
+            return True
+        return (time.time() - self.navigator.line_x_time) > self.line_lost_timeout
+
+    def _handle_line_lost(self):
+        if self.line_lost_mode == LINE_LOST_STOP:
+            self.nav.speed = 0
+            self.nav.steering = 0
+        elif self.line_lost_mode == LINE_LOST_COAST_STRAIGHT:
+            self.nav.speed = self.line_lost_speed
+            self.nav.steering = 0
+        else:  # LINE_LOST_SLOW_HOLD
+            self.nav.speed = self.line_lost_speed
+            # keep last steering value
+        print(
+            "StepFollowLinePid LINE LOST mode=%s speed=%s steering=%s"
+            % (self.line_lost_mode, self.nav.speed, self.nav.steering)
+        )
+        self.PublishNavigation()
+
     def DoStageStepRun(self, loop_ct):
         if time.time() > self.next_time:
-            self.nav.steering = self.pid.GetOutput(self.navigator.line_x)
-            self.nav.speed = self.speed
-            self.nav.p_error = self.pid.error
-            self.nav.i_accumulator = self.pid.i_accumulator
-            self.nav.derivative = self.pid.derivative
-            print(
-                "StepFollowLinePid.DoStageStepRun() LINEpid",
-                self.navigator.line_x,
-                self.nav.speed,
-                self.nav.steering,
-            )
-            self.PublishNavigation()
-            self.next_time = time.time() + 1.0
+            if self._line_is_stale():
+                self._handle_line_lost()
+            else:
+                self.nav.steering = self.pid.GetOutput(self.navigator.line_x)
+                self.nav.speed = self.speed
+                self.nav.p_error = self.pid.error
+                self.nav.i_accumulator = self.pid.i_accumulator
+                self.nav.derivative = self.pid.derivative
+                print(
+                    "StepFollowLinePid.DoStageStepRun() LINEpid",
+                    self.navigator.line_x,
+                    self.nav.speed,
+                    self.nav.steering,
+                )
+                self.PublishNavigation()
             self.next_time = time.time() + 0.5
         return False
 
@@ -392,9 +438,12 @@ class StepFollowLinePid(MissionStep):
 class StepFollowLineTrace(MissionStep):
     __slots__ = (
         "base_angle",
+        "line_lost_mode",
+        "line_lost_speed",
+        "line_lost_timeout",
         "next_time",
-        "sensitvity_x",
         "sensitivity_general",
+        "sensitivity_x",
         "speed",
         "target_x",
     )
@@ -406,31 +455,65 @@ class StepFollowLineTrace(MissionStep):
         self.sensitivity_general = 1.5
         self.sensitivity_x = 1.0
         self.speed = 4
+        self.line_lost_mode = LINE_LOST_SLOW_HOLD
+        self.line_lost_speed = None
+        self.line_lost_timeout = LINE_LOST_TIMEOUT
 
     def DoStageStepInit(self):
         if "speed" in self.parm_kword:
             self.speed = int(self.parm_kword["speed"])
         if "base_angle" in self.parm_kword:
             self.base_angle = float(self.parm_kword["base_angle"])
-        rect = oc.RectFromPayload(self.parm_kword)
+        if "line_lost_mode" in self.parm_kword:
+            self.line_lost_mode = self.parm_kword["line_lost_mode"]
+        if "line_lost_speed" in self.parm_kword:
+            self.line_lost_speed = int(self.parm_kword["line_lost_speed"])
+        if "line_lost_timeout" in self.parm_kword:
+            self.line_lost_timeout = float(self.parm_kword["line_lost_timeout"])
+        if self.line_lost_speed is None:
+            self.line_lost_speed = max(1, self.speed // 2)
+        rect = oc.right_from_payload(self.parm_kword)
         self.target_x = rect.center_x
         self.next_time = 0
 
+    def _line_is_stale(self):
+        if self.navigator.line_x is None:
+            return True
+        return (time.time() - self.navigator.line_x_time) > self.line_lost_timeout
+
+    def _handle_line_lost(self):
+        if self.line_lost_mode == LINE_LOST_STOP:
+            self.nav.speed = 0
+            self.nav.steering = 0
+        elif self.line_lost_mode == LINE_LOST_COAST_STRAIGHT:
+            self.nav.speed = self.line_lost_speed
+            self.nav.steering = 0
+        else:  # LINE_LOST_SLOW_HOLD
+            self.nav.speed = self.line_lost_speed
+            # keep last steering value
+        print(
+            "StepFollowLineTrace LINE LOST mode=%s speed=%s steering=%s"
+            % (self.line_lost_mode, self.nav.speed, self.nav.steering)
+        )
+        self.PublishNavigation()
+
     def DoStageStepRun(self, loop_ct):
         if time.time() > self.next_time:
-            x_error = self.navigator.line_x - self.target_x
-            x_steering = float(x_error) * self.sensitivity_x
-            path_steering = self.navigator.line_angle - self.base_angle
-            self.nav.steering = (x_steering + path_steering) * self.sensitivity_general
-            self.nav.speed = self.speed
-            print(
-                "StepFollowLinePid.DoStageStepRun() LINEtrace",
-                self.navigator.line_x,
-                self.nav.speed,
-                self.nav.steering,
-            )
-            self.PublishNavigation()
-            self.next_time = time.time() + 1.0
+            if self._line_is_stale():
+                self._handle_line_lost()
+            else:
+                x_error = self.navigator.line_x - self.target_x
+                x_steering = float(x_error) * self.sensitivity_x
+                path_steering = self.navigator.line_angle - self.base_angle
+                self.nav.steering = (x_steering + path_steering) * self.sensitivity_general
+                self.nav.speed = self.speed
+                print(
+                    "StepFollowLineTrace.DoStageStepRun() LINEtrace",
+                    self.navigator.line_x,
+                    self.nav.speed,
+                    self.nav.steering,
+                )
+                self.PublishNavigation()
             self.next_time = time.time() + 0.1
         return False
 
@@ -1096,6 +1179,7 @@ class navigator(vmqtt.VnavsNode):
         self.line_angle = None
         self.line_centers = []
         self.line_x = None
+        self.line_x_time = 0.0
         self.mission = None
         self.mission_load_payload = None
         self.mission_sync_event_payload = None
@@ -1174,14 +1258,19 @@ class navigator(vmqtt.VnavsNode):
         self.stats.Count("ImuRcv")
 
     def DoCameramanPicReady(self, payload):
-        if "center_line" in payload:
+        if payload.get("center_line"):
             line_at = payload["center_line"]
-            list_of_OpenCvRect = oc.ListOfOpenCvRectFromListofDicts(line_at)
+            # chase_line() (via cameraman.maker_faire_2018) returns points from the
+            # bottom of the image upward, serialized as RotatedRect dicts.
+            list_of_line_rects = oc.list_of_rotated_rect_from_list_of_dicts(line_at)
             self.line_centers = []
-            if len(list_of_OpenCvRect) > 0:
-                self.line_x = list_of_OpenCvRect[0].center_x
-                start_y = list_of_OpenCvRect[0].center_y
-                for this_rect in list_of_OpenCvRect:
+            if len(list_of_line_rects) > 0:
+                self.line_x = list_of_line_rects[0].center_x
+                self.line_x_time = time.time()
+                start_y = list_of_line_rects[0].center_y
+                end_x = self.line_x
+                end_y = start_y
+                for this_rect in list_of_line_rects:
                     self.line_centers.append(this_rect.center)
                     end_x = this_rect.center_x
                     end_y = this_rect.center_y

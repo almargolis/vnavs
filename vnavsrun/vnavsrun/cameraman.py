@@ -20,7 +20,103 @@ from ezcomms import vnavs_node as vmqtt
 from vnavsrun import helmsman
 from cvpipeline.macbookcamera import MacbookCamera
 
-picamera = None  # imported below if needed
+PICAMERA2_FORMATS = {
+    "bgr": "BGR888",
+    "rgb": "RGB888",
+    "yuv": "YUV420",
+}
+
+
+class CaptureBuffer:
+    """Mimics the PiRGBArray/PiYUVArray interface for picamera2."""
+
+    __slots__ = ("array",)
+
+    def __init__(self):
+        self.array = None
+
+    def truncate(self):
+        pass
+
+    def seek(self, pos):
+        pass
+
+
+class Picamera2Wrapper:
+    """Wraps picamera2.Picamera2 to present the same interface as legacy PiCamera.
+
+    Works with both global shutter (e.g. IMX296) and rolling shutter
+    (e.g. IMX219, IMX477) cameras -- libcamera handles sensor differences
+    transparently.
+    """
+
+    __slots__ = (
+        "_cam",
+        "_iso",
+        "_shutter_speed",
+        "hflip",
+        "resolution",
+        "vflip",
+    )
+
+    def __init__(self, resolution=(320, 240)):
+        from picamera2 import Picamera2
+        from libcamera import Transform
+
+        self._cam = Picamera2()
+        self.resolution = resolution
+        self.vflip = False
+        self.hflip = False
+        self._iso = 100
+        self._shutter_speed = 0
+        config = self._cam.create_video_configuration(
+            main={"size": resolution, "format": "BGR888"},
+            transform=Transform(hflip=self.hflip, vflip=self.vflip),
+        )
+        self._cam.configure(config)
+        self._cam.start()
+
+    @property
+    def iso(self):
+        return self._iso
+
+    @iso.setter
+    def iso(self, value):
+        self._iso = value
+        # picamera2 uses AnalogueGain; ISO 100 ~ gain 1.0
+        gain = max(1.0, value / 100.0)
+        self._cam.set_controls({"AnalogueGain": gain})
+
+    @property
+    def shutter_speed(self):
+        return self._shutter_speed
+
+    @shutter_speed.setter
+    def shutter_speed(self, value):
+        self._shutter_speed = value
+        if value > 0:
+            self._cam.set_controls({"ExposureTime": value})
+        else:
+            self._cam.set_controls({"AeEnable": True})
+
+    @property
+    def exposure_speed(self):
+        metadata = self._cam.capture_metadata()
+        return metadata.get("ExposureTime", 0)
+
+    def capture_continuous(self, output, format=None, use_video_port=True):
+        """Generator that yields file paths or filled CaptureBuffer objects."""
+        ctr = 0
+        while True:
+            ctr += 1
+            array = self._cam.capture_array("main")
+            if isinstance(output, str):
+                path = output.format(counter=ctr)
+                cv2.imwrite(path, array)
+                yield path
+            else:
+                output.array = array
+                yield output
 
 print("CONFIGURING SIGNAL")
 stop_process = False
@@ -152,15 +248,13 @@ class Cameraman(vmqtt.VnavsNode):
         self.camera_resolution = (160, 120)
         self.camera_resolution = (320, 240)
         self.camera_type = self.config.get("Cameraman", "Camera")
-        if self.camera_type == "Picamera":
-            import picamera
-            import picamera.array
-
+        if self.camera_type == "Picamera2":
             try:
-                self.camera = picamera.PiCamera(resolution=self.camera_resolution)
-            except picamera.exc.PiCameraMMALError:
+                self.camera = Picamera2Wrapper(resolution=self.camera_resolution)
+            except RuntimeError as e:
                 print(
-                    "Camera out of resources exception. Camera is probably in-use by another node."
+                    "Camera error:", e,
+                    "Camera is probably in-use by another node."
                 )
                 sys.exit(1)
         else:
@@ -388,10 +482,8 @@ class Cameraman(vmqtt.VnavsNode):
             burst_dest = os.path.join(self.image_dir, image_file_name_format)
         else:
             # streams can be jpeg, rgb, bgr, or yuv
-            if self.loop_format == "yuv":
-                burst_dest = picamera.array.PiYUVArray(self.camera)
-            elif self.loop_format in [opticchiasm.IM_RGB, opticchiasm.IM_BGR]:
-                burst_dest = picamera.array.PiRGBArray(self.camera)
+            if self.loop_format in ["yuv", opticchiasm.IM_RGB, opticchiasm.IM_BGR]:
+                burst_dest = CaptureBuffer()
             else:  # jpeg
                 burst_dest = io.BytesIO()
         #
@@ -478,21 +570,9 @@ class Cameraman(vmqtt.VnavsNode):
                     hsv_payload[vconst.dname_field_name] = self.mark_payload["save"]
                     self.publish(vconst.data_save_topic, hsv_payload)
                 self.mark_payload = None  # only do the HSV processing once
-            """
-            if self.cam_compiled is not None:
-                self.post_process(img)
-            if len(self.post_processes) > 0:
-                annotated = img.copy()
-                for this in self.post_processes:
-                    self.post_process(this, Im=img, An=annotated)
-                pos = image_fn.rfind('.')
-                an_fn = image_fn[:pos] + '-A' + im_fn[pos:]
-                an_path = os.path.join(self.image_dir, an_fn)
-                cv2.imwrite(an_path, annotated)
-            else:
-                rect_list = self.maker_faire_2018(this_image)
-                annotated = None
-            """
+            annotated = None
+            an_fn = None
+            rect_list = self.maker_faire_2018(this_image)
             #
             # Imsge process, now publish
             #
