@@ -161,6 +161,7 @@ class CameramanOrdersDict(vdata.Dict):
 
 class Cameraman(vmqtt.VnavsNode):
     __slots__ = (
+        "blob_specs",
         "burst_fps_ct",
         "burst_fps_rate",
         "burst_fps_start_time",
@@ -229,6 +230,11 @@ class Cameraman(vmqtt.VnavsNode):
                     async_delivery=True,
                     handler=self.on_mission_log_stop,
                 ),
+                vmqtt.Subscription(
+                    vconst.cameraman_blob_spec_topic,
+                    async_delivery=True,
+                    handler=self.on_cameraman_blob_spec,
+                ),
             ],
             single_threaded=False,
             broker_type="F",
@@ -280,6 +286,7 @@ class Cameraman(vmqtt.VnavsNode):
         self.loop_mode = "idle"  # idle, single, run, pause
         self.loop_format = "jpeg"  # jpeg, bgr, yuv, rgb
         self.loop_publish = "file"  # file, stream
+        self.blob_specs = {}
         self.mark_payload = None
         self.mark_hsv_spec = None
         self.mark_rect = None
@@ -308,6 +315,22 @@ class Cameraman(vmqtt.VnavsNode):
         print(payload)
         self.mark_rect = opticchiasm.right_from_payload(payload)
         self.mark_payload = payload
+
+    def on_cameraman_blob_spec(self, payload):
+        action = payload.get("action", "set")
+        if action == "set":
+            label = payload["label"]
+            hsv_spec = opticchiasm.hsv_spec_from_payload(payload)
+            if "y_min" in payload:
+                rect = opticchiasm.right_from_payload(payload)
+            else:
+                rect = None
+            self.blob_specs[label] = (hsv_spec, rect)
+        elif action == "clear":
+            label = payload["label"]
+            self.blob_specs.pop(label, None)
+        elif action == "clear_all":
+            self.blob_specs = {}
 
     def on_cameraman_orders(self, payload):
         # capture orders asynchronously so it can be used to tell the
@@ -573,6 +596,15 @@ class Cameraman(vmqtt.VnavsNode):
             annotated = None
             an_fn = None
             rect_list = self.maker_faire_2018(this_image)
+            blobs_result = {}
+            for label, (hsv_spec, rect) in self.blob_specs.items():
+                blob_list, _ = this_image.find_color_blobs(
+                    hsv_spec, rect=rect, minimum_blob_area=20
+                )
+                if blob_list:
+                    blobs_result[label] = (
+                        opticchiasm.list_of_rotated_rect_as_list_of_dicts(blob_list)
+                    )
             #
             # Imsge process, now publish
             #
@@ -589,6 +621,7 @@ class Cameraman(vmqtt.VnavsNode):
             payload["capture_publish"] = self.capture_publish
             payload["capture_fps"] = self.burst_fps_rate
             payload["center_line"] = rect_list
+            payload["blobs"] = blobs_result
             self.publish(vconst.cameraman_pic_ready_topic, payload)
             # print("P", self.mqttc.connected, payload)
             if self.camera.iso != self.iso:

@@ -712,6 +712,47 @@ class StepWait(MissionStep):
             return True
 
 
+class StepWaitForBlob(MissionStep):
+    __slots__ = (
+        "blob_label",
+        "branch_stage",
+        "min_area",
+        "start_time",
+        "timeout",
+    )
+
+    def __init__(self, stage):
+        super().__init__(stage)
+        self.blob_label = None
+        self.branch_stage = None
+        self.min_area = 0
+        self.start_time = None
+        self.timeout = None
+
+    def DoStageStepInit(self):
+        self.blob_label = self.parm_pos[0]
+        self.branch_stage = self.parm_kword.get("branch")
+        if "min_area" in self.parm_kword:
+            self.min_area = float(self.parm_kword["min_area"])
+        if "timeout" in self.parm_kword:
+            self.timeout = float(self.parm_kword["timeout"])
+        self.start_time = time.time()
+
+    def DoStageStepRun(self, loop_ct):
+        if self.timeout is not None:
+            if (time.time() - self.start_time) >= self.timeout:
+                return True
+        blobs = self.navigator.blobs.get(self.blob_label)
+        if blobs:
+            for blob in blobs:
+                if blob.width * blob.height >= self.min_area:
+                    if self.branch_stage is not None:
+                        self.mission.StartStage(self.branch_stage, None)
+                        self.mission.stage_step_ix = -1
+                    return True
+        return False
+
+
 class StepAccMotion(MissionStep):
     def __init__(self, stage):
         super().__init__(stage)
@@ -860,6 +901,7 @@ class Mission:
         MissionStepDef("message", sclass=StepMessage, defs=step_defs)
         MissionStepDef("sleep", sclass=StepSleep, defs=step_defs)
         MissionStepDef("wait", sclass=StepWait, defs=step_defs)
+        MissionStepDef("wait_for_blob", sclass=StepWaitForBlob, defs=step_defs)
 
         self.mission_script = script
         print("LOAD", self.mission_name)
@@ -1176,6 +1218,8 @@ class navigator(vmqtt.VnavsNode):
         self.imu_data = engineer_1.ImuDataRecord()
         self.imageFn = None
         self.imageRequested = None
+        self.blobs = {}
+        self.blobs_time = 0.0
         self.line_angle = None
         self.line_centers = []
         self.line_x = None
@@ -1281,6 +1325,13 @@ class navigator(vmqtt.VnavsNode):
                         math.atan2(adjacent_len, opposite_len)
                     )
                     # print("DoCameramanPicReady()", self.line_x, start_y, end_x, end_y, self.line_angle, "<<<")
+        if payload.get("blobs"):
+            self.blobs = {}
+            for label, blob_dicts in payload["blobs"].items():
+                self.blobs[label] = oc.list_of_rotated_rect_from_list_of_dicts(
+                    blob_dicts
+                )
+            self.blobs_time = time.time()
 
     def DoMissionLoad(self, payload):
         self.mission_load_payload = payload
