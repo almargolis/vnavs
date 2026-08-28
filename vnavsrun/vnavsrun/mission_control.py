@@ -3,10 +3,12 @@ import sys
 import os
 
 if (len(sys.argv) >= 2) and (sys.argv[1] == "gui"):
+    import tkinter
     from PIL import ImageTk, Image
     from eztk import eztk
     from eztk.eztk import SAME_ROW, SAME_COL, NEXT_ROW, NEXT_COL, COL_SPAN_ALL
 else:
+    tkinter = None
     ImageTk = None
     Image = None
     eztk = None
@@ -24,6 +26,13 @@ except ImportError:
     numpy = None
     image_analyzer = None
     oc = None
+
+try:
+    import pygame
+    _HAS_PYGAME = True
+except ImportError:
+    pygame = None
+    _HAS_PYGAME = False
 
 from vnavsrun import engineer_1
 from vnavsrun import helmsman
@@ -259,6 +268,60 @@ class MissionControl(vmqtt.VnavsNode):
             "Helmsman Derivative:"
         )
 
+        # --- Drive Tab ---
+        drive_tab = self.notebook.add_tab("Drive")
+
+        camera_frame = drive_tab.add_label_frame("Camera", colspan=COL_SPAN_ALL)
+        self.camera_iso_entry = camera_frame.add_entry_field(
+            "ISO", width=8, value="800"
+        )
+        self.camera_shutter_entry = camera_frame.add_entry_field(
+            "Shutter Speed", width=8, value="10000", row=SAME_ROW, col=NEXT_COL
+        )
+        camera_frame.add_button(
+            "Apply", command=self.on_camera_apply, row=SAME_ROW, col=NEXT_COL
+        )
+        self.max_width_entry = camera_frame.add_entry_field(
+            "Max Width", width=6, value="320"
+        )
+        self.max_height_entry = camera_frame.add_entry_field(
+            "Max Height", width=6, value="240", row=SAME_ROW, col=NEXT_COL
+        )
+        self.image_toggle_button = camera_frame.add_button(
+            "Disable Image", command=self.on_toggle_image, row=SAME_ROW, col=NEXT_COL
+        )
+        self.image_status_label = camera_frame.add_label(
+            "Image: ON", row=SAME_ROW, col=NEXT_COL
+        )
+
+        drive_frame = drive_tab.add_label_frame("Drive", colspan=COL_SPAN_ALL)
+        self.drive_speed_entry = drive_frame.add_entry_field(
+            "Speed (cm/s)", width=6, value="20"
+        )
+        self.drive_steer_entry = drive_frame.add_entry_field(
+            "Steer (rad/s)", width=6, value="0.3", row=SAME_ROW, col=NEXT_COL
+        )
+        btn_frame = drive_frame.add_frame(colspan=COL_SPAN_ALL)
+        btn_frame.add_button(
+            "Forward (W)", command=self.on_drive_forward, row=SAME_ROW, col=NEXT_COL
+        )
+        btn_frame.add_button(
+            "Left (A)", command=self.on_drive_left, row=SAME_ROW, col=NEXT_COL
+        )
+        btn_frame.add_button(
+            "STOP (Space)", command=self.on_drive_stop, row=SAME_ROW, col=NEXT_COL
+        )
+        btn_frame.add_button(
+            "Right (D)", command=self.on_drive_right, row=SAME_ROW, col=NEXT_COL
+        )
+        btn_frame.add_button(
+            "Back (S)", command=self.on_drive_back, row=SAME_ROW, col=NEXT_COL
+        )
+        self.drive_status = drive_frame.add_label_info("Drive Status:", value="stopped")
+        self.gamepad_label = drive_frame.add_label_info(
+            "Gamepad:", value="none", row=SAME_ROW, col=NEXT_COL
+        )
+
         self.message_tab = self.notebook.add_tab("Message")
         self.mt_file_name = self.message_tab.add_entry_field("Script File", width=25)
         self.message_tab.add_button(
@@ -298,6 +361,26 @@ class MissionControl(vmqtt.VnavsNode):
         self.replay_log_payloads = None
         self.replay_frames = -1  # ct of frames to replay, -1 is continuous
         self.update_local_mission_list()
+
+        # --- Drive and camera state ---
+        self.pic_continuous = True
+        self.last_pic_time = 0.0
+        self.keys_held = set()
+        self.drive_active = False
+        self.last_drive_publish_time = 0.0
+
+        # Gamepad state
+        self.gamepad = None
+        self.gamepad_active = False
+        self.gamepad_speed = 0.0
+        self.gamepad_steer = 0.0
+
+        # Keyboard bindings
+        self.tk.tkw.bind("<KeyPress>", self.on_key_press)
+        self.tk.tkw.bind("<KeyRelease>", self.on_key_release)
+
+        # Gamepad init
+        self._init_gamepad()
 
     def open_script_file(self):
         fn = self.message_tab.do_file_name_dialog(directory=self.scripts_dir)
@@ -442,23 +525,136 @@ class MissionControl(vmqtt.VnavsNode):
 
     def on_speed_stop(self):
         self.speed = 0.0
-        payload = {}
-        payload[helmsman.HELMSMAN_CM_PER_SEC] = self.speed
-        self.publish(vconst.helmsman_orders_topic, payload)
+        self._publish_drive_order(0.0, 0.0)
 
     def on_speed_plus(self):
         self.speed += 5.0
-        payload = {}
-        payload[helmsman.HELMSMAN_CM_PER_SEC] = self.speed
-        self.publish(vconst.helmsman_orders_topic, payload)
+        self._publish_drive_order(self.speed, 0.0)
 
     def on_speed_minus(self):
         self.speed -= 5.0
         if self.speed < 0:
             self.speed = 0.0
-        payload = {}
-        payload[helmsman.HELMSMAN_CM_PER_SEC] = self.speed
+        self._publish_drive_order(self.speed, 0.0)
+
+    #
+    # Camera settings
+    #
+
+    def on_camera_apply(self):
+        payload = {
+            "iso": self.camera_iso_entry.value(),
+            "shutter_speed": self.camera_shutter_entry.value(),
+        }
+        self.publish(vconst.cameraman_orders_topic, payload)
+
+    def on_toggle_image(self):
+        self.pic_continuous = not self.pic_continuous
+        label = "Image: ON" if self.pic_continuous else "Image: OFF"
+        self.image_status_label.replace_value(label)
+
+    #
+    # Drive controls
+    #
+
+    def _read_drive_params(self):
+        try:
+            speed = float(self.drive_speed_entry.value())
+        except (ValueError, TypeError):
+            speed = 20.0
+        try:
+            steer = float(self.drive_steer_entry.value())
+        except (ValueError, TypeError):
+            steer = 0.3
+        return speed, steer
+
+    def _publish_drive_order(self, speed, steer):
+        payload = {
+            helmsman.HELMSMAN_CM_PER_SEC: speed,
+            helmsman.HELMSMAN_RAD_PER_SEC: steer,
+            helmsman.HELMSMAN_TIMER: 3,
+        }
         self.publish(vconst.helmsman_orders_topic, payload)
+        self.drive_status.replace_value(
+            "spd={:.0f} str={:.2f}".format(speed, steer)
+        )
+
+    def on_drive_forward(self):
+        speed, steer = self._read_drive_params()
+        self._publish_drive_order(speed, 0.0)
+
+    def on_drive_back(self):
+        speed, steer = self._read_drive_params()
+        self._publish_drive_order(-speed, 0.0)
+
+    def on_drive_left(self):
+        speed, steer = self._read_drive_params()
+        self._publish_drive_order(speed, -steer)
+
+    def on_drive_right(self):
+        speed, steer = self._read_drive_params()
+        self._publish_drive_order(speed, steer)
+
+    def on_drive_stop(self):
+        self.keys_held.clear()
+        self.drive_active = False
+        self._publish_drive_order(0.0, 0.0)
+
+    #
+    # Keyboard drive
+    #
+
+    def on_key_press(self, event):
+        if tkinter is not None and isinstance(
+            event.widget, (tkinter.Entry, tkinter.Text)
+        ):
+            return
+        key = event.keysym.lower()
+        if key == "space":
+            self.on_drive_stop()
+            return
+        if key in ("w", "a", "s", "d"):
+            self.keys_held.add(key)
+            self.drive_active = True
+
+    def on_key_release(self, event):
+        key = event.keysym.lower()
+        self.keys_held.discard(key)
+        if not self.keys_held:
+            self.drive_active = False
+
+    #
+    # Gamepad
+    #
+
+    def _init_gamepad(self):
+        if not _HAS_PYGAME:
+            return
+        pygame.init()
+        pygame.joystick.init()
+        if pygame.joystick.get_count() == 0:
+            print("No gamepad found")
+            return
+        self.gamepad = pygame.joystick.Joystick(0)
+        self.gamepad.init()
+        self.gamepad_active = True
+        self.gamepad_label.replace_value(self.gamepad.get_name())
+        t = threading.Thread(target=self._gamepad_poll_loop, daemon=True)
+        t.start()
+
+    def _gamepad_poll_loop(self):
+        DEADZONE = 0.15
+        while self.gamepad_active:
+            pygame.event.pump()
+            raw_steer = self.gamepad.get_axis(0)  # left/right
+            raw_speed = self.gamepad.get_axis(1)  # up/down (inverted)
+            if abs(raw_steer) < DEADZONE:
+                raw_steer = 0.0
+            if abs(raw_speed) < DEADZONE:
+                raw_speed = 0.0
+            self.gamepad_speed = -raw_speed  # invert: up = forward
+            self.gamepad_steer = raw_steer
+            time.sleep(0.05)  # 20 Hz
 
     def on_stage_execute(self):
         this_stage = self.mission_stage_entry.value()
@@ -713,9 +909,34 @@ class MissionControl(vmqtt.VnavsNode):
                         else:
                             sub.handler_method(payload, replay=True)
                         break
-            elif self.pic_next_payload is not None:
-                self.configure_image_location(self.pic_next_payload, self.download_dir)
+            elif (
+                self.pic_next_payload is not None
+                and self.pic_continuous
+                and (time.time() - self.last_pic_time) > 1.0
+            ):
+                payload = self.pic_next_payload
                 self.pic_next_payload = None
+                self.pic_fn = payload["filename"]
+                self.pic_path = os.path.join(self.download_dir, self.pic_fn)
+                try:
+                    max_w = int(self.max_width_entry.value() or 0)
+                except (ValueError, TypeError):
+                    max_w = 0
+                try:
+                    max_h = int(self.max_height_entry.value() or 0)
+                except (ValueError, TypeError):
+                    max_h = 0
+                if self.file_client.get_file(
+                    "i",
+                    self.pic_fn,
+                    path=self.pic_path,
+                    timeout=5.0,
+                    max_width=max_w,
+                    max_height=max_h,
+                ):
+                    self.last_pic_time = time.time()
+                    self.pic_payload = payload
+                    self.process_image()
             if self.transfer_type != TRANSFER_TYPE_NONE:
                 if self.transfer_type == TRANSFER_TYPE_IMAGE:
                     transfer_fn = self.pic_fn
@@ -724,6 +945,37 @@ class MissionControl(vmqtt.VnavsNode):
                     self.transfer_type, transfer_fn, path=transfer_path
                 )
                 # print("client_loop_code() Start Transfer", self.transfer_type, transfer_fn)
+        # --- Continuous drive publishing ---
+        now = time.time()
+        if self.drive_active and self.keys_held:
+            if (now - self.last_drive_publish_time) > 0.5:
+                drive_speed, drive_steer_rate = self._read_drive_params()
+                speed = 0.0
+                steer = 0.0
+                if "w" in self.keys_held:
+                    speed = drive_speed
+                elif "s" in self.keys_held:
+                    speed = -drive_speed
+                if "a" in self.keys_held:
+                    steer = -drive_steer_rate
+                elif "d" in self.keys_held:
+                    steer = drive_steer_rate
+                if speed == 0.0 and steer != 0.0:
+                    speed = drive_speed * 0.5
+                self._publish_drive_order(speed, steer)
+                self.last_drive_publish_time = now
+        elif (
+            self.gamepad_active
+            and (abs(self.gamepad_speed) > 0 or abs(self.gamepad_steer) > 0)
+            and not self.keys_held
+        ):
+            if (now - self.last_drive_publish_time) > 0.1:
+                drive_speed, drive_steer_rate = self._read_drive_params()
+                speed = self.gamepad_speed * drive_speed
+                steer = self.gamepad_steer * drive_steer_rate
+                self._publish_drive_order(speed, steer)
+                self.last_drive_publish_time = now
+
         self.tk.update()
         # when tk is destroyed by close window, self.disconnect()	# stop mqtt client loop
 
