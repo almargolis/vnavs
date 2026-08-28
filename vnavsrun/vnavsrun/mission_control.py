@@ -920,7 +920,7 @@ def save_gps(waypoint):
             vmqtt.Publish(vconst.data_save_topic, payload)
 
 
-if __name__ == "__main__":
+def main():
     if sys.argv[1] == "gui":
         m = MissionControl()
         m.main_loop()
@@ -945,3 +945,7 @@ if __name__ == "__main__":
         save_local_data()
     elif sys.argv[1] == "show_local_data":
         show_local_data()
+
+
+if __name__ == "__main__":
+    main()

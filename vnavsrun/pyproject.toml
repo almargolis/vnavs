@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "vnavsrun"
 version = "0.0.1"
@@ -12,6 +16,33 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+    "ezcomms",
+    "cvpipeline",
+    "geopy>=2.0.0",
+    "pynmea2",
+    "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+gui = [
+    "eztk",
+    "Pillow>=8.0.0",
+]
+raspberry-pi = [
+    "picamera>=1.13",
+    "spidev>=3.5",
+]
+hardware = [
+    "pyfirmata>=1.1.0",
+    "sense_hat",
+]
+
+[project.scripts]
+mission_control = "vnavsrun.mission_control:main"
+
+[tool.setuptools.packages.find]
+include = ["vnavsrun*"]
 
 [project.urls]
 Homepage = "https://github.com/pypa/sampleproject"
