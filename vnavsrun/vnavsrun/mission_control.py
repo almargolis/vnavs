@@ -322,6 +322,8 @@ class MissionControl(vmqtt.VnavsNode):
             "Gamepad:", value="none", row=SAME_ROW, col=NEXT_COL
         )
 
+        self.drive_img = drive_tab.add_label_image()
+
         self.message_tab = self.notebook.add_tab("Message")
         self.mt_file_name = self.message_tab.add_entry_field("Script File", width=25)
         self.message_tab.add_button(
@@ -801,6 +803,7 @@ class MissionControl(vmqtt.VnavsNode):
             fwd = (ctr[0], ctr[1] - 10)
             cv2.line(im._im, ctr, fwd, oc.DRAW_BGR_WHITE, 5)
         self.f1_img1.update_image(source_im=im.im)
+        self.drive_img.update_image(source_im=im.im)
         self.f1_fname.replace_value(self.pic_fn)
         self.f1_fps.replace_value("{} fps".format(self.pic_payload["capture_fps"]))
 
