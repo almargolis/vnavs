@@ -105,7 +105,7 @@ class FastMqttServer(vcomm.SocketWrapperServer):
                         self.queue_message_z(
                             ["message", topic, repr(self.message_in_ct), payload],
                             s=this.s,
-                            QueueClass=queue_class,
+                            queue_class=queue_class,
                         )
             if topic == vconst.mission_init_topic:
                 payload_dict = json.loads(payload)

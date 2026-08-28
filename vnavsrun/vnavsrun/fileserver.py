@@ -9,7 +9,7 @@ class FileServer(vcomms.SocketWrapperServer):
 
     def __init__(self, verbose=True):
         super().__init__(
-            BufferLen=vcomms.TCPIP_XFR_BUFLEN, ini_section="FileServer", verbose=verbose
+            buffer_len=vcomms.TCPIP_XFR_BUFLEN, ini_section="FileServer", verbose=verbose
         )
         self.file_dirs = {}
         specs = self.config.items("FileServer")
@@ -34,7 +34,7 @@ class FileServer(vcomms.SocketWrapperServer):
         except IOError as e:
             # IOError: [Errno 2] No such file or directory: '/bot1/images/R20170513114208_0_11202.jpeg'
             if e.errno == 2:
-                self.queue_message("0\x00", s=s)
+                self.queue_message_str("0\x00", s=s)
                 return
             else:
                 raise
@@ -46,7 +46,7 @@ class FileServer(vcomms.SocketWrapperServer):
                 rec = (
                     repr(len(c)).encode() + "\x00".encode() + rec
                 )  # add file size to first block
-            self.queue_message(rec, s=s)
+            self.queue_message_str(rec, s=s)
             ix += self.buffer_len
 
 
