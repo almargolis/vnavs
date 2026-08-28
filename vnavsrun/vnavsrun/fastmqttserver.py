@@ -101,7 +101,7 @@ class FastMqttServer(vcomm.SocketWrapperServer):
                         if this.mode == vmqtt.SUBSCRIPTION_MODE_LATEST:
                             queue_class = vcomm.QueueOne
                         else:
-                            queue_class = queue.Queue
+                            queue_class = vcomm.QueueBounded
                         self.queue_message_z(
                             ["message", topic, repr(self.message_in_ct), payload],
                             s=this.s,

@@ -1,4 +1,5 @@
 import math
+import time
 
 from vnavsrun import helmsman
 
@@ -230,3 +231,89 @@ def test_ackerman_default_angle_rate():
     }
     h.InterpretOrdersAckerman(payload)
     assert h._last_angle_rate == 1.0
+
+
+# --- Stale / future message rejection in InterpretOrders ---
+
+
+def test_interpret_orders_stale_rejected(capsys):
+    """Stale _sendTime causes InterpretOrders to return early."""
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.deadman_time = 0
+    payload = {
+        helmsman.HELMSMAN_CM_PER_SEC: "10",
+        helmsman.HELMSMAN_RAD_PER_SEC: "1.0",
+        "_sender": "test",
+        "_sendTime": time.time() - 10.0,
+    }
+    h.InterpretOrders(payload)
+    assert h._last_speed is None  # speed never set
+    assert h.deadman_time == 0  # deadman NOT extended
+    assert "HELMSMAN REJECT" in capsys.readouterr().out
+
+
+def test_interpret_orders_future_rejected(capsys):
+    """Future _sendTime causes InterpretOrders to return early."""
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.deadman_time = 0
+    payload = {
+        helmsman.HELMSMAN_CM_PER_SEC: "10",
+        "_sender": "test",
+        "_sendTime": time.time() + 10.0,
+    }
+    h.InterpretOrders(payload)
+    assert h._last_speed is None
+    assert h.deadman_time == 0
+    assert "HELMSMAN REJECT" in capsys.readouterr().out
+
+
+def test_interpret_orders_fresh_accepted():
+    """Fresh _sendTime allows normal InterpretOrders processing."""
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.deadman_time = 0
+    payload = {
+        helmsman.HELMSMAN_CM_PER_SEC: "10",
+        helmsman.HELMSMAN_RAD_PER_SEC: "1.5",
+        "_sender": "test",
+        "_sendTime": time.time() - 1.0,
+    }
+    h.InterpretOrders(payload)
+    assert h._last_speed == 10.0
+    assert h._last_steering == 1.5
+    assert h.deadman_time > 0
+
+
+def test_interpret_orders_no_sendtime_backward_compat():
+    """Orders without _sendTime are processed normally (backward compat)."""
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.deadman_time = 0
+    payload = {
+        helmsman.HELMSMAN_CM_PER_SEC: "20",
+        helmsman.HELMSMAN_RAD_PER_SEC: "0.5",
+        "_sender": "test",
+    }
+    h.InterpretOrders(payload)
+    assert h._last_speed == 20.0
+    assert h.deadman_time > 0
+
+
+def test_deadman_fires_after_no_fresh_orders():
+    """Deadman timer fires estop when no fresh orders arrive."""
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    estop_called = []
+    h.vehicle_estop = lambda: estop_called.append(True)
+    h.stats = type("C", (), {"Count": lambda self, n: None})()
+    h.mqttc = type("M", (), {"connected": True})()
+    h.orders_q = __import__("queue").Queue(10)
+
+    # Set deadman in the past
+    h.deadman_time = time.time() - 1.0
+    h.state = helmsman.STATE_DEADMAN
+    h.client_loop_code()
+    assert len(estop_called) == 1
+    assert h.state == helmsman.STATE_TIMED_OUT

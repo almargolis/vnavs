@@ -1191,29 +1191,45 @@ class navigator(vmqtt.VnavsNode):
         super().__init__(
             subscriptions=[
                 vmqtt.Subscription(
-                    vconst.cameraman_pic_ready_topic, handler=self.DoCameramanPicReady
+                    vconst.cameraman_pic_ready_topic,
+                    handler=self.DoCameramanPicReady,
                 ),
                 vmqtt.Subscription(
-                    vconst.engineer_1_gps_topic, handler=self.DoEngineer1Gps
+                    vconst.engineer_1_gps_topic,
+                    handler=self.DoEngineer1Gps,
+                    stale_threshold=10.0,
                 ),
                 vmqtt.Subscription(
-                    vconst.engineer_1_imu_topic, handler=self.DoEngineer1Imu
+                    vconst.engineer_1_imu_topic,
+                    handler=self.DoEngineer1Imu,
                 ),
                 vmqtt.Subscription(
-                    vconst.mission_load_topic, handler=self.DoMissionLoad
+                    vconst.mission_load_topic,
+                    handler=self.DoMissionLoad,
+                    stale_threshold=None,
                 ),
                 vmqtt.Subscription(
-                    vconst.mission_cancel_topic, handler=self.DoMissionCancel
+                    vconst.mission_cancel_topic,
+                    handler=self.DoMissionCancel,
+                    stale_threshold=None,
                 ),
                 vmqtt.Subscription(
-                    vconst.mission_sync_event_topic, handler=self.DoMissionSyncEvent
+                    vconst.mission_sync_event_topic,
+                    handler=self.DoMissionSyncEvent,
+                    stale_threshold=None,
                 ),
                 # vmqtt.Subscription(vconst.navigator_service_topic, handler=self.DoNavigatorService),
                 vmqtt.Subscription(
-                    vconst.data_save_topic, async_delivery=True, handler=self.OnDataSave
+                    vconst.data_save_topic,
+                    async_delivery=True,
+                    handler=self.OnDataSave,
+                    stale_threshold=None,
                 ),
                 vmqtt.Subscription(
-                    vconst.data_get_topic, async_delivery=True, handler=self.OnDataGet
+                    vconst.data_get_topic,
+                    async_delivery=True,
+                    handler=self.OnDataGet,
+                    stale_threshold=None,
                 ),
             ],
             single_threaded=False,

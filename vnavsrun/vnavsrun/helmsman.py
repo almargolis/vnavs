@@ -43,21 +43,25 @@ class Helmsman(vmqtt.VnavsNode):
                     vconst.helmsman_orders_topic,
                     async_delivery=True,
                     handler=self.OnHelmsmanOrders,
+                    stale_threshold=5.0,
                 ),
                 vmqtt.Subscription(
                     vconst.helmsman_controls_topic,
                     async_delivery=True,
                     handler=self.OnHelmsmanControls,
+                    stale_threshold=10.0,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_log_start_topic,
                     async_delivery=True,
                     handler=self.OnMissionLogStart,
+                    stale_threshold=None,
                 ),
                 vmqtt.Subscription(
                     vconst.mission_log_stop_topic,
                     async_delivery=True,
                     handler=self.OnMissionLogStop,
+                    stale_threshold=None,
                 ),
             ],
             single_threaded=False,
@@ -202,6 +206,14 @@ class Helmsman(vmqtt.VnavsNode):
             self._recompute_differential_from_ackerman()
 
     def InterpretOrders(self, payload):
+        if "_sendTime" in payload:
+            send_age = time.time() - float(payload["_sendTime"])
+            if send_age > 5.0 or send_age < -2.0:
+                print(
+                    "HELMSMAN REJECT stale/future order age={:.1f}s"
+                    .format(send_age)
+                )
+                return
         if HELMSMAN_CM_PER_SEC in payload:
             self.InterpretOrdersSpeed(payload)
         msg_steering_type = payload.get(
