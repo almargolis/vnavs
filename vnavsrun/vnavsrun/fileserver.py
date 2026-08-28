@@ -1,7 +1,12 @@
 import os
 import sys
 
+import cv2
+import numpy as np
+
 from ezcomms import vnavs_comms as vcomms
+
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
 class FileServer(vcomms.SocketWrapperServer):
@@ -21,6 +26,32 @@ class FileServer(vcomms.SocketWrapperServer):
                 path = os.path.expanduser(value)
                 self.file_dirs[code] = path
 
+    @staticmethod
+    def _maybe_resize(file_bytes, filename, max_width, max_height):
+        if max_width == 0 and max_height == 0:
+            return file_bytes
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in _IMAGE_EXTENSIONS:
+            return file_bytes
+        arr = np.frombuffer(file_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            return file_bytes
+        h, w = img.shape[:2]
+        scales = []
+        if max_width > 0:
+            scales.append(max_width / w)
+        if max_height > 0:
+            scales.append(max_height / h)
+        scale = min(scales)
+        if scale >= 1.0:
+            return file_bytes
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        _, encoded = cv2.imencode(ext, img)
+        return encoded.tobytes()
+
     def process_message(self, s, message):
         dir_code = message[0]
         source_dir = self.file_dirs[dir_code]
@@ -38,6 +69,10 @@ class FileServer(vcomms.SocketWrapperServer):
                 return
             else:
                 raise
+        if len(message) >= 4:
+            max_w = int(message[2])
+            max_h = int(message[3])
+            c = self._maybe_resize(c, fn, max_w, max_h)
         print("SEND FILE", fp, len(c))
         ix = 0
         while ix < len(c):
