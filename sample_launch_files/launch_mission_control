@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# Start the mission control GUI (load / run missions, monitor nodes). Runs in
+# THIS terminal by default; add -d to detach into a screen session
+# "mission_control". Needs an X display and the broker (launch_fastmqtt).
+# Usually run on the laptop rather than the Pi. Not part of launch_all /
+# stop_all. See _launch_common.sh for details.
+#
+SESSION=mission_control
+NODE_CMD="python -m vnavsrun.mission_control gui"
+LAUNCH_DEFAULT=foreground
+# shellcheck source=_launch_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_launch_common.sh"

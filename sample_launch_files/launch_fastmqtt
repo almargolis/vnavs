@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#
+# Start the VNAVS fast-MQTT broker in a detached screen session "fastmqtt"
+# (add -f to run it in this terminal instead). Start this one first.
+# See _launch_common.sh for how it works.
+#
+SESSION=fastmqtt
+NODE_CMD="python -m vnavsrun.fastmqttserver m"
+# shellcheck source=_launch_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_launch_common.sh"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#
+# Start the VNAVS navigator (steering logic / missions) in a detached screen
+# session "navigator" (add -f to run it in this terminal instead). Needs the
+# broker (launch_fastmqtt) running first. See _launch_common.sh for details.
+#
+SESSION=navigator
+NODE_CMD="python -m vnavsrun.navigator node"
+# shellcheck source=_launch_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_launch_common.sh"

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# Start the VNAVS helmsman (PCA9685 steering servo + ESC) in a detached screen
+# session "helmsman" (add -f to run it in this terminal instead). Needs the
+# broker (launch_fastmqtt) running first. See _launch_common.sh for details.
+#
+# Safety: the helmsman drives the ESC. Keep the rover on blocks until the
+# steering sign and PWM calibration in vnavs.ini [Helmsman] are confirmed.
+#
+SESSION=helmsman
+NODE_CMD="python -m vnavsrun.helmsman_donkeycar node"
+# shellcheck source=_launch_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_launch_common.sh"

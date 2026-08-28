@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#
+# Start the VNAVS file-transfer server in a detached screen session
+# "fileserver" (add -f to run it in this terminal instead). Serves the image
+# and log dirs from [FileServer] in vnavs.ini on the file-transfer port
+# (4010); independent of the broker. See _launch_common.sh for details.
+#
+SESSION=fileserver
+NODE_CMD="python -m vnavsrun.fileserver f"
+# shellcheck source=_launch_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_launch_common.sh"

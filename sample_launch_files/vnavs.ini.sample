@@ -1,0 +1,52 @@
+[Cameraman]
+imagedir = /exports/vnavs_images
+camera = Picamera2
+
+[FileClient]
+host = 127.0.0.1
+port = 4010
+downloaddir = ~/vnavs/download
+
+[FileServer]
+host = 
+port = 4010
+xi = /exports/vnavs_images
+xl = /exports/vnavs_logs
+
+[MqttBroker]
+host = 127.0.0.1
+port = 1883
+
+[MqttFast]
+host = 127.0.0.1
+port = 4000
+
+[MqttFastServer]
+host = 
+port = 4000
+archivedir = /exports/vnavs_logs
+
+[MissionControl]
+scripts = ~/vnavs/scripts
+
+[Navigator]
+missiondir = ~/vnavs/missions
+speed_method = automatic
+
+[Helmsman]
+type = donkeycar
+i2cbus = 1
+i2caddress = 0x40
+pwmfrequencyhz = 60
+steeringchannel = 1
+throttlechannel = 0
+steeringleftpwm = 460
+steeringcenterpwm = 375
+steeringrightpwm = 290
+throttleforwardpwm = 500
+throttlestoppedpwm = 370
+throttlereversepwm = 220
+steeringgain = 0.012
+maxsteeringradians = 0.6
+maxspeedcmpersec = 200
+

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#
+# Start the VNAVS cameraman (camera + vision pipeline) in a detached screen
+# session "cameraman" (add -f to run it in this terminal instead). Needs the
+# broker (launch_fastmqtt) running first. See _launch_common.sh for details.
+#
+SESSION=cameraman
+NODE_CMD="python -m vnavsrun.cameraman node"
+# shellcheck source=_launch_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_launch_common.sh"

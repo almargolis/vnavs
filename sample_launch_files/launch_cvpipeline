@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# Start the cvpipeline GUI editor (build / tune vision filter pipelines,
+# save/load .cvp scripts). Runs in THIS terminal by default; add -d to
+# detach into a screen session "cvpipeline". Needs an X display; needs the
+# broker (launch_fastmqtt) only for the live-camera source. Not part of
+# launch_all / stop_all. See _launch_common.sh for details.
+#
+SESSION=cvpipeline
+NODE_CMD="python -m cvpipeline.cvpipeline"
+LAUNCH_DEFAULT=foreground
+# shellcheck source=_launch_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_launch_common.sh"

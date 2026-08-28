@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#
+# Start every VNAVS node for this robot, in order, each in its own screen
+# session. Safe to re-run: nodes already running are left alone.
+#
+#   screen -ls                     see what is running
+#   screen -r <name>               attach to a node (Ctrl-A D to detach)
+#   ./stop_all                     stop everything
+#
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+"$HERE/launch_fastmqtt"
+"$HERE/launch_fileserver"
+sleep 2                       # let the broker bind before clients connect
+"$HERE/launch_cameraman"
+"$HERE/launch_navigator"
+"$HERE/launch_helmsman"
+
+echo
+screen -ls || true

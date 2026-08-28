@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#
+# Stop every VNAVS node screen session started by the launch_* scripts.
+#
+set -uo pipefail
+
+for SESSION in helmsman navigator cameraman fileserver fastmqtt; do
+    if screen -ls 2>/dev/null | grep -qE "[.]${SESSION}[[:space:]]"; then
+        screen -S "$SESSION" -X quit && echo "stopped '$SESSION'"
+    else
+        echo "'$SESSION' not running"
+    fi
+    rm -f "${TMPDIR:-/tmp}/vnavs-keepopen.$SESSION.rc"
+done
