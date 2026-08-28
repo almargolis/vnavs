@@ -1,4 +1,5 @@
 import base64
+import configparser
 import io
 import json
 import os
@@ -25,6 +26,18 @@ PICAMERA2_FORMATS = {
     "rgb": "RGB888",
     "yuv": "YUV420",
 }
+
+
+def _ini_bool(config, section, option, default=False):
+    """Read a 0/1/true/false ini value, tolerating a missing section/option."""
+    try:
+        return config.getboolean(section, option)
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        return default
+    except ValueError:
+        print("Cameraman: [{}] {} is not boolean, using {}".format(
+            section, option, default))
+        return default
 
 
 class CaptureBuffer:
@@ -59,20 +72,24 @@ class Picamera2Wrapper:
         "vflip",
     )
 
-    def __init__(self, resolution=(320, 240)):
+    def __init__(self, resolution=(320, 240), hflip=False, vflip=False, controls=None):
         from picamera2 import Picamera2
         from libcamera import Transform
 
         self._cam = Picamera2()
         self.resolution = resolution
-        self.vflip = False
-        self.hflip = False
+        self.vflip = bool(vflip)
+        self.hflip = bool(hflip)
         self._iso = 100
         self._shutter_speed = 0
-        config = self._cam.create_video_configuration(
-            main={"size": resolution, "format": "BGR888"},
-            transform=Transform(hflip=self.hflip, vflip=self.vflip),
-        )
+        config_opts = {
+            "main": {"size": resolution, "format": "BGR888"},
+            "transform": Transform(hflip=self.hflip, vflip=self.vflip),
+        }
+        if controls:
+            # Any libcamera control name -> value, straight from vnavs.ini.
+            config_opts["controls"] = dict(controls)
+        config = self._cam.create_video_configuration(**config_opts)
         self._cam.configure(config)
         self._cam.start()
 
@@ -254,9 +271,15 @@ class Cameraman(vmqtt.VnavsNode):
         self.camera_resolution = (160, 120)
         self.camera_resolution = (320, 240)
         self.camera_type = self.config.get("Cameraman", "Camera")
+        hflip, vflip, camera_controls = self.read_camera_options()
         if self.camera_type == "Picamera2":
             try:
-                self.camera = Picamera2Wrapper(resolution=self.camera_resolution)
+                self.camera = Picamera2Wrapper(
+                    resolution=self.camera_resolution,
+                    hflip=hflip,
+                    vflip=vflip,
+                    controls=camera_controls,
+                )
             except RuntimeError as e:
                 print(
                     "Camera error:", e,
@@ -265,10 +288,8 @@ class Cameraman(vmqtt.VnavsNode):
                 sys.exit(1)
         else:
             self.camera = MacbookCamera(resolution=self.camera_resolution)
-        self.camera.vflip = True
-        self.camera.vflip = False
-        self.camera.hflip = True
-        self.camera.hflip = False
+            self.camera.hflip = hflip
+            self.camera.vflip = vflip
         self.camera.iso = self.iso
         #
         # capture format/publish are specs for how to save the captured image
@@ -298,6 +319,35 @@ class Cameraman(vmqtt.VnavsNode):
         time.sleep(2)  # camera setling time, needed?
         self.last_fn = ""
         self.last_format = ""
+
+    def read_camera_options(self):
+        """Camera orientation and libcamera controls from [Cameraman] in vnavs.ini.
+
+        HFlip / VFlip (0 or 1) drive the libcamera Transform -- set both for a
+        camera mounted upside down. Controls is a JSON object mapping any
+        libcamera control name to a value, passed straight through to
+        picamera2's create_video_configuration(), e.g.
+
+            [Cameraman]
+            HFlip = 1
+            VFlip = 1
+            Controls = {"Brightness": 0.1, "Sharpness": 2.0, "FrameRate": 40}
+        """
+        hflip = _ini_bool(self.config, "Cameraman", "HFlip", False)
+        vflip = _ini_bool(self.config, "Cameraman", "VFlip", False)
+        controls = {}
+        try:
+            raw = self.config.get("Cameraman", "Controls").strip()
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            raw = ""
+        if raw:
+            try:
+                controls = json.loads(raw)
+            except ValueError as e:
+                print("Cameraman: ignoring invalid [Cameraman] Controls JSON:", e)
+        print("Cameraman options: hflip={} vflip={} controls={}".format(
+            hflip, vflip, controls))
+        return hflip, vflip, controls
 
     def on_cameraman_process(self, payload):
         if payload["Type"] == "clear":

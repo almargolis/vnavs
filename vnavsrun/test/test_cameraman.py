@@ -1,3 +1,5 @@
+import configparser
+
 import cv2
 import numpy as np
 from cvpipeline import opticchiasm as oc
@@ -9,6 +11,35 @@ def _make_cameraman():
     cam = object.__new__(cameraman.Cameraman)
     cam.blob_specs = {}
     return cam
+
+
+def _cameraman_with_config(cameraman_section):
+    cam = object.__new__(cameraman.Cameraman)
+    cam.config = configparser.ConfigParser()
+    cam.config.read_dict({"Cameraman": cameraman_section})
+    return cam
+
+
+def test_read_camera_options_flips_and_controls():
+    cam = _cameraman_with_config(
+        {"HFlip": "1", "VFlip": "1", "Controls": '{"Sharpness": 2.0, "FrameRate": 40}'}
+    )
+    hflip, vflip, controls = cam.read_camera_options()
+    assert hflip is True
+    assert vflip is True
+    assert controls == {"Sharpness": 2.0, "FrameRate": 40}
+
+
+def test_read_camera_options_defaults_when_absent():
+    cam = object.__new__(cameraman.Cameraman)
+    cam.config = configparser.ConfigParser()  # no [Cameraman] section
+    assert cam.read_camera_options() == (False, False, {})
+
+
+def test_read_camera_options_bad_controls_json_ignored():
+    cam = _cameraman_with_config({"VFlip": "1", "Controls": "{not json}"})
+    hflip, vflip, controls = cam.read_camera_options()
+    assert (hflip, vflip, controls) == (False, True, {})
 
 
 def test_on_cameraman_blob_spec_set():

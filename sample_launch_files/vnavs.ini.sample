@@ -1,6 +1,13 @@
 [Cameraman]
 imagedir = /exports/vnavs_images
 camera = Picamera2
+# Image orientation (libcamera Transform). Set both to 1 for a camera
+# mounted upside down.
+hflip = 0
+vflip = 0
+# Any libcamera controls as a JSON object, passed to picamera2, e.g.
+#   controls = {"Brightness": 0.1, "Sharpness": 2.0, "FrameRate": 40}
+controls =
 
 [FileClient]
 host = 127.0.0.1
