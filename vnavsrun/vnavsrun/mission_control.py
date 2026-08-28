@@ -271,7 +271,7 @@ class MissionControl(vmqtt.VnavsNode):
         # --- Drive Tab ---
         drive_tab = self.notebook.add_tab("Drive")
 
-        camera_frame = drive_tab.add_label_frame("Camera", colspan=COL_SPAN_ALL)
+        camera_frame = drive_tab.add_label_frame("Camera")
         self.camera_iso_entry = camera_frame.add_entry_field(
             "ISO", width=8, value="800"
         )
@@ -294,7 +294,7 @@ class MissionControl(vmqtt.VnavsNode):
             "Image: ON", row=SAME_ROW, col=NEXT_COL
         )
 
-        drive_frame = drive_tab.add_label_frame("Drive", colspan=COL_SPAN_ALL)
+        drive_frame = drive_tab.add_label_frame("Drive")
         self.drive_speed_entry = drive_frame.add_entry_field(
             "Speed (cm/s)", width=6, value="20"
         )
