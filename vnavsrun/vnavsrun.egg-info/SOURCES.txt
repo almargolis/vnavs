@@ -15,6 +15,7 @@ vnavsrun/fileserver.py
 vnavsrun/helmsman.py
 vnavsrun/helmsman_create.py
 vnavsrun/helmsman_firmata.py
+vnavsrun/mark.py
 vnavsrun/mission_control.py
 vnavsrun/navigator.py
 vnavsrun/node_tester.py

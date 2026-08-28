@@ -7,6 +7,7 @@ except ImportError:
     np = None
     oc = None
 
+import configparser
 import math
 import os
 from geopy.distance import great_circle
@@ -290,9 +291,10 @@ class MissionStep:
         self.parm_mission = parm_mission
 
     def PublishNavigation(self, timer=6):
-        # mission_specs = self.navigator.persistent_data.Get('mission_specs', key_group='/')
-        # speed_method = mission_specs.get('speed_method', 'automatic')
-        speed_method = "manual"
+        # "automatic" (default): publish the mission step's commanded speed.
+        # "manual": publish steering only, leave throttle to a manual/RC source.
+        # Set via [Navigator] speed_method in vnavs.ini.
+        speed_method = getattr(self.navigator, "speed_method", "automatic")
 
         payload = {}
         payload[helmsman.HELMSMAN_RAD_PER_SEC] = self.nav.steering
@@ -802,9 +804,17 @@ class StepMessage(MissionStep):
 
 
 class StepSleep(MissionStep):
+    __slots__ = ("interval",)
+
     def __init__(self, stage):
         super().__init__(stage)
-        self.interval = interval
+        self.interval = 1.0
+
+    def DoStageStepInit(self):
+        if "seconds" in self.parm_kword:
+            self.interval = float(self.parm_kword["seconds"])
+        elif self.parm_pos and self.parm_pos[0]:
+            self.interval = float(self.parm_pos[0])
 
     def DoStageStepRun(self, loop_ct):
         time.sleep(float(self.interval))
@@ -1214,6 +1224,10 @@ class navigator(vmqtt.VnavsNode):
         self.missionDir = self.get_ini_directory(
             "Navigator", "MissionDir", IsWriteable=True
         )
+        try:
+            self.speed_method = self.config.get("Navigator", "speed_method").strip()
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            self.speed_method = "automatic"
         self.gps_data = engineer_1.GpsDataRecord()
         self.imu_data = engineer_1.ImuDataRecord()
         self.imageFn = None
