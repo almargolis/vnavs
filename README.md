@@ -67,6 +67,7 @@ VNAVS is organized as four packages:
   - `fastmqttserver.py`: High-performance message broker with archiving
   - `navigator.py`: GPS waypoint navigation with PID steering control
   - `helmsman.py`: Motor and steering control with dual steering support (differential and Ackerman)
+  - `helmsman_donkeycar.py`: PCA9685 servo + ESC helmsman for a DonkeyCar-style rover — see [CALIBRATION.md](CALIBRATION.md)
   - `cameraman.py`: Multi-camera image capture and streaming
   - `engineer_1.py`: Sensor data collection and processing
   - `mission_control.py`: Coordination and mission sequencing

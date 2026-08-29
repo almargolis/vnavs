@@ -41,6 +41,8 @@ activate the venv, start the node). Each script also accepts `-f`
   `_launch_common.sh`.
 - **helmsman**: `launch_helmsman` runs the DonkeyCar/PCA9685 driver. Swap
   `NODE_CMD` for `vnavsrun.helmsman_firmata` (Ackerman) or another helmsman.
+  Calibrate the `[Helmsman]` PWM values before the first powered test --
+  see [../CALIBRATION.md](../CALIBRATION.md).
 - **tmux instead of screen**: replace the `screen -h 20000 -dmS` line in
   `_launch_common.sh` with `tmux new -d -s`.
 - Detached nodes run inside a shell that stays open after the node exits, so

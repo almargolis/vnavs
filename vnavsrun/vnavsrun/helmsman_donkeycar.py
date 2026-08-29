@@ -4,7 +4,8 @@ The controller board (silkscreen "DuinoFun") is a PCA9685 16-channel PWM
 driver on the Raspberry Pi I2C bus: one channel feeds the steering servo,
 one feeds the ESC / throttle. All calibration values live in the
 ``[Helmsman]`` section of ``vnavs.ini`` (loaded from the launch directory)
-so a robot can be tuned on-site without code changes.
+so a robot can be tuned on-site without code changes. See ``CALIBRATION.md``
+at the repo root for the bench procedure.
 
 Steering type is reported as differential so that the navigator's
 ``follow_line_pid`` / ``follow_line_trace`` output (published in the

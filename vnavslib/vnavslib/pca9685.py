@@ -257,6 +257,12 @@ def _selftest(argv=None):
     parser.add_argument("--step-us", type=int, default=25)
     parser.add_argument("--dwell", type=float, default=0.20,
                         help="seconds between steps (default 0.20)")
+    parser.add_argument(
+        "--hold", type=int, metavar="US", default=None,
+        help="calibration mode: hold the channel(s) at this fixed pulse width "
+        "(microseconds) and wait, instead of sweeping. Repeat with different "
+        "values to find servo/ESC endpoints; the count written is printed.",
+    )
     args = parser.parse_args(argv)
 
     err = _probe(args.bus, args.address)
@@ -266,6 +272,10 @@ def _selftest(argv=None):
     print(f"PCA9685 found at 0x{args.address:02x} on I2C bus {args.bus}.")
 
     channels = [int(c) for c in args.channels.split(",") if c.strip() != ""]
+
+    if args.hold is not None:
+        _hold(args, channels)
+        return
 
     prompt = (
         "\n*** Make sure the rover is on blocks / wheels off the ground. ***\n"
@@ -295,6 +305,29 @@ def _selftest(argv=None):
         print("\nself-test complete -- all channels OFF.")
     except KeyboardInterrupt:
         print("\n!! ABORTED by keypress -- all channels OFF.")
+    finally:
+        pca.close()
+
+
+def _hold(args, channels):
+    """Calibration helper: drive channel(s) to one fixed pulse and wait, so
+    you can watch the servo/ESC and read off the endpoint. Prints the 12-bit
+    count actually written (this is what goes in vnavs.ini [Helmsman])."""
+    period_us = 1_000_000.0 / args.freq
+    count = int(round(PWM_STEPS * args.hold / period_us))
+    print(
+        "*** wheels off the ground -- ch 0 is usually the ESC ***\n"
+        f"holding channels {channels} at {args.hold} us "
+        f"(count {count} @ {args.freq:g} Hz). Ctrl-C to stop (channels go OFF)."
+    )
+    pca = Pca9685(bus=args.bus, address=args.address, freq_hz=args.freq)
+    try:
+        for ch in channels:
+            pca.set_pulse_us(ch, args.hold)
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\nstopped -- all channels OFF.")
     finally:
         pca.close()
 
