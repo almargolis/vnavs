@@ -1,5 +1,7 @@
 import math
+import os
 import queue
+import signal
 import sys
 import time
 
@@ -37,6 +39,7 @@ HELMSMAN_ANGLE_RATE = "angle_rate"
 class Helmsman(vmqtt.VnavsNode):
     def __init__(self):
         self.orders_q = queue.Queue(10)
+        self._shutdown_done = False
         super().__init__(
             subscriptions=[
                 vmqtt.Subscription(
@@ -80,7 +83,18 @@ class Helmsman(vmqtt.VnavsNode):
         self.wheelbase = 0.0  # cm, subclass sets if differential
         self.current_cm_per_sec = 0.0  # cached for ackerman->differential recomputation
         self.current_ackerman_angle = None  # cached angle (radians), None if not active
+        self._log_state = self.state  # last state we logged a transition for
+        self._log_connected = None  # last broker-connection state we logged
+        self._last_order_log = 0.0
         self.vehicle_init()
+
+    def _log(self, *parts):
+        print("HELMSMAN -", *parts)
+
+    def _log_state_change(self):
+        if self.state != self._log_state:
+            self._log("state", self._log_state, "->", self.state)
+            self._log_state = self.state
 
     def vehicle_init(self):
         """Initialize hardware. Must set self.speed_max and self.steering_max."""
@@ -142,13 +156,16 @@ class Helmsman(vmqtt.VnavsNode):
         if HELMSMAN_STATE in payload:
             new_state = payload[HELMSMAN_STATE]
             if new_state == STATE_ESTOPPED:
+                self._log("E-STOP order from", payload.get("_sender", "?"))
                 self.vehicle_estop()
                 self.current_cm_per_sec = 0.0
                 self.current_ackerman_angle = None
                 self.state = STATE_ESTOPPED
+                self._log_state_change()
                 self.ClearOrdersQueue()
             if new_state in STATES_MOVING:
                 self.state = new_state
+                self._log_state_change()
         if self.state == STATE_ESTOPPED:
             return
         try:
@@ -239,18 +256,37 @@ class Helmsman(vmqtt.VnavsNode):
         self.deadman_time = time.time() + timer
         if self.state == STATE_TIMED_OUT:
             self.state = STATE_DEADMAN
+            self._log_state_change()
+        now = time.time()
+        if now - self._last_order_log > 1.0:
+            self._last_order_log = now
+            self._log(
+                "order from {} speed={} steer={} deadman={}s".format(
+                    payload.get("_sender", "?"),
+                    payload.get(HELMSMAN_CM_PER_SEC),
+                    payload.get(HELMSMAN_RAD_PER_SEC, payload.get(HELMSMAN_ANGLE)),
+                    timer,
+                )
+            )
 
     def client_loop_code(self):
         if not self.mqttc.connected:
+            if self._log_connected is not False:
+                self._log("broker connection lost -- holding vehicle stopped")
+                self._log_connected = False
             self.vehicle_estop()
             self.current_cm_per_sec = 0.0
             self.current_ackerman_angle = None
             return
+        if self._log_connected is not True:
+            self._log("broker connected")
+            self._log_connected = True
         if (self.state == STATE_DEADMAN) and (time.time() > self.deadman_time):
             self.vehicle_estop()
             self.current_cm_per_sec = 0.0
             self.current_ackerman_angle = None
             self.state = STATE_TIMED_OUT
+            self._log_state_change()
             self.stats.Count("timeouts")
             return
         if self.state == STATE_ESTOPPED:
@@ -269,4 +305,43 @@ class Helmsman(vmqtt.VnavsNode):
             self.vehicle_tick()
 
     def cleanup_loop(self):
-        self.vehicle_cleanup()
+        # Called by VnavsNode.main_loop on KeyboardInterrupt / fatal exception.
+        self.safe_shutdown()
+
+    def safe_shutdown(self):
+        """Stop the motors and release the hardware, exactly once, on any exit
+        path. Without this a killed helmsman leaves the last PWM latched in the
+        PWM chip / ESC and the vehicle keeps driving (only power-cycling the
+        battery stops it)."""
+        if self._shutdown_done:
+            return
+        self._shutdown_done = True
+        try:
+            self.vehicle_estop()
+        except Exception as exc:  # hardware may already be half torn down
+            print("HELMSMAN - estop during shutdown failed:", exc)
+        try:
+            self.vehicle_cleanup()
+        except Exception as exc:
+            print("HELMSMAN - vehicle_cleanup during shutdown failed:", exc)
+
+    def run(self):
+        """Entry point for the node scripts. Runs main_loop() but guarantees
+        safe_shutdown() on every exit path: Ctrl-C, a normal return, a fatal
+        exception, and -- the case main_loop() misses -- SIGTERM / SIGHUP,
+        which is how `screen -X quit` / `kill` / `stop_all` end the process."""
+
+        def _on_signal(signum, _frame):
+            print("HELMSMAN - signal {}, stopping vehicle".format(signum))
+            self.safe_shutdown()
+            os._exit(0)
+
+        for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            try:
+                signal.signal(_sig, _on_signal)
+            except (ValueError, OSError):
+                pass  # not the main thread, or unsupported on this platform
+        try:
+            self.main_loop()
+        finally:
+            self.safe_shutdown()

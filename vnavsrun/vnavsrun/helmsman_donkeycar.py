@@ -17,9 +17,14 @@ also accepted and scaled by ``MaxSteeringRadians``.
 
 import configparser
 import sys
+import time
 
 from vnavslib import pca9685
 from vnavsrun import helmsman
+
+# Hold the ESC at neutral this long after init so it can arm before any
+# order is processed. A too-short hold is a common "motors spin on startup".
+ESC_ARM_SECONDS = 2.0
 
 
 def _clamp(value, low, high):
@@ -56,6 +61,7 @@ class Vehicle:
             address=self.i2c_address,
             freq_hz=self.pwm_frequency_hz,
         )
+        self._closed = False
         self.steering_norm = 0.0
         self.throttle_frac = 0.0
         self.stop()
@@ -83,6 +89,8 @@ class Vehicle:
         self.throttle_frac = _clamp(frac, -1.0, 1.0)
 
     def tick(self):
+        if self._closed:
+            return
         self.pca.set_pwm(
             self.steering_channel, 0, self._steering_norm_to_pwm(self.steering_norm)
         )
@@ -93,12 +101,26 @@ class Vehicle:
     def stop(self):
         self.steering_norm = 0.0
         self.throttle_frac = 0.0
+        if self._closed:
+            return
         self.pca.set_pwm(self.steering_channel, 0, self.steering_center_pwm)
         self.pca.set_pwm(self.throttle_channel, 0, self.throttle_stopped_pwm)
 
     def cleanup(self):
+        if self._closed:
+            return
         self.stop()
+        self.throttle_off()
+        self._closed = True
         self.pca.close()
+
+    def throttle_off(self):
+        """Kill the throttle pulse entirely (not just "neutral PWM"). With no
+        signal an ESC will not drive, even if throttle_stopped_pwm is
+        mis-calibrated."""
+        if self._closed:
+            return
+        self.pca.set_channel_off(self.throttle_channel)
 
 
 class HelmsmanDonkeycar(helmsman.Helmsman):
@@ -108,6 +130,7 @@ class HelmsmanDonkeycar(helmsman.Helmsman):
 
     def vehicle_init(self):
         self.v = Vehicle(self.config)
+        time.sleep(ESC_ARM_SECONDS)  # hold neutral so the ESC can arm
         self.speed_max = self.v.max_speed_cm_per_sec
         self.steering_max = 3.0  # rad/sec, nominal
         # Report differential so navigator rad_per_sec steering is accepted.
@@ -115,7 +138,8 @@ class HelmsmanDonkeycar(helmsman.Helmsman):
         self.wheelbase = 15.0  # cm, DonkeyCar-ish; used only for ackerman conversion
 
     def vehicle_estop(self):
-        self.v.stop()
+        if self.v is not None:
+            self.v.stop()
 
     def vehicle_set_speed(self, cm_per_sec):
         self.v.set_throttle_frac(cm_per_sec / self.v.max_speed_cm_per_sec)
@@ -131,10 +155,11 @@ class HelmsmanDonkeycar(helmsman.Helmsman):
         self.v.tick()
 
     def vehicle_cleanup(self):
-        self.v.cleanup()
+        if self.v is not None:
+            self.v.cleanup()
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "node":
         m = HelmsmanDonkeycar()
-        m.main_loop()
+        m.run()

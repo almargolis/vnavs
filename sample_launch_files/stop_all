@@ -2,7 +2,35 @@
 #
 # Stop every VNAVS node screen session started by the launch_* scripts.
 #
+# The helmsman is signalled directly (SIGINT) first so its shutdown handler
+# runs and neutralises the ESC / steering + releases the PWM chip. Relying on
+# `screen -X quit` alone is not enough: it does not reliably deliver a signal
+# to the python process inside the "keep the window open" bash wrapper, and a
+# helmsman that dies without cleaning up leaves the motors driving until the
+# battery is disconnected.
+#
 set -uo pipefail
+
+_signal_helmsman() {
+    local sig="$1" hit=0 pid comm
+    for pid in $(pgrep -f "vnavsrun[.]helmsman" 2>/dev/null); do
+        comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
+        case "$comm" in
+            python*|Python*)  # the interpreter, not the screen/bash wrapper
+                kill "-$sig" "$pid" 2>/dev/null && hit=1 ;;
+        esac
+    done
+    return $((1 - hit))
+}
+
+if _signal_helmsman INT; then
+    echo "signalled helmsman to stop the vehicle; waiting for clean shutdown..."
+    for _ in $(seq 1 15); do
+        _signal_helmsman 0 || break   # gone
+        sleep 0.3
+    done
+    _signal_helmsman KILL || true
+fi
 
 for SESSION in helmsman navigator cameraman fileserver fastmqtt; do
     if screen -ls 2>/dev/null | grep -qE "[.]${SESSION}[[:space:]]"; then

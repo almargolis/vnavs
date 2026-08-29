@@ -18,7 +18,24 @@ def make_vehicle():
     v.max_speed_cm_per_sec = 200.0
     v.steering_norm = 0.0
     v.throttle_frac = 0.0
+    v._closed = False
     return v
+
+
+class _FakePca:
+    def __init__(self):
+        self.writes = []
+        self.channels_off = []
+        self.closed = False
+
+    def set_pwm(self, ch, on, off):
+        self.writes.append((ch, on, off))
+
+    def set_channel_off(self, ch):
+        self.channels_off.append(ch)
+
+    def close(self):
+        self.closed = True
 
 
 def test_steering_center_maps_to_center_pwm():
@@ -67,6 +84,27 @@ def test_helmsman_reports_differential_steering():
     assert abs(h.v.steering_norm - 0.5) < 1e-9
     hd.HelmsmanDonkeycar.vehicle_set_steering_angle(h, 0.3, 1.0)
     assert abs(h.v.steering_norm - 0.5) < 1e-9
+
+
+def test_cleanup_neutralises_kills_throttle_and_closes_bus():
+    v = make_vehicle()
+    v.pca = _FakePca()
+    v.cleanup()
+    assert (v.throttle_channel, 0, v.throttle_stopped_pwm) in v.pca.writes  # neutral
+    assert v.throttle_channel in v.pca.channels_off                        # no pulse
+    assert v.pca.closed
+    assert v._closed
+
+
+def test_cleanup_is_idempotent_after_bus_closed():
+    v = make_vehicle()
+    v.pca = _FakePca()
+    v.cleanup()
+    before = (len(v.pca.writes), len(v.pca.channels_off))
+    v.cleanup()          # second call must not touch the closed bus
+    v.stop()
+    v.throttle_off()
+    assert (len(v.pca.writes), len(v.pca.channels_off)) == before
 
 
 def test_module_uses_differential_type_constant():

@@ -228,4 +228,4 @@ if __name__ == "__main__":
         if len(sys.argv) > 2:
             steering_type = sys.argv[2]
         m = HelmsmanFirmata(steering_type=steering_type)
-        m.main_loop()
+        m.run()

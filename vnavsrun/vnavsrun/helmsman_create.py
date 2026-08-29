@@ -39,4 +39,4 @@ class HelmsmanCreate(helmsman.Helmsman):
 if __name__ == "__main__":
     if sys.argv[1] == "node":
         m = HelmsmanCreate()
-        m.main_loop()
+        m.run()

@@ -53,6 +53,9 @@ def make_helmsman(**overrides):
     h.current_cm_per_sec = 0.0
     h.current_ackerman_angle = None
     h.state = helmsman.STATE_DEADMAN
+    h._log_state = None
+    h._log_connected = None
+    h._last_order_log = 0.0
     h._last_speed = None
     h._last_steering = None
     h._last_angle = None
@@ -299,6 +302,43 @@ def test_interpret_orders_no_sendtime_backward_compat():
     h.InterpretOrders(payload)
     assert h._last_speed == 20.0
     assert h.deadman_time > 0
+
+
+def test_safe_shutdown_estops_cleans_once():
+    """safe_shutdown() estops + cleans up exactly once, even called repeatedly
+    and even if a vehicle method raises."""
+    h = object.__new__(helmsman.Helmsman)
+    h._shutdown_done = False
+    calls = []
+    h.vehicle_estop = lambda: calls.append("estop")
+    h.vehicle_cleanup = lambda: calls.append("cleanup")
+    h.safe_shutdown()
+    h.safe_shutdown()
+    assert calls == ["estop", "cleanup"]
+
+
+def test_safe_shutdown_survives_failing_vehicle(capsys):
+    h = object.__new__(helmsman.Helmsman)
+    h._shutdown_done = False
+
+    def boom():
+        raise RuntimeError("bus gone")
+
+    h.vehicle_estop = boom
+    cleaned = []
+    h.vehicle_cleanup = lambda: cleaned.append(True)
+    h.safe_shutdown()  # must not raise
+    assert cleaned == [True]  # cleanup still attempted after estop failed
+
+
+def test_cleanup_loop_delegates_to_safe_shutdown():
+    h = object.__new__(helmsman.Helmsman)
+    h._shutdown_done = False
+    hits = []
+    h.vehicle_estop = lambda: hits.append("e")
+    h.vehicle_cleanup = lambda: hits.append("c")
+    h.cleanup_loop()
+    assert hits == ["e", "c"]
 
 
 def test_deadman_fires_after_no_fresh_orders():
