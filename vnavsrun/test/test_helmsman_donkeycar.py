@@ -18,6 +18,7 @@ def make_vehicle():
     v.max_speed_cm_per_sec = 200.0
     v.steering_norm = 0.0
     v.throttle_frac = 0.0
+    v.throttle_deadband_pwm = 0
     v._closed = False
     return v
 
@@ -61,6 +62,28 @@ def test_throttle_mapping():
     assert v._throttle_frac_to_pwm(1.0) == 500
     assert v._throttle_frac_to_pwm(-1.0) == 220
     assert v._throttle_frac_to_pwm(0.5) == round(370 + 0.5 * (500 - 370))
+
+
+def test_throttle_deadband_compensation():
+    v = make_vehicle()
+    v.throttle_deadband_pwm = 25
+    assert v._throttle_frac_to_pwm(0.0) == 370          # zero stays neutral
+    # any positive frac starts at stopped + deadband, ramps to forward
+    assert v._throttle_frac_to_pwm(0.0001) > 393
+    assert v._throttle_frac_to_pwm(1.0) == 500
+    assert v._throttle_frac_to_pwm(0.5) == round(395 + 0.5 * (500 - 395))
+    # reverse mirrors below stopped
+    assert v._throttle_frac_to_pwm(-1.0) == 220
+    assert v._throttle_frac_to_pwm(-0.5) == round(345 + 0.5 * (220 - 345))
+
+
+def test_manual_norm_commands_pass_through():
+    h = object.__new__(hd.HelmsmanDonkeycar)
+    h.v = make_vehicle()
+    hd.HelmsmanDonkeycar.vehicle_set_throttle(h, 0.4)
+    assert h.v.throttle_frac == 0.4
+    hd.HelmsmanDonkeycar.vehicle_set_steering_direct(h, -0.7)
+    assert h.v.steering_norm == -0.7
 
 
 def test_tick_writes_both_channels():

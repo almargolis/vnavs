@@ -39,8 +39,8 @@ def _make_mc(**overrides):
     mc.gamepad_steer = 0.0
 
     # Stub UI widgets
-    mc.drive_speed_entry = _StubWidget("20")
-    mc.drive_steer_entry = _StubWidget("0.3")
+    mc.drive_speed_entry = _StubWidget("0.35")  # throttle 0..1
+    mc.drive_steer_entry = _StubWidget("0.7")   # steer 0..1
     mc.drive_status = _StubWidget("stopped")
     mc.gamepad_label = _StubWidget("none")
     mc.image_status_label = _StubWidget("Image: ON")
@@ -57,19 +57,36 @@ def _make_mc(**overrides):
 # --- _publish_drive_order ---
 
 
-def test_publish_drive_order_fields():
+def test_publish_manual_drive_fields():
     mc = _make_mc()
-    mc._publish_drive_order(25.0, 0.5)
+    mc._publish_manual_drive(0.4, -0.6)
     assert len(mc._published) == 1
     topic, payload = mc._published[0]
     assert topic == vconst.helmsman_orders_topic
+    assert payload[helmsman.HELMSMAN_THROTTLE] == 0.4
+    assert payload[helmsman.HELMSMAN_STEERING] == -0.6
+    assert payload[helmsman.HELMSMAN_TIMER] == 3
+    assert helmsman.HELMSMAN_CM_PER_SEC not in payload
+
+
+def test_publish_manual_drive_clamps():
+    mc = _make_mc()
+    mc._publish_manual_drive(2.0, -3.0)
+    _, payload = mc._published[0]
+    assert payload[helmsman.HELMSMAN_THROTTLE] == 1.0
+    assert payload[helmsman.HELMSMAN_STEERING] == -1.0
+
+
+def test_publish_drive_order_legacy_cm_per_sec():
+    """Mission-tab +/- buttons still use the cm/s path."""
+    mc = _make_mc()
+    mc._publish_drive_order(25.0, 0.5)
+    _, payload = mc._published[0]
     assert payload[helmsman.HELMSMAN_CM_PER_SEC] == 25.0
     assert payload[helmsman.HELMSMAN_RAD_PER_SEC] == 0.5
-    assert payload[helmsman.HELMSMAN_TIMER] == 3
-    assert mc.drive_status.value() == "spd=25 str=0.50"
 
 
-# --- Drive buttons ---
+# --- Drive buttons (normalized manual commands) ---
 
 
 def test_drive_stop_zeros():
@@ -79,40 +96,39 @@ def test_drive_stop_zeros():
     mc.on_drive_stop()
     assert len(mc.keys_held) == 0
     assert mc.drive_active is False
-    topic, payload = mc._published[0]
-    assert payload[helmsman.HELMSMAN_CM_PER_SEC] == 0.0
-    assert payload[helmsman.HELMSMAN_RAD_PER_SEC] == 0.0
+    _, payload = mc._published[0]
+    assert payload[helmsman.HELMSMAN_THROTTLE] == 0.0
+    assert payload[helmsman.HELMSMAN_STEERING] == 0.0
 
 
 def test_drive_forward():
     mc = _make_mc()
     mc.on_drive_forward()
-    topic, payload = mc._published[0]
-    assert payload[helmsman.HELMSMAN_CM_PER_SEC] == 20.0
-    assert payload[helmsman.HELMSMAN_RAD_PER_SEC] == 0.0
+    _, payload = mc._published[0]
+    assert payload[helmsman.HELMSMAN_THROTTLE] == 0.35
+    assert payload[helmsman.HELMSMAN_STEERING] == 0.0
 
 
 def test_drive_back():
     mc = _make_mc()
     mc.on_drive_back()
-    topic, payload = mc._published[0]
-    assert payload[helmsman.HELMSMAN_CM_PER_SEC] == -20.0
+    _, payload = mc._published[0]
+    assert payload[helmsman.HELMSMAN_THROTTLE] == -0.35
 
 
 def test_drive_left():
     mc = _make_mc()
     mc.on_drive_left()
-    topic, payload = mc._published[0]
-    assert payload[helmsman.HELMSMAN_CM_PER_SEC] == 20.0
-    assert payload[helmsman.HELMSMAN_RAD_PER_SEC] == -0.3
+    _, payload = mc._published[0]
+    assert payload[helmsman.HELMSMAN_THROTTLE] == 0.35
+    assert payload[helmsman.HELMSMAN_STEERING] == -0.7
 
 
 def test_drive_right():
     mc = _make_mc()
     mc.on_drive_right()
-    topic, payload = mc._published[0]
-    assert payload[helmsman.HELMSMAN_CM_PER_SEC] == 20.0
-    assert payload[helmsman.HELMSMAN_RAD_PER_SEC] == 0.3
+    _, payload = mc._published[0]
+    assert payload[helmsman.HELMSMAN_STEERING] == 0.7
 
 
 # --- Keyboard ---
@@ -163,7 +179,7 @@ def test_key_press_space_stops():
     assert len(mc.keys_held) == 0
     assert mc.drive_active is False
     assert len(mc._published) == 1
-    assert mc._published[0][1][helmsman.HELMSMAN_CM_PER_SEC] == 0.0
+    assert mc._published[0][1][helmsman.HELMSMAN_THROTTLE] == 0.0
 
 
 # --- Toggle image ---

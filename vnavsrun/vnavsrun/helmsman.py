@@ -16,6 +16,11 @@ STATES_MOVING = STATE_DEADMAN + STATE_CONTINUOUS
 
 HELMSMAN_CM_PER_SEC = "cm_per_sec"
 HELMSMAN_RAD_PER_SEC = "rad_per_sec"
+# Direct manual commands, normalized -1.0..1.0 (RC-transmitter style). These
+# bypass cm/s and the PID steering_gain -- for the mission-control Drive tab /
+# a gamepad, where the human is the control loop.
+HELMSMAN_THROTTLE = "throttle"
+HELMSMAN_STEERING = "steering"
 HELMSMAN_TIMER = "timer"
 HELMSMAN_P_ERROR = "p_error"
 HELMSMAN_I_ACCUMULATOR = "i_accumulator"
@@ -31,6 +36,10 @@ HELMSMAN_STEERING_CONTROL_DEFAULT = "*"
 
 STEERING_TYPE_DIFFERENTIAL = "d"
 STEERING_TYPE_ACKERMAN = "a"
+
+
+def _clamp(value, low, high):
+    return max(low, min(high, value))
 HELMSMAN_STEERING_TYPE = "steering_type"
 HELMSMAN_ANGLE = "angle"
 HELMSMAN_ANGLE_RATE = "angle_rate"
@@ -120,6 +129,17 @@ class Helmsman(vmqtt.VnavsNode):
         """Periodic call to update hardware with current speed/steering."""
         raise NotImplementedError
 
+    def vehicle_set_throttle(self, norm):
+        """Direct manual throttle, normalized -1.0..1.0. Default: scale to
+        speed_max and reuse vehicle_set_speed(). Subclasses with a native
+        normalized throttle should override."""
+        self.vehicle_set_speed(_clamp(norm, -1.0, 1.0) * self.speed_max)
+
+    def vehicle_set_steering_direct(self, norm):
+        """Direct manual steering, normalized -1.0..1.0. Default: scale to
+        steering_max and reuse vehicle_set_steering()."""
+        self.vehicle_set_steering(_clamp(norm, -1.0, 1.0) * self.steering_max)
+
     def vehicle_cleanup(self):
         """Shutdown hardware gracefully."""
         raise NotImplementedError
@@ -179,11 +199,25 @@ class Helmsman(vmqtt.VnavsNode):
     def OnMissionLogStop(self, payload):
         self.mission_logging = False
 
+    def _authorized_speed(self, payload):
+        if self.speed_control == HELMSMAN_SPEED_CONTROL_DEFAULT:
+            return True
+        if self.speed_control == payload.get("_sender"):
+            return True
+        print(f"HELMSMAN - Unauthorized Speed Order from {payload.get('_sender')}")
+        return False
+
+    def _authorized_steering(self, payload):
+        if self.steering_control == HELMSMAN_STEERING_CONTROL_DEFAULT:
+            return True
+        if self.steering_control == payload.get("_sender"):
+            return True
+        print(f"HELMSMAN - Unauthorized Steering Order from {payload.get('_sender')}")
+        return False
+
     def InterpretOrdersSpeed(self, payload):
-        if self.speed_control != HELMSMAN_SPEED_CONTROL_DEFAULT:
-            if self.speed_control != payload["_sender"]:
-                print(f"HELMSMAN - Unauthorized Speed Order from {payload['_sender']}")
-                return
+        if not self._authorized_speed(payload):
+            return
         cm_per_sec = float(payload[HELMSMAN_CM_PER_SEC])
         if self.governor > 0:
             if cm_per_sec > self.governor:
@@ -231,12 +265,23 @@ class Helmsman(vmqtt.VnavsNode):
                     .format(send_age)
                 )
                 return
+        has_steering = False
+        # Direct normalized manual commands take priority and bypass all the
+        # cm/s and PID-gain scaling below.
+        if HELMSMAN_THROTTLE in payload:
+            if self._authorized_speed(payload):
+                self.current_cm_per_sec = 0.0
+                self.vehicle_set_throttle(float(payload[HELMSMAN_THROTTLE]))
+        if HELMSMAN_STEERING in payload:
+            if self._authorized_steering(payload):
+                self.current_ackerman_angle = None
+                self.vehicle_set_steering_direct(float(payload[HELMSMAN_STEERING]))
+                has_steering = True
         if HELMSMAN_CM_PER_SEC in payload:
             self.InterpretOrdersSpeed(payload)
         msg_steering_type = payload.get(
             HELMSMAN_STEERING_TYPE, STEERING_TYPE_DIFFERENTIAL
         )
-        has_steering = False
         if msg_steering_type == STEERING_TYPE_ACKERMAN:
             if HELMSMAN_ANGLE in payload:
                 self.InterpretOrdersAckerman(payload)
@@ -260,12 +305,20 @@ class Helmsman(vmqtt.VnavsNode):
         now = time.time()
         if now - self._last_order_log > 1.0:
             self._last_order_log = now
+            fields = {
+                k: payload[k]
+                for k in (
+                    HELMSMAN_THROTTLE,
+                    HELMSMAN_STEERING,
+                    HELMSMAN_CM_PER_SEC,
+                    HELMSMAN_RAD_PER_SEC,
+                    HELMSMAN_ANGLE,
+                )
+                if k in payload
+            }
             self._log(
-                "order from {} speed={} steer={} deadman={}s".format(
-                    payload.get("_sender", "?"),
-                    payload.get(HELMSMAN_CM_PER_SEC),
-                    payload.get(HELMSMAN_RAD_PER_SEC, payload.get(HELMSMAN_ANGLE)),
-                    timer,
+                "order from {} {} deadman={}s".format(
+                    payload.get("_sender", "?"), fields, timer
                 )
             )
 

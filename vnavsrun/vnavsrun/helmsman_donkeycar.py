@@ -52,6 +52,11 @@ class Vehicle:
         self.throttle_forward_pwm = get("ThrottleForwardPwm", 500, int)
         self.throttle_stopped_pwm = get("ThrottleStoppedPwm", 370, int)
         self.throttle_reverse_pwm = get("ThrottleReversePwm", 220, int)
+        # PWM counts to skip past the ESC/motor deadband so ANY non-zero
+        # throttle command actually moves the car. Bench-find the count just
+        # above throttle_stopped_pwm where the wheels start turning; set
+        # (that - stopped). 0 = no compensation.
+        self.throttle_deadband_pwm = get("ThrottleDeadbandPwm", 0, int)
         self.steering_gain = get("SteeringGain", 0.012, float)
         self.max_steering_radians = get("MaxSteeringRadians", 0.6, float)
         self.max_speed_cm_per_sec = get("MaxSpeedCmPerSec", 200.0, float)
@@ -76,10 +81,13 @@ class Vehicle:
     def _throttle_frac_to_pwm(self, frac):
         frac = _clamp(frac, -1.0, 1.0)
         stopped = self.throttle_stopped_pwm
+        dead = self.throttle_deadband_pwm
         if frac > 0.0:
-            return int(round(stopped + frac * (self.throttle_forward_pwm - stopped)))
+            base = stopped + dead
+            return int(round(base + frac * (self.throttle_forward_pwm - base)))
         if frac < 0.0:
-            return int(round(stopped + (-frac) * (self.throttle_reverse_pwm - stopped)))
+            base = stopped - dead
+            return int(round(base + (-frac) * (self.throttle_reverse_pwm - base)))
         return stopped
 
     def set_steering_norm(self, norm):
@@ -147,6 +155,14 @@ class HelmsmanDonkeycar(helmsman.Helmsman):
     def vehicle_set_steering(self, rad_per_sec):
         # rad_per_sec here carries the navigator's PID correction term.
         self.v.set_steering_norm(rad_per_sec * self.v.steering_gain)
+
+    def vehicle_set_throttle(self, norm):
+        # Direct manual throttle (Drive tab / gamepad): -1..1 straight through.
+        self.v.set_throttle_frac(norm)
+
+    def vehicle_set_steering_direct(self, norm):
+        # Direct manual steering: -1..1 = full-left..full-right servo travel.
+        self.v.set_steering_norm(norm)
 
     def vehicle_set_steering_angle(self, angle, angle_rate):
         self.v.set_steering_norm(angle / self.v.max_steering_radians)

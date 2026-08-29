@@ -53,6 +53,9 @@ steeringrightpwm = 290
 throttleforwardpwm = 500
 throttlestoppedpwm = 370
 throttlereversepwm = 220
+# PWM counts to skip past the ESC/motor deadband. Bench-find the count just
+# above throttlestoppedpwm where the wheels start turning; set (that - stopped).
+throttledeadbandpwm = 0
 steeringgain = 0.012
 maxsteeringradians = 0.6
 maxspeedcmpersec = 200

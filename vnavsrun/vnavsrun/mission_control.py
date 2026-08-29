@@ -295,11 +295,14 @@ class MissionControl(vmqtt.VnavsNode):
         )
 
         drive_frame = drive_tab.add_label_frame("Drive")
+        # RC-transmitter style: normalized 0..1 magnitudes. The helmsman maps
+        # these onto the calibrated servo/ESC PWM range directly (no cm/s, no
+        # PID gain). 1.0 = full throttle / full steering lock.
         self.drive_speed_entry = drive_frame.add_entry_field(
-            "Speed (cm/s)", width=6, value="20"
+            "Throttle 0-1", width=6, value="0.35"
         )
         self.drive_steer_entry = drive_frame.add_entry_field(
-            "Steer (rad/s)", width=6, value="0.3", row=SAME_ROW, col=NEXT_COL
+            "Steer 0-1", width=6, value="0.7", row=SAME_ROW, col=NEXT_COL
         )
         btn_frame = drive_frame.add_frame(colspan=COL_SPAN_ALL)
         btn_frame.add_button(
@@ -560,17 +563,35 @@ class MissionControl(vmqtt.VnavsNode):
     #
 
     def _read_drive_params(self):
+        """Return (throttle_max, steer_max), each a normalized 0..1 magnitude
+        from the Drive-tab entry fields."""
         try:
-            speed = float(self.drive_speed_entry.value())
+            throttle_max = float(self.drive_speed_entry.value())
         except (ValueError, TypeError):
-            speed = 20.0
+            throttle_max = 0.35
         try:
-            steer = float(self.drive_steer_entry.value())
+            steer_max = float(self.drive_steer_entry.value())
         except (ValueError, TypeError):
-            steer = 0.3
-        return speed, steer
+            steer_max = 0.7
+        return throttle_max, steer_max
+
+    def _publish_manual_drive(self, throttle, steer):
+        """Publish a direct normalized manual command (-1..1) for the Drive
+        tab / keyboard / gamepad."""
+        throttle = max(-1.0, min(1.0, throttle))
+        steer = max(-1.0, min(1.0, steer))
+        payload = {
+            helmsman.HELMSMAN_THROTTLE: throttle,
+            helmsman.HELMSMAN_STEERING: steer,
+            helmsman.HELMSMAN_TIMER: 3,
+        }
+        self.publish(vconst.helmsman_orders_topic, payload)
+        self.drive_status.replace_value(
+            "thr={:+.2f} str={:+.2f}".format(throttle, steer)
+        )
 
     def _publish_drive_order(self, speed, steer):
+        """Legacy cm/s speed nudge for the Mission-tab +/-/Stop buttons."""
         payload = {
             helmsman.HELMSMAN_CM_PER_SEC: speed,
             helmsman.HELMSMAN_RAD_PER_SEC: steer,
@@ -582,25 +603,25 @@ class MissionControl(vmqtt.VnavsNode):
         )
 
     def on_drive_forward(self):
-        speed, steer = self._read_drive_params()
-        self._publish_drive_order(speed, 0.0)
+        throttle_max, _ = self._read_drive_params()
+        self._publish_manual_drive(throttle_max, 0.0)
 
     def on_drive_back(self):
-        speed, steer = self._read_drive_params()
-        self._publish_drive_order(-speed, 0.0)
+        throttle_max, _ = self._read_drive_params()
+        self._publish_manual_drive(-throttle_max, 0.0)
 
     def on_drive_left(self):
-        speed, steer = self._read_drive_params()
-        self._publish_drive_order(speed, -steer)
+        throttle_max, steer_max = self._read_drive_params()
+        self._publish_manual_drive(throttle_max, -steer_max)
 
     def on_drive_right(self):
-        speed, steer = self._read_drive_params()
-        self._publish_drive_order(speed, steer)
+        throttle_max, steer_max = self._read_drive_params()
+        self._publish_manual_drive(throttle_max, steer_max)
 
     def on_drive_stop(self):
         self.keys_held.clear()
         self.drive_active = False
-        self._publish_drive_order(0.0, 0.0)
+        self._publish_manual_drive(0.0, 0.0)
 
     #
     # Keyboard drive
@@ -952,20 +973,20 @@ class MissionControl(vmqtt.VnavsNode):
         now = time.time()
         if self.drive_active and self.keys_held:
             if (now - self.last_drive_publish_time) > 0.5:
-                drive_speed, drive_steer_rate = self._read_drive_params()
-                speed = 0.0
+                throttle_max, steer_max = self._read_drive_params()
+                throttle = 0.0
                 steer = 0.0
                 if "w" in self.keys_held:
-                    speed = drive_speed
+                    throttle = throttle_max
                 elif "s" in self.keys_held:
-                    speed = -drive_speed
+                    throttle = -throttle_max
                 if "a" in self.keys_held:
-                    steer = -drive_steer_rate
+                    steer = -steer_max
                 elif "d" in self.keys_held:
-                    steer = drive_steer_rate
-                if speed == 0.0 and steer != 0.0:
-                    speed = drive_speed * 0.5
-                self._publish_drive_order(speed, steer)
+                    steer = steer_max
+                if throttle == 0.0 and steer != 0.0:
+                    throttle = throttle_max * 0.5
+                self._publish_manual_drive(throttle, steer)
                 self.last_drive_publish_time = now
         elif (
             self.gamepad_active
@@ -973,10 +994,11 @@ class MissionControl(vmqtt.VnavsNode):
             and not self.keys_held
         ):
             if (now - self.last_drive_publish_time) > 0.1:
-                drive_speed, drive_steer_rate = self._read_drive_params()
-                speed = self.gamepad_speed * drive_speed
-                steer = self.gamepad_steer * drive_steer_rate
-                self._publish_drive_order(speed, steer)
+                throttle_max, steer_max = self._read_drive_params()
+                self._publish_manual_drive(
+                    self.gamepad_speed * throttle_max,
+                    self.gamepad_steer * steer_max,
+                )
                 self.last_drive_publish_time = now
 
         self.tk.update()

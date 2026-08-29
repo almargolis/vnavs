@@ -73,6 +73,42 @@ def _patch_vehicle_methods(h):
         setattr(h, "_last_angle", a),
         setattr(h, "_last_angle_rate", r),
     )
+    h._last_throttle_norm = None
+    h._last_steering_norm = None
+    h.vehicle_set_throttle = lambda n: setattr(h, "_last_throttle_norm", n)
+    h.vehicle_set_steering_direct = lambda n: setattr(h, "_last_steering_norm", n)
+
+
+def test_manual_throttle_steering_fields_route_directly():
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.deadman_time = 0
+    h.InterpretOrders(
+        {
+            helmsman.HELMSMAN_THROTTLE: "0.4",
+            helmsman.HELMSMAN_STEERING: "-0.7",
+            "_sender": "drive",
+        }
+    )
+    assert h._last_throttle_norm == 0.4
+    assert h._last_steering_norm == -0.7
+    assert h._last_speed is None  # cm/s path untouched
+    assert h._last_steering is None  # PID-gain path untouched
+    assert h.deadman_time > 0  # deadman still armed
+
+
+def test_manual_command_default_scaling():
+    """Base vehicle_set_throttle/steering_direct scale onto speed_max /
+    steering_max and clamp."""
+    h = make_helmsman(speed_max=150.0, steering_max=3.0)
+    h._last_speed = None
+    h._last_steering = None
+    h.vehicle_set_speed = lambda cm: setattr(h, "_last_speed", cm)
+    h.vehicle_set_steering = lambda rad: setattr(h, "_last_steering", rad)
+    helmsman.Helmsman.vehicle_set_throttle(h, 0.5)
+    helmsman.Helmsman.vehicle_set_steering_direct(h, -2.0)  # clamps to -1
+    assert h._last_speed == 75.0
+    assert h._last_steering == -3.0
 
 
 # --- Conversion tests ---
