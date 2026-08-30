@@ -27,9 +27,13 @@ def _make_mc(**overrides):
         mc._published.append((topic, dict(payload)))
 
     mc.publish = _mock_publish
+    mc._disconnected = False
+    mc.disconnect = lambda: setattr(mc, "_disconnected", True)
     mc.speed = 0.0
     mc.keys_held = set()
     mc.drive_active = False
+    mc._shutting_down = False
+    mc._drive_publishing = False
     mc.last_drive_publish_time = 0.0
     mc.pic_continuous = True
     mc.last_pic_time = 0.0
@@ -154,6 +158,70 @@ def test_key_release_clears():
     mc.on_key_release(_FakeEvent("w"))
     assert "w" not in mc.keys_held
     assert mc.drive_active is False
+
+
+def test_key_release_with_other_key_held_stays_active():
+    mc = _make_mc()
+    mc.keys_held = {"w", "a"}
+    mc.drive_active = True
+    mc.on_key_release(_FakeEvent("a"))
+    assert mc.keys_held == {"w"}
+    assert mc.drive_active is True
+
+
+# --- Shutdown / window close ---
+
+
+def test_stop_vehicle_and_teardown():
+    mc = _make_mc()
+    mc.keys_held = {"w", "a"}
+    mc.drive_active = True
+    mc.gamepad_active = True
+    mc._stop_vehicle_and_teardown("test")
+    assert mc._shutting_down is True
+    assert mc.drive_active is False
+    assert mc.keys_held == set()
+    assert mc.gamepad_active is False
+    assert mc._disconnected is True
+    # explicit stop published
+    topic, payload = mc._published[0]
+    assert topic == vconst.helmsman_orders_topic
+    assert payload[helmsman.HELMSMAN_THROTTLE] == 0.0
+    assert payload[helmsman.HELMSMAN_STEERING] == 0.0
+
+
+def test_stop_vehicle_and_teardown_idempotent():
+    mc = _make_mc()
+    mc._stop_vehicle_and_teardown("first")
+    n = len(mc._published)
+    mc._stop_vehicle_and_teardown("second")
+    assert len(mc._published) == n  # no further publishes
+
+
+def test_on_window_close_raises_systemexit():
+    mc = _make_mc()
+    mc.gamepad_active = False
+
+    class _Tkw:
+        def destroy(self_):
+            self_.destroyed = True
+
+    mc.tk = type("T", (), {"tkw": _Tkw()})()
+    import pytest
+
+    with pytest.raises(SystemExit):
+        mc._on_window_close()
+    assert mc._shutting_down is True
+    assert mc.tk.tkw.destroyed is True
+
+
+def test_cleanup_loop_stops_vehicle():
+    mc = _make_mc()
+    mc.drive_active = True
+    mc.cleanup_loop()
+    assert mc._shutting_down is True
+    _, payload = mc._published[0]
+    assert payload[helmsman.HELMSMAN_THROTTLE] == 0.0
 
 
 def test_key_press_ignores_entry_widget():

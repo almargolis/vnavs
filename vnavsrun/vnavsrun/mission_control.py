@@ -373,6 +373,8 @@ class MissionControl(vmqtt.VnavsNode):
         self.keys_held = set()
         self.drive_active = False
         self.last_drive_publish_time = 0.0
+        self._drive_publishing = False
+        self._shutting_down = False
 
         # Gamepad state
         self.gamepad = None
@@ -384,8 +386,59 @@ class MissionControl(vmqtt.VnavsNode):
         self.tk.tkw.bind("<KeyPress>", self.on_key_press)
         self.tk.tkw.bind("<KeyRelease>", self.on_key_release)
 
+        # Window close button -> stop the vehicle and exit cleanly. Without
+        # this the close raises a TclError out of tk.update() that the base
+        # main_loop swallowed, and the continuous-drive block kept publishing
+        # every iteration -- a closed mission control drove the car away
+        # (with whatever key / stick was held at close time latched).
+        self.tk.tkw.protocol("WM_DELETE_WINDOW", self._on_window_close)
+
         # Gamepad init
         self._init_gamepad()
+
+    def _stop_vehicle_and_teardown(self, reason):
+        """Publish an explicit stop, drop all drive state, disconnect. Safe to
+        call more than once. Does not itself exit -- callers raise SystemExit."""
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self.gamepad_active = False
+        self.keys_held.clear()
+        self.drive_active = False
+        print(
+            "MISSION CONTROL - {}: stopping vehicle and disconnecting".format(reason)
+        )
+        try:
+            # A few explicit stops in case one is dropped on the way out.
+            for _ in range(3):
+                self.publish(
+                    vconst.helmsman_orders_topic,
+                    {
+                        helmsman.HELMSMAN_THROTTLE: 0.0,
+                        helmsman.HELMSMAN_STEERING: 0.0,
+                        helmsman.HELMSMAN_TIMER: 1,
+                    },
+                )
+                time.sleep(0.05)
+        except Exception as exc:  # best effort -- keep tearing down
+            print("MISSION CONTROL - stop publish failed:", exc)
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+
+    def _on_window_close(self):
+        self._stop_vehicle_and_teardown("window closed")
+        try:
+            self.tk.tkw.destroy()
+        except Exception:
+            pass
+        raise SystemExit(0)
+
+    def cleanup_loop(self):
+        # Called by VnavsNode.main_loop on KeyboardInterrupt / SystemExit /
+        # fatal exception -- make sure the vehicle is stopped on every exit path.
+        self._stop_vehicle_and_teardown("shutdown")
 
     def open_script_file(self):
         fn = self.message_tab.do_file_name_dialog(directory=self.scripts_dir)
@@ -645,6 +698,9 @@ class MissionControl(vmqtt.VnavsNode):
         self.keys_held.discard(key)
         if not self.keys_held:
             self.drive_active = False
+            # client_loop_code() publishes one explicit stop on this falling
+            # edge (see _drive_publishing) -- don't wait out the helmsman
+            # deadman, and clear its manual-hold backstop.
 
     #
     # Gamepad
@@ -882,6 +938,8 @@ class MissionControl(vmqtt.VnavsNode):
         )
 
     def client_loop_code(self):
+        if self._shutting_down:
+            raise SystemExit(0)
         if self.transfer_type != TRANSFER_TYPE_NONE:
             # Checking the transfer reports completion and does some transfering if not complete
             if self.file_client.check_transfer():
@@ -971,8 +1029,9 @@ class MissionControl(vmqtt.VnavsNode):
                 # print("client_loop_code() Start Transfer", self.transfer_type, transfer_fn)
         # --- Continuous drive publishing ---
         now = time.time()
-        if self.drive_active and self.keys_held:
-            if (now - self.last_drive_publish_time) > 0.5:
+        throttle = steer = None
+        if not self._shutting_down:
+            if self.drive_active and self.keys_held:
                 throttle_max, steer_max = self._read_drive_params()
                 throttle = 0.0
                 steer = 0.0
@@ -986,23 +1045,36 @@ class MissionControl(vmqtt.VnavsNode):
                     steer = steer_max
                 if throttle == 0.0 and steer != 0.0:
                     throttle = throttle_max * 0.5
+            elif (
+                self.gamepad_active
+                and (abs(self.gamepad_speed) > 0 or abs(self.gamepad_steer) > 0)
+                and not self.keys_held
+            ):
+                throttle_max, steer_max = self._read_drive_params()
+                throttle = self.gamepad_speed * throttle_max
+                steer = self.gamepad_steer * steer_max
+
+        if throttle is not None:
+            interval = 0.5 if self.keys_held else 0.1
+            if (now - self.last_drive_publish_time) > interval:
                 self._publish_manual_drive(throttle, steer)
                 self.last_drive_publish_time = now
-        elif (
-            self.gamepad_active
-            and (abs(self.gamepad_speed) > 0 or abs(self.gamepad_steer) > 0)
-            and not self.keys_held
-        ):
-            if (now - self.last_drive_publish_time) > 0.1:
-                throttle_max, steer_max = self._read_drive_params()
-                self._publish_manual_drive(
-                    self.gamepad_speed * throttle_max,
-                    self.gamepad_steer * steer_max,
-                )
-                self.last_drive_publish_time = now
+                self._drive_publishing = True
+        elif self._drive_publishing:
+            # Falling edge (released keys / centred stick / shutting down):
+            # one explicit stop so the helmsman doesn't wait out its deadman
+            # and its manual-hold backstop is cleared.
+            self._publish_manual_drive(0.0, 0.0)
+            self._drive_publishing = False
 
-        self.tk.update()
-        # when tk is destroyed by close window, self.disconnect()	# stop mqtt client loop
+        try:
+            self.tk.update()
+        except tkinter.TclError:
+            # Window was destroyed out from under us (close button, killed X
+            # connection). Stop the vehicle and exit instead of spinning here
+            # forever republishing drive orders.
+            self._stop_vehicle_and_teardown("window destroyed")
+            raise SystemExit(0)
 
 
 def run_gps(waypoint):

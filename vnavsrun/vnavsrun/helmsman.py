@@ -95,6 +95,15 @@ class Helmsman(vmqtt.VnavsNode):
         self._log_state = self.state  # last state we logged a transition for
         self._log_connected = None  # last broker-connection state we logged
         self._last_order_log = 0.0
+        # Backstop deadman for manual drive -- see _manual_throttle_effective().
+        self._manual_throttle_since = None
+        self._manual_hold_tripped = False
+        try:
+            self.manual_drive_max_hold_s = float(
+                self.config.get("Helmsman", "ManualDriveMaxHoldSeconds")
+            )
+        except Exception:
+            self.manual_drive_max_hold_s = 5.0
         self.vehicle_init()
 
     def _log(self, *parts):
@@ -180,6 +189,7 @@ class Helmsman(vmqtt.VnavsNode):
                 self.vehicle_estop()
                 self.current_cm_per_sec = 0.0
                 self.current_ackerman_angle = None
+                self._reset_manual_hold()
                 self.state = STATE_ESTOPPED
                 self._log_state_change()
                 self.ClearOrdersQueue()
@@ -214,6 +224,38 @@ class Helmsman(vmqtt.VnavsNode):
             return True
         print(f"HELMSMAN - Unauthorized Steering Order from {payload.get('_sender')}")
         return False
+
+    def _reset_manual_hold(self):
+        self._manual_throttle_since = None
+        self._manual_hold_tripped = False
+
+    def _manual_throttle_effective(self, throttle):
+        """Backstop deadman for direct manual drive: if a non-zero manual
+        throttle keeps arriving with no release for longer than
+        ManualDriveMaxHoldSeconds, force it to zero. A human varies throttle
+        and lets go (which stops publishing -> the ordinary deadman fires); a
+        stuck / zombie mission control republishes the same non-zero value
+        forever and re-arms the ordinary deadman every time. Once tripped, the
+        ordinary deadman is left to expire (full estop) and the trip stays
+        latched until an explicit zero-throttle order arrives -- so a stuck
+        sender stays stopped instead of stuttering."""
+        now = time.time()
+        if abs(throttle) < 1e-3:
+            self._reset_manual_hold()
+            return throttle
+        if self._manual_throttle_since is None:
+            self._manual_throttle_since = now
+        held = now - self._manual_throttle_since
+        if held > self.manual_drive_max_hold_s:
+            if not self._manual_hold_tripped:
+                self._manual_hold_tripped = True
+                self._log(
+                    "manual throttle held {:.1f}s with no release -- forcing "
+                    "stop (stuck mission control?); send a zero-throttle order "
+                    "to resume".format(held)
+                )
+            return 0.0
+        return throttle
 
     def InterpretOrdersSpeed(self, payload):
         if not self._authorized_speed(payload):
@@ -271,7 +313,9 @@ class Helmsman(vmqtt.VnavsNode):
         if HELMSMAN_THROTTLE in payload:
             if self._authorized_speed(payload):
                 self.current_cm_per_sec = 0.0
-                self.vehicle_set_throttle(float(payload[HELMSMAN_THROTTLE]))
+                self.vehicle_set_throttle(self._manual_throttle_effective(
+                    float(payload[HELMSMAN_THROTTLE])
+                ))
         if HELMSMAN_STEERING in payload:
             if self._authorized_steering(payload):
                 self.current_ackerman_angle = None
@@ -298,10 +342,16 @@ class Helmsman(vmqtt.VnavsNode):
             timer = int(payload[HELMSMAN_TIMER])
         else:
             timer = 3
-        self.deadman_time = time.time() + timer
-        if self.state == STATE_TIMED_OUT:
-            self.state = STATE_DEADMAN
-            self._log_state_change()
+        if self._manual_hold_tripped:
+            # Stuck-sender backstop tripped: stop re-arming so the ordinary
+            # deadman expires and a full estop runs. A zero-throttle order
+            # (which clears the trip) will re-arm normally.
+            pass
+        else:
+            self.deadman_time = time.time() + timer
+            if self.state == STATE_TIMED_OUT:
+                self.state = STATE_DEADMAN
+                self._log_state_change()
         now = time.time()
         if now - self._last_order_log > 1.0:
             self._last_order_log = now

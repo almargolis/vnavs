@@ -56,6 +56,9 @@ def make_helmsman(**overrides):
     h._log_state = None
     h._log_connected = None
     h._last_order_log = 0.0
+    h._manual_throttle_since = None
+    h._manual_hold_tripped = False
+    h.manual_drive_max_hold_s = 5.0
     h._last_speed = None
     h._last_steering = None
     h._last_angle = None
@@ -393,3 +396,73 @@ def test_deadman_fires_after_no_fresh_orders():
     h.client_loop_code()
     assert len(estop_called) == 1
     assert h.state == helmsman.STATE_TIMED_OUT
+
+
+# --- Manual-hold backstop deadman ---
+
+
+def _manual_order(throttle):
+    return {helmsman.HELMSMAN_THROTTLE: str(throttle), "_sender": "MissionControl"}
+
+
+def test_manual_hold_forces_stop_after_max_hold(capsys):
+    """A non-zero manual throttle republished past ManualDriveMaxHoldSeconds
+    with no release gets forced to zero (stuck mission control)."""
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.deadman_time = 0
+    h.manual_drive_max_hold_s = 1.0
+
+    h._manual_throttle_since = time.time() - 0.2  # just started holding
+    h.InterpretOrders(_manual_order(0.35))
+    assert h._last_throttle_norm == 0.35  # still within the hold window
+
+    h._manual_throttle_since = time.time() - 5.0  # held way too long
+    h.InterpretOrders(_manual_order(0.35))
+    assert h._last_throttle_norm == 0.0
+    assert "forcing" in capsys.readouterr().out
+
+
+def test_manual_hold_cleared_by_zero_throttle():
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.deadman_time = 0
+    h.manual_drive_max_hold_s = 1.0
+    h._manual_throttle_since = time.time() - 5.0
+    h._manual_hold_tripped = True
+
+    h.InterpretOrders(_manual_order(0.0))
+    assert h._manual_throttle_since is None
+    assert h._manual_hold_tripped is False
+
+    # A fresh press now drives again.
+    h.InterpretOrders(_manual_order(0.35))
+    assert h._last_throttle_norm == 0.35
+
+
+def test_manual_hold_tripped_stops_rearming_deadman():
+    """Once tripped, a stuck non-zero throttle order no longer re-arms the
+    deadman -- so the ordinary timer expires and a full estop runs."""
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.manual_drive_max_hold_s = 1.0
+    h._manual_throttle_since = time.time() - 5.0
+    h.deadman_time = 0
+    h.InterpretOrders(_manual_order(0.35))
+    assert h._manual_hold_tripped is True
+    assert h._last_throttle_norm == 0.0
+    assert h.deadman_time == 0  # NOT re-armed while tripped
+
+
+def test_manual_hold_latched_until_zero_order():
+    """A stuck sender stays stopped -- the trip does not self-clear."""
+    h = make_helmsman()
+    _patch_vehicle_methods(h)
+    h.manual_drive_max_hold_s = 1.0
+    h._manual_throttle_since = time.time() - 5.0
+    h._manual_hold_tripped = True
+    h.deadman_time = 0
+    for _ in range(5):
+        h.InterpretOrders(_manual_order(0.35))
+        assert h._last_throttle_norm == 0.0
+        assert h._manual_hold_tripped is True
