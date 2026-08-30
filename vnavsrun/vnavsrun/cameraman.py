@@ -641,13 +641,27 @@ class Cameraman(vmqtt.VnavsNode):
                 else:
                     self.mark_hsv_spec = hsv_spec
                 if "save" in self.mark_payload:
-                    hsv_payload = vcomms.prepare_response(
-                        self.mark_payload, conf_request=True
-                    )
-                    hsv_payload.update(self.mark_hsv_spec.as_payload())
-                    print("MARK HSV", hsv_payload)
-                    hsv_payload[vconst.dname_field_name] = self.mark_payload["save"]
-                    self.publish(vconst.data_save_topic, hsv_payload)
+                    # Persist the HSV spec under the given data name. The
+                    # navigator's OnDataSave expects a PersistentData envelope
+                    # ({"pdata": {...}}); the range fields come back from
+                    # next_hsv_spec_fn() as np.uint8, which must be cast to
+                    # int or the navigator's json.dumps() save crashes.
+                    dname = self.mark_payload["save"]
+                    hsv_dict = {
+                        k: int(v)
+                        for k, v in self.mark_hsv_spec.as_payload().items()
+                    }
+                    pdata = {
+                        vdata.dkey_field_name: dname,
+                        vdata.dgroup_field_name: None,
+                        vdata.dfqn_field_name: dname,
+                        vdata.dclass_field_name: "str",
+                        vdata.dpayload_field_name: {
+                            vdata.dprimitive_field_name: json.dumps(hsv_dict)
+                        },
+                    }
+                    print("MARK HSV SAVE", dname, hsv_dict)
+                    self.publish(vconst.data_save_topic, {"pdata": pdata})
                 self.mark_payload = None  # only do the HSV processing once
             annotated = None
             an_fn = None
