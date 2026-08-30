@@ -206,6 +206,7 @@ class Cameraman(vmqtt.VnavsNode):
         "loop_mode",
         "loop_publish",
         "line_specs",
+        "mark_adapt",
         "mark_hsv_spec",
         "mark_minrange",
         "mark_open_dim",
@@ -326,6 +327,10 @@ class Cameraman(vmqtt.VnavsNode):
         #   mark_minrange -- floor on the auto-sampled HSV channel range
         self.mark_open_dim = 0
         self.mark_minrange = 20
+        # mark_adapt False -> chase_line keeps the marked HSV fixed as it
+        # climbs instead of re-sampling per slice (stops spec drift). Set with
+        # `mark --no-adapt`; best paired with an explicit --hsv.
+        self.mark_adapt = True
         # Named lane-edge lines: label -> (HsvSpec, RightRect start box). Each
         # is chased with chase_line() every frame and published under
         # payload["lane_lines"]. Populated by a `cameraman/mark` with a
@@ -549,6 +554,7 @@ class Cameraman(vmqtt.VnavsNode):
             kernel_dim=kernel_dim,
             iterations=iterations,
             open_dim=self.mark_open_dim,
+            adapt=self.mark_adapt,
         )
         list_list = opticchiasm.list_of_rotated_rect_as_list_of_dicts(rect_list)
         # print("MAKER ==>", list_list)
@@ -659,6 +665,8 @@ class Cameraman(vmqtt.VnavsNode):
                     self.mark_open_dim = int(self.mark_payload["open"])
                 if "minrange" in self.mark_payload:
                     self.mark_minrange = int(self.mark_payload["minrange"])
+                if "adapt" in self.mark_payload:
+                    self.mark_adapt = bool(int(self.mark_payload["adapt"]))
                 hsv_spec = opticchiasm.hsv_spec_from_payload(self.mark_payload)
                 if hsv_spec is None:
                     hsv_spec = opticchiasm.next_hsv_spec_fn(
@@ -713,6 +721,7 @@ class Cameraman(vmqtt.VnavsNode):
                     kernel_dim=7,
                     iterations=1,
                     open_dim=self.mark_open_dim,
+                    adapt=self.mark_adapt,
                 )
                 if seg_list:
                     lane_lines_result[label] = (

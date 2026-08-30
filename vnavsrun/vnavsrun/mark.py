@@ -54,6 +54,9 @@ def build_payload(args):
     if args.minrange is not None:
         payload["minrange"] = args.minrange
 
+    if args.no_adapt:
+        payload["adapt"] = 0
+
     if args.hsv is not None:
         hsv_parts = [int(v) for v in args.hsv.split(",")]
         if len(hsv_parts) != 6:
@@ -100,6 +103,11 @@ def main():
         "--minrange", type=int, default=None,
         help="Floor on the auto-sampled HSV channel range (default 20). "
         "Raise for a broader, more forgiving color match.",
+    )
+    parser.add_argument(
+        "--no-adapt", dest="no_adapt", action="store_true",
+        help="Keep the marked HSV fixed as chase_line climbs (no per-slice "
+        "re-sampling). Stops spec drift; pair with an explicit --hsv.",
     )
     parser.add_argument(
         "--save", default=None,
