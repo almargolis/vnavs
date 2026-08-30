@@ -650,6 +650,110 @@ class StepFollowLaneCenter(MissionStep):
         return False
 
 
+class StepFollowNearestBlob(MissionStep):
+    """Kludge crawl-along-a-line: hold the nearest detection at a fixed screen x.
+
+    'Nearest' = lowest on screen (largest center_y) among the cameraman's
+    center_line points, plus any published blobs. On the first frame it sees
+    one it locks that x as the PID target (target_x=auto), then steers to keep
+    the nearest detection there while creeping forward. Deliberately dumb --
+    just enough to see the rover move along the line. Needs a `mark` first so
+    the cameraman publishes center_line.
+
+    follow_nearest_blob : speed=18 : Kp=0.5 : Ki=0 : Kd=0.2 : target_x=auto :
+        lost_timeout=0.8 : lost_speed=0
+    """
+
+    __slots__ = (
+        "lost_speed",
+        "lost_timeout",
+        "next_time",
+        "pid",
+        "speed",
+        "target_x",
+    )
+
+    def __init__(self, stage):
+        super().__init__(stage)
+        self.next_time = None
+        self.pid = PID(SetPoint=160, KI=0, KD=0.2)
+        self.speed = 4
+        self.target_x = None  # None -> lock onto the first sighting
+        self.lost_timeout = 0.8
+        self.lost_speed = 0
+
+    def DoStageStepInit(self):
+        if "speed" in self.parm_kword:
+            self.speed = int(self.parm_kword["speed"])
+        if "Kp" in self.parm_kword:
+            self.pid.p_gain = float(self.parm_kword["Kp"])
+        if "Ki" in self.parm_kword:
+            self.pid.i_gain = float(self.parm_kword["Ki"])
+        if "Kd" in self.parm_kword:
+            self.pid.d_gain = float(self.parm_kword["Kd"])
+        if "lost_timeout" in self.parm_kword:
+            self.lost_timeout = float(self.parm_kword["lost_timeout"])
+        if "lost_speed" in self.parm_kword:
+            self.lost_speed = int(self.parm_kword["lost_speed"])
+        target = self.parm_kword.get("target_x", "auto")
+        if target != "auto":
+            self.target_x = float(target)
+            self.pid.target_value = self.target_x
+        self.next_time = 0
+        self.pid.Reset()
+
+    def _fresh(self):
+        newest = max(
+            getattr(self.navigator, "line_x_time", 0.0),
+            getattr(self.navigator, "blobs_time", 0.0),
+        )
+        return bool(newest) and (time.time() - newest) <= self.lost_timeout
+
+    def _nearest_x(self):
+        if not self._fresh():
+            return None
+        points = list(getattr(self.navigator, "line_centers", []) or [])
+        for rects in (getattr(self.navigator, "blobs", {}) or {}).values():
+            for r in rects:
+                points.append((r.center_x, r.center_y))
+        if points:
+            # lowest on screen == largest y == closest to the rover
+            return float(max(points, key=lambda p: p[1])[0])
+        line_x = getattr(self.navigator, "line_x", None)
+        return None if line_x is None else float(line_x)
+
+    def DoStageStepRun(self, loop_ct):
+        if time.time() > self.next_time:
+            nearest_x = self._nearest_x()
+            if nearest_x is None:
+                self.nav.speed = self.lost_speed
+                # hold last steering value
+                print(
+                    "StepFollowNearestBlob LOST speed=%s steering=%s"
+                    % (self.nav.speed, self.nav.steering)
+                )
+                self.PublishNavigation()
+            else:
+                if self.target_x is None:
+                    self.target_x = nearest_x
+                    self.pid.target_value = nearest_x
+                    print(
+                        "StepFollowNearestBlob LOCK target_x=%.1f" % nearest_x
+                    )
+                self.nav.steering = self.pid.GetOutput(nearest_x)
+                self.nav.speed = self.speed
+                self.nav.p_error = self.pid.error
+                self.nav.i_accumulator = self.pid.i_accumulator
+                self.nav.derivative = self.pid.derivative
+                print(
+                    "StepFollowNearestBlob nearest_x=%.1f speed=%s steering=%s"
+                    % (nearest_x, self.nav.speed, self.nav.steering)
+                )
+                self.PublishNavigation()
+            self.next_time = time.time() + 0.2
+        return False
+
+
 class StepGpsWaypoint(MissionStep):
     __slots__ = ("next_time", "speed", "waypoint", "differential_base_position")
 
@@ -1036,6 +1140,9 @@ class Mission:
         MissionStepDef("follow_line_trace", sclass=StepFollowLineTrace, defs=step_defs)
         MissionStepDef(
             "follow_lane_center", sclass=StepFollowLaneCenter, defs=step_defs
+        )
+        MissionStepDef(
+            "follow_nearest_blob", sclass=StepFollowNearestBlob, defs=step_defs
         )
         MissionStepDef("log_start", func=StartLog, defs=step_defs)
         MissionStepDef("log_stop", func=StopLog, defs=step_defs)

@@ -255,3 +255,88 @@ def test_do_cameraman_pic_ready_extracts_lane_lines():
     assert nav.lane_lines["left"][0].center_x == 40
     assert nav.lane_lines["right"][0].center_x == 260
     assert nav.lane_lines_time > 0
+
+
+# --- StepFollowNearestBlob (crawl kludge) --------------------------------
+
+
+def _make_nearest_step(line_centers=None, line_time=None, parm_kword=None):
+    mission = MockMission()
+    nav = mission.navigator
+    nav.line_centers = line_centers or []
+    nav.line_x = line_centers[0][0] if line_centers else None
+    nav.line_x_time = line_time if line_time is not None else (
+        time.time() if line_centers else 0.0
+    )
+    stage = MockStage(mission)
+    step = navigator.StepFollowNearestBlob(stage)
+    step.Load([], parm_kword or {}, [])
+    step.DoStageStepInit()
+    return step, mission
+
+
+def test_nearest_blob_picks_lowest_on_screen():
+    # (x, y) points; largest y is lowest on screen / closest
+    step, _ = _make_nearest_step(line_centers=[(100, 40), (130, 90), (150, 200)])
+    assert step._nearest_x() == 150.0
+
+
+def test_nearest_blob_includes_blobs():
+    step, mission = _make_nearest_step(line_centers=[(100, 40)])
+    mission.navigator.blobs = {"x": [_make_blob(220, 230, 10, 10)]}
+    mission.navigator.blobs_time = time.time()
+    assert step._nearest_x() == 220.0  # blob at y=230 beats line point at y=40
+
+
+def test_nearest_blob_none_when_stale():
+    step, _ = _make_nearest_step(
+        line_centers=[(150, 200)],
+        line_time=time.time() - 5.0,
+        parm_kword={"lost_timeout": "0.8"},
+    )
+    assert step._nearest_x() is None
+
+
+def test_nearest_blob_locks_target_on_first_sighting():
+    step, mission = _make_nearest_step(
+        line_centers=[(150, 200)], parm_kword={"speed": "18", "Kp": "0.5", "Kd": "0"}
+    )
+    published = []
+    mission.navigator.publish = lambda topic, payload, **kw: published.append(payload)
+    step.DoStageStepRun(1)
+    assert step.target_x == 150.0
+    assert step.pid.target_value == 150.0
+    # nearest_x == target on the locking frame -> zero steering command
+    assert published[0][navigator.helmsman.HELMSMAN_RAD_PER_SEC] == 0.0
+    assert step.nav.speed == 18
+
+
+def test_nearest_blob_explicit_target_x():
+    step, _ = _make_nearest_step(
+        line_centers=[(150, 200)], parm_kword={"target_x": "160"}
+    )
+    assert step.target_x == 160.0
+    assert step.pid.target_value == 160.0
+
+
+def test_nearest_blob_lost_stops_at_lost_speed():
+    step, mission = _make_nearest_step(
+        line_centers=[(150, 200)],
+        line_time=time.time() - 5.0,
+        parm_kword={"lost_timeout": "0.5", "lost_speed": "0"},
+    )
+    published = []
+    mission.navigator.publish = lambda topic, payload, **kw: published.append(payload)
+    step.DoStageStepRun(1)
+    assert step.nav.speed == 0
+    assert published[0][navigator.helmsman.HELMSMAN_CM_PER_SEC] == 0
+
+
+def test_follow_nearest_blob_step_registered():
+    mission = navigator.Mission(
+        name="t",
+        script=["stage : drive", "follow_nearest_blob : speed=18"],
+    )
+    stage = mission.stages_dict["drive"]
+    assert len(stage.steps) == 1
+    assert isinstance(stage.steps[0], navigator.StepFollowNearestBlob)
