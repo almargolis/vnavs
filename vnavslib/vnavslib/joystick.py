@@ -1,3 +1,7 @@
+# DEPRECATED: older evdev prototype (cm/s + rad/s path through the PID gain,
+# hard-coded /dev/input/eventN, `raise Error` on no pad). Superseded by
+# vnavsrun.headless_control (pygame, deadman button, recording, status). Kept
+# only for reference.
 import platform
 import sys
 import time

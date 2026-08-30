@@ -3,6 +3,7 @@ import tkinter
 from ezcomms import vnavs_const as vconst
 from vnavsrun import helmsman
 from vnavsrun import mission_control
+from vnavsrun import mission_functions as mf
 
 
 class _StubWidget:
@@ -47,6 +48,7 @@ def _make_mc(**overrides):
     mc.drive_steer_entry = _StubWidget("0.7")   # steer 0..1
     mc.drive_status = _StubWidget("stopped")
     mc.gamepad_label = _StubWidget("none")
+    mc.headless_status = _StubWidget("")
     mc.image_status_label = _StubWidget("Image: ON")
     mc.camera_iso_entry = _StubWidget("800")
     mc.camera_shutter_entry = _StubWidget("10000")
@@ -69,7 +71,7 @@ def test_publish_manual_drive_fields():
     assert topic == vconst.helmsman_orders_topic
     assert payload[helmsman.HELMSMAN_THROTTLE] == 0.4
     assert payload[helmsman.HELMSMAN_STEERING] == -0.6
-    assert payload[helmsman.HELMSMAN_TIMER] == 3
+    assert payload[helmsman.HELMSMAN_TIMER] == mf.MANUAL_DRIVE_TIMER
     assert helmsman.HELMSMAN_CM_PER_SEC not in payload
 
 
@@ -222,6 +224,22 @@ def test_cleanup_loop_stops_vehicle():
     assert mc._shutting_down is True
     _, payload = mc._published[0]
     assert payload[helmsman.HELMSMAN_THROTTLE] == 0.0
+
+
+def test_do_headless_status_updates_label():
+    mc = _make_mc()
+    mc.display_mode = mission_control.DISPLAY_MODE_LIVE
+    mc.do_headless_status(
+        mf.build_status_payload(
+            armed=True,
+            recording=True,
+            mission_id="headless_20260830120000",
+            throttle=0.2,
+            steering=-0.1,
+        )
+    )
+    v = mc.headless_status.value()
+    assert "ARMED" in v and "REC" in v and "headless_20260830120000" in v
 
 
 def test_key_press_ignores_entry_widget():

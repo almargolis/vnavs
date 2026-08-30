@@ -36,6 +36,7 @@ except ImportError:
 
 from vnavsrun import engineer_1
 from vnavsrun import helmsman
+from vnavsrun import mission_functions as mf
 from vnavsrun import navigator
 from ezcomms import vnavs_node as vmqtt
 from ezcomms import vnavs_const as vconst
@@ -134,6 +135,11 @@ class MissionControl(vmqtt.VnavsNode):
                     handler=self.do_process_result,
                     LatestOnly=True,
                 ),
+                vmqtt.Subscription(
+                    vconst.headless_control_status_topic,
+                    handler=self.do_headless_status,
+                    LatestOnly=True,
+                ),
             ],
             wait_if_not_connected=False,
             single_threaded=True,
@@ -162,6 +168,9 @@ class MissionControl(vmqtt.VnavsNode):
         self.tk = eztk.EasyTk(debug=True)
         self.tk.tkw.title("VNAVS Mission Control")
         self.status_frame = self.tk.add_label_frame("Status", row=1)
+        self.headless_status = self.status_frame.add_label_info(
+            "Headless:", value="(no headless_control)"
+        )
         self.thumbnail_frame = self.tk.add_label_frame("Thumbnails", row=2)
         self.notebook = self.tk.add_notebook(row=3)
 
@@ -630,17 +639,14 @@ class MissionControl(vmqtt.VnavsNode):
 
     def _publish_manual_drive(self, throttle, steer):
         """Publish a direct normalized manual command (-1..1) for the Drive
-        tab / keyboard / gamepad."""
-        throttle = max(-1.0, min(1.0, throttle))
-        steer = max(-1.0, min(1.0, steer))
-        payload = {
-            helmsman.HELMSMAN_THROTTLE: throttle,
-            helmsman.HELMSMAN_STEERING: steer,
-            helmsman.HELMSMAN_TIMER: 3,
-        }
-        self.publish(vconst.helmsman_orders_topic, payload)
+        tab / keyboard / gamepad. Shared with headless_control via
+        mission_functions so both send identical orders."""
+        payload = mf.publish_manual_drive(self, throttle, steer)
         self.drive_status.replace_value(
-            "thr={:+.2f} str={:+.2f}".format(throttle, steer)
+            "thr={:+.2f} str={:+.2f}".format(
+                payload[helmsman.HELMSMAN_THROTTLE],
+                payload[helmsman.HELMSMAN_STEERING],
+            )
         )
 
     def _publish_drive_order(self, speed, steer):
@@ -837,6 +843,11 @@ class MissionControl(vmqtt.VnavsNode):
         log_list = payload["log_list"]
         log_list.sort()
         self.bot_mission_entry.replace_choices(log_list)
+
+    def do_headless_status(self, payload, replay=False):
+        if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
+            return
+        self.headless_status.replace_value(mf.format_status(payload))
 
     def do_helmsman_orders(self, payload, replay=False):
         if (self.display_mode != DISPLAY_MODE_LIVE) and (not replay):
