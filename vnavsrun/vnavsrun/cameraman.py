@@ -205,6 +205,7 @@ class Cameraman(vmqtt.VnavsNode):
         "loop_format",
         "loop_mode",
         "loop_publish",
+        "line_specs",
         "mark_hsv_spec",
         "mark_payload",
         "mark_rect",
@@ -317,6 +318,11 @@ class Cameraman(vmqtt.VnavsNode):
         self.mark_payload = None
         self.mark_hsv_spec = None
         self.mark_rect = None
+        # Named lane-edge lines: label -> (HsvSpec, RightRect start box). Each
+        # is chased with chase_line() every frame and published under
+        # payload["lane_lines"]. Populated by a `cameraman/mark` with a
+        # "label" field (see `python -m vnavsrun.mark --label`).
+        self.line_specs = {}
         self.mission_id = None
         self.mission_logging = False
         self.orders_dict = CameramanOrdersDict()
@@ -369,6 +375,13 @@ class Cameraman(vmqtt.VnavsNode):
 
     def on_cameraman_mark(self, payload):
         print(payload)
+        action = payload.get("action")
+        if action == "clear_all":
+            self.line_specs = {}
+            return
+        if action == "clear":
+            self.line_specs.pop(payload.get("label"), None)
+            return
         self.mark_rect = opticchiasm.right_from_payload(payload)
         self.mark_payload = payload
 
@@ -635,9 +648,15 @@ class Cameraman(vmqtt.VnavsNode):
                 # If the payload has a save parameter, save it in mission persistant data.
                 hsv_spec = opticchiasm.hsv_spec_from_payload(self.mark_payload)
                 if hsv_spec is None:
-                    self.mark_hsv_spec = opticchiasm.next_hsv_spec_fn(
+                    hsv_spec = opticchiasm.next_hsv_spec_fn(
                         this_image.im_as_hsv(), rotated_rect=self.mark_rect
                     )
+                label = self.mark_payload.get("label")
+                if label:
+                    # A named lane-edge line -- track it independently in
+                    # image_burst()'s chase_line() loop below rather than as
+                    # the single maker_faire_2018 center line.
+                    self.line_specs[label] = (hsv_spec, self.mark_rect)
                 else:
                     self.mark_hsv_spec = hsv_spec
                 if "save" in self.mark_payload:
@@ -648,8 +667,7 @@ class Cameraman(vmqtt.VnavsNode):
                     # int or the navigator's json.dumps() save crashes.
                     dname = self.mark_payload["save"]
                     hsv_dict = {
-                        k: int(v)
-                        for k, v in self.mark_hsv_spec.as_payload().items()
+                        k: int(v) for k, v in hsv_spec.as_payload().items()
                     }
                     pdata = {
                         vdata.dkey_field_name: dname,
@@ -666,6 +684,24 @@ class Cameraman(vmqtt.VnavsNode):
             annotated = None
             an_fn = None
             rect_list = self.maker_faire_2018(this_image)
+            lane_lines_result = {}
+            for label, (line_spec, line_rect) in self.line_specs.items():
+                if (line_spec is None) or (line_rect is None):
+                    continue
+                line_end_y = line_rect.top_y(0) - (line_rect.height * 10)
+                if line_end_y < 0:
+                    line_end_y = 0
+                seg_list = this_image.chase_line(
+                    hsvspec=line_spec,
+                    rect=line_rect,
+                    end_y=line_end_y,
+                    kernel_dim=7,
+                    iterations=1,
+                )
+                if seg_list:
+                    lane_lines_result[label] = (
+                        opticchiasm.list_of_rotated_rect_as_list_of_dicts(seg_list)
+                    )
             blobs_result = {}
             for label, (hsv_spec, rect) in self.blob_specs.items():
                 blob_list, _ = this_image.find_color_blobs(
@@ -691,6 +727,7 @@ class Cameraman(vmqtt.VnavsNode):
             payload["capture_publish"] = self.capture_publish
             payload["capture_fps"] = self.burst_fps_rate
             payload["center_line"] = rect_list
+            payload["lane_lines"] = lane_lines_result
             payload["blobs"] = blobs_result
             self.publish(vconst.cameraman_pic_ready_topic, payload)
             # print("P", self.mqttc.connected, payload)

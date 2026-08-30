@@ -143,3 +143,115 @@ def test_do_cameraman_pic_ready_extracts_blobs():
     assert nav.blobs["red_sign"][0].center_x == 160
     assert nav.blobs["red_sign"][0].width == 30
     assert nav.blobs_time > 0
+
+
+# --- StepFollowLaneCenter -------------------------------------------------
+
+
+def _make_lane_step(lane_lines=None, lane_time=None, parm_kword=None):
+    mission = MockMission()
+    nav = mission.navigator
+    nav.lane_lines = lane_lines or {}
+    if lane_time is not None:
+        nav.lane_lines_time = lane_time
+    else:
+        nav.lane_lines_time = time.time() if lane_lines else 0.0
+    stage = MockStage(mission)
+    step = navigator.StepFollowLaneCenter(stage)
+    step.Load([], parm_kword or {}, [])
+    step.DoStageStepInit()
+    return step, mission
+
+
+def test_lane_center_midpoint_of_both_edges():
+    lines = {
+        "left": [_make_blob(40, 220, 10, 20)],
+        "right": [_make_blob(260, 220, 10, 20)],
+    }
+    step, _ = _make_lane_step(lane_lines=lines, parm_kword={"lane_half_width": "95"})
+    assert step._lane_center_x() == 150.0
+
+
+def test_lane_center_falls_back_to_left_offset():
+    lines = {"left": [_make_blob(40, 220, 10, 20)]}
+    step, _ = _make_lane_step(lane_lines=lines, parm_kword={"lane_half_width": "95"})
+    assert step._lane_center_x() == 135.0
+
+
+def test_lane_center_falls_back_to_right_offset():
+    lines = {"right": [_make_blob(260, 220, 10, 20)]}
+    step, _ = _make_lane_step(lane_lines=lines, parm_kword={"lane_half_width": "95"})
+    assert step._lane_center_x() == 165.0
+
+
+def test_lane_center_none_when_stale():
+    lines = {
+        "left": [_make_blob(40, 220, 10, 20)],
+        "right": [_make_blob(260, 220, 10, 20)],
+    }
+    step, _ = _make_lane_step(
+        lane_lines=lines,
+        lane_time=time.time() - 5.0,
+        parm_kword={"line_lost_timeout": "0.6"},
+    )
+    assert step._lane_center_x() is None
+
+
+def test_lane_center_none_when_no_lines():
+    step, _ = _make_lane_step()
+    assert step._lane_center_x() is None
+
+
+def test_lane_center_custom_labels():
+    lines = {
+        "lane_left": [_make_blob(50, 220, 10, 20)],
+        "lane_right": [_make_blob(250, 220, 10, 20)],
+    }
+    step, _ = _make_lane_step(
+        lane_lines=lines,
+        parm_kword={"left_label": "lane_left", "right_label": "lane_right"},
+    )
+    assert step._lane_center_x() == 150.0
+
+
+def test_lane_center_step_run_steers_and_publishes():
+    lines = {
+        "left": [_make_blob(40, 220, 10, 20)],
+        "right": [_make_blob(240, 220, 10, 20)],  # midpoint 140, left of target
+    }
+    step, mission = _make_lane_step(
+        lane_lines=lines,
+        parm_kword={"speed": "25", "target_x": "160", "Kp": "0.5", "Kd": "0"},
+    )
+    published = []
+    mission.navigator.publish = lambda topic, payload, **kw: published.append(payload)
+    step.DoStageStepRun(1)
+    assert step.nav.speed == 25
+    assert len(published) == 1
+    # midpoint 140 - target 160 = -20 error, Kp 0.5 -> -10.0 steering command
+    assert published[0][navigator.helmsman.HELMSMAN_RAD_PER_SEC] == -10.0
+
+
+def test_follow_lane_center_step_registered():
+    mission = navigator.Mission(
+        name="t",
+        script=["stage : drive", "follow_lane_center : speed=20 : Kp=0.5"],
+    )
+    stage = mission.stages_dict["drive"]
+    assert len(stage.steps) == 1
+    assert isinstance(stage.steps[0], navigator.StepFollowLaneCenter)
+
+
+def test_do_cameraman_pic_ready_extracts_lane_lines():
+    nav = MockNavigator()
+    nav.lane_lines = {}
+    nav.lane_lines_time = 0.0
+    left_dicts = oc.list_of_rotated_rect_as_list_of_dicts([_make_blob(40, 220, 10, 20)])
+    right_dicts = oc.list_of_rotated_rect_as_list_of_dicts(
+        [_make_blob(260, 220, 10, 20)]
+    )
+    payload = {"lane_lines": {"left": left_dicts, "right": right_dicts}}
+    navigator.navigator.DoCameramanPicReady(nav, payload)
+    assert nav.lane_lines["left"][0].center_x == 40
+    assert nav.lane_lines["right"][0].center_x == 260
+    assert nav.lane_lines_time > 0

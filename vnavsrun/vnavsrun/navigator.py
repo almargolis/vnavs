@@ -520,6 +520,136 @@ class StepFollowLineTrace(MissionStep):
         return False
 
 
+class StepFollowLaneCenter(MissionStep):
+    """PID steer toward the midpoint of two tracked lane-edge lines.
+
+    The cameraman publishes each named line (calibrated with `mark --label`)
+    as a polyline on `cameraman/pic_ready` under `lane_lines`. This step takes
+    the near-field x of the left and right lines and targets their midpoint.
+    When only one line is visible -- a dashed segment gap, or a line leaving
+    the frame on a curve -- it falls back to a fixed `lane_half_width` offset
+    from the line it still has. When neither is visible it runs the usual
+    line-lost handling.
+
+    follow_lane_center : speed=25 : Kp=0.6 : Kd=0.3 : target_x=160 :
+        lane_half_width=95 : left_label=left : right_label=right :
+        line_lost_mode=slow_hold : line_lost_speed=10 : line_lost_timeout=0.6
+    """
+
+    __slots__ = (
+        "lane_half_width",
+        "left_label",
+        "line_lost_mode",
+        "line_lost_speed",
+        "line_lost_timeout",
+        "next_time",
+        "pid",
+        "right_label",
+        "speed",
+    )
+
+    def __init__(self, stage):
+        super().__init__(stage)
+        self.next_time = None
+        self.pid = PID(SetPoint=160, KI=0, KD=1)
+        self.speed = 4
+        self.lane_half_width = 90.0
+        self.left_label = "left"
+        self.right_label = "right"
+        self.line_lost_mode = LINE_LOST_SLOW_HOLD
+        self.line_lost_speed = None
+        self.line_lost_timeout = LINE_LOST_TIMEOUT
+
+    def DoStageStepInit(self):
+        if "speed" in self.parm_kword:
+            self.speed = int(self.parm_kword["speed"])
+        if "Kp" in self.parm_kword:
+            self.pid.p_gain = float(self.parm_kword["Kp"])
+        if "Ki" in self.parm_kword:
+            self.pid.i_gain = float(self.parm_kword["Ki"])
+        if "Kd" in self.parm_kword:
+            self.pid.d_gain = float(self.parm_kword["Kd"])
+        if "lane_half_width" in self.parm_kword:
+            self.lane_half_width = float(self.parm_kword["lane_half_width"])
+        if "left_label" in self.parm_kword:
+            self.left_label = self.parm_kword["left_label"]
+        if "right_label" in self.parm_kword:
+            self.right_label = self.parm_kword["right_label"]
+        if "line_lost_mode" in self.parm_kword:
+            self.line_lost_mode = self.parm_kword["line_lost_mode"]
+        if "line_lost_speed" in self.parm_kword:
+            self.line_lost_speed = int(self.parm_kword["line_lost_speed"])
+        if "line_lost_timeout" in self.parm_kword:
+            self.line_lost_timeout = float(self.parm_kword["line_lost_timeout"])
+        if self.line_lost_speed is None:
+            self.line_lost_speed = max(1, self.speed // 2)
+        if "target_x" in self.parm_kword:
+            self.pid.target_value = float(self.parm_kword["target_x"])
+        self.next_time = 0
+        self.pid.Reset()
+
+    def _near_x(self, label):
+        lines = getattr(self.navigator, "lane_lines", {}) or {}
+        segments = lines.get(label)
+        if not segments:
+            return None
+        # chase_line() appends bottom (nearest the rover) first.
+        return segments[0].center_x
+
+    def _lane_center_x(self):
+        lines_time = getattr(self.navigator, "lane_lines_time", 0.0)
+        if not lines_time:
+            return None
+        if (time.time() - lines_time) > self.line_lost_timeout:
+            return None
+        left_x = self._near_x(self.left_label)
+        right_x = self._near_x(self.right_label)
+        if (left_x is not None) and (right_x is not None):
+            return (left_x + right_x) / 2.0
+        if left_x is not None:
+            return left_x + self.lane_half_width
+        if right_x is not None:
+            return right_x - self.lane_half_width
+        return None
+
+    def _handle_line_lost(self):
+        if self.line_lost_mode == LINE_LOST_STOP:
+            self.nav.speed = 0
+            self.nav.steering = 0
+        elif self.line_lost_mode == LINE_LOST_COAST_STRAIGHT:
+            self.nav.speed = self.line_lost_speed
+            self.nav.steering = 0
+        else:  # LINE_LOST_SLOW_HOLD
+            self.nav.speed = self.line_lost_speed
+            # keep last steering value
+        print(
+            "StepFollowLaneCenter LINE LOST mode=%s speed=%s steering=%s"
+            % (self.line_lost_mode, self.nav.speed, self.nav.steering)
+        )
+        self.PublishNavigation()
+
+    def DoStageStepRun(self, loop_ct):
+        if time.time() > self.next_time:
+            center_x = self._lane_center_x()
+            if center_x is None:
+                self._handle_line_lost()
+            else:
+                self.nav.steering = self.pid.GetOutput(center_x)
+                self.nav.speed = self.speed
+                self.nav.p_error = self.pid.error
+                self.nav.i_accumulator = self.pid.i_accumulator
+                self.nav.derivative = self.pid.derivative
+                print(
+                    "StepFollowLaneCenter.DoStageStepRun() LANEpid",
+                    center_x,
+                    self.nav.speed,
+                    self.nav.steering,
+                )
+                self.PublishNavigation()
+            self.next_time = time.time() + 0.5
+        return False
+
+
 class StepGpsWaypoint(MissionStep):
     __slots__ = ("next_time", "speed", "waypoint", "differential_base_position")
 
@@ -904,6 +1034,9 @@ class Mission:
         MissionStepDef("gps", sclass=StepGpsWaypoint, defs=step_defs)
         MissionStepDef("follow_line_pid", sclass=StepFollowLinePid, defs=step_defs)
         MissionStepDef("follow_line_trace", sclass=StepFollowLineTrace, defs=step_defs)
+        MissionStepDef(
+            "follow_lane_center", sclass=StepFollowLaneCenter, defs=step_defs
+        )
         MissionStepDef("log_start", func=StartLog, defs=step_defs)
         MissionStepDef("log_stop", func=StopLog, defs=step_defs)
         MissionStepDef("magic", sclass=StepMagic, defs=step_defs)
@@ -1254,6 +1387,8 @@ class navigator(vmqtt.VnavsNode):
         self.line_centers = []
         self.line_x = None
         self.line_x_time = 0.0
+        self.lane_lines = {}
+        self.lane_lines_time = 0.0
         self.mission = None
         self.mission_load_payload = None
         self.mission_sync_event_payload = None
@@ -1355,6 +1490,13 @@ class navigator(vmqtt.VnavsNode):
                         math.atan2(adjacent_len, opposite_len)
                     )
                     # print("DoCameramanPicReady()", self.line_x, start_y, end_x, end_y, self.line_angle, "<<<")
+        if payload.get("lane_lines"):
+            self.lane_lines = {}
+            for label, line_dicts in payload["lane_lines"].items():
+                self.lane_lines[label] = oc.list_of_rotated_rect_from_list_of_dicts(
+                    line_dicts
+                )
+            self.lane_lines_time = time.time()
         if payload.get("blobs"):
             self.blobs = {}
             for label, blob_dicts in payload["blobs"].items():

@@ -7,6 +7,13 @@ Usage:
     python -m vnavsrun.mark --rect y,x,w,h
     python -m vnavsrun.mark --rect y,x,w,h --hsv hue,huerange,sat,satrange,val,valrange
     python -m vnavsrun.mark --rect y,x,w,h --save lane_color
+
+    # Two-line lane centering (follow_lane_center step): calibrate each edge
+    # under its own label; the cameraman chases both every frame.
+    python -m vnavsrun.mark --label left  --rect 150,10,90,50 --hsv 0,179,15,18,235,25
+    python -m vnavsrun.mark --label right --rect 150,220,90,50 --hsv 0,179,15,18,235,25
+    python -m vnavsrun.mark --label left --clear     # drop one
+    python -m vnavsrun.mark --clear                  # drop all lane lines
 """
 
 import argparse
@@ -18,11 +25,24 @@ from ezcomms import vnavs_const as vconst
 
 
 def build_payload(args):
+    if args.clear:
+        # A clear needs no rectangle. --label names one line; without it,
+        # every lane line is dropped.
+        if args.label is not None:
+            return {"action": "clear", "label": args.label}
+        return {"action": "clear_all"}
+
+    if args.rect is None:
+        print("--rect is required unless --clear is given")
+        sys.exit(1)
     parts = [int(v) for v in args.rect.split(",")]
     if len(parts) != 4:
         print("--rect requires exactly 4 values: y,x,w,h")
         sys.exit(1)
     payload = {"y": parts[0], "x": parts[1], "w": parts[2], "h": parts[3]}
+
+    if args.label is not None:
+        payload["label"] = args.label
 
     if args.hsv is not None:
         hsv_parts = [int(v) for v in args.hsv.split(",")]
@@ -45,8 +65,17 @@ def build_payload(args):
 def main():
     parser = argparse.ArgumentParser(description="Publish a cameraman mark payload.")
     parser.add_argument(
-        "--rect", required=True,
-        help="Rectangle as y,x,w,h (pixels from top-left)",
+        "--rect", default=None,
+        help="Rectangle as y,x,w,h (pixels from top-left). Required unless --clear.",
+    )
+    parser.add_argument(
+        "--label", default=None,
+        help="Track as a named lane-edge line (e.g. left, right) for the "
+        "follow_lane_center step, instead of the single center line.",
+    )
+    parser.add_argument(
+        "--clear", action="store_true",
+        help="Remove the --label lane line (or all lane lines if no --label).",
     )
     parser.add_argument(
         "--hsv", default=None,

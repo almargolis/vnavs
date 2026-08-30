@@ -10,6 +10,7 @@ def _make_cameraman():
     """Create a Cameraman instance without calling __init__."""
     cam = object.__new__(cameraman.Cameraman)
     cam.blob_specs = {}
+    cam.line_specs = {}
     return cam
 
 
@@ -107,3 +108,30 @@ def test_on_cameraman_blob_spec_clear_all():
     payload = {"action": "clear_all"}
     cam.on_cameraman_blob_spec(payload)
     assert cam.blob_specs == {}
+
+
+def test_on_cameraman_mark_labeled_defers_to_burst():
+    cam = _make_cameraman()
+    cam.mark_payload = None
+    payload = {"y": 150, "x": 10, "w": 90, "h": 50, "label": "left"}
+    cam.on_cameraman_mark(payload)
+    # The HSV resolution needs a captured frame, so it is deferred to
+    # image_burst(); on_cameraman_mark only stashes the payload + start box.
+    assert cam.mark_payload is payload
+    assert cam.mark_rect.x_min == 10
+    assert cam.mark_rect.x_max == 100
+    assert cam.line_specs == {}
+
+
+def test_on_cameraman_mark_clear_one_line():
+    cam = _make_cameraman()
+    cam.line_specs = {"left": ("s", "r"), "right": ("s", "r")}
+    cam.on_cameraman_mark({"action": "clear", "label": "left"})
+    assert set(cam.line_specs) == {"right"}
+
+
+def test_on_cameraman_mark_clear_all_lines():
+    cam = _make_cameraman()
+    cam.line_specs = {"left": ("s", "r"), "right": ("s", "r")}
+    cam.on_cameraman_mark({"action": "clear_all"})
+    assert cam.line_specs == {}
