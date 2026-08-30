@@ -153,7 +153,9 @@ class MissionControl(vmqtt.VnavsNode):
             self.download_dir
         )  # this expands tilde in path
 
-        self.scripts_dir = self.config.get("MissionControl", "Scripts")
+        self.scripts_dir = os.path.expanduser(
+            self.config.get("MissionControl", "Scripts")
+        )
         # The default BuifferLen is 4096 which I settled on at some time in the past while working on FastMqtt.
         # That involved some testing, but not rigorously. I just figured out it was taking 2 seconds to
         # transfer a 130K image from the bot to mission control. I then changed the buffer on the client end
