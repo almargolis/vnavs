@@ -207,6 +207,8 @@ class Cameraman(vmqtt.VnavsNode):
         "loop_publish",
         "line_specs",
         "mark_hsv_spec",
+        "mark_minrange",
+        "mark_open_dim",
         "mark_payload",
         "mark_rect",
         "mission_id",
@@ -318,6 +320,12 @@ class Cameraman(vmqtt.VnavsNode):
         self.mark_payload = None
         self.mark_hsv_spec = None
         self.mark_rect = None
+        # Vision knobs, live-tunable from `mark` (see on/in image_burst):
+        #   mark_open_dim -- morphological-opening kernel to drop speckle
+        #                    before line detection (0 = off)
+        #   mark_minrange -- floor on the auto-sampled HSV channel range
+        self.mark_open_dim = 0
+        self.mark_minrange = 20
         # Named lane-edge lines: label -> (HsvSpec, RightRect start box). Each
         # is chased with chase_line() every frame and published under
         # payload["lane_lines"]. Populated by a `cameraman/mark` with a
@@ -540,6 +548,7 @@ class Cameraman(vmqtt.VnavsNode):
             end_y=end_y,
             kernel_dim=kernel_dim,
             iterations=iterations,
+            open_dim=self.mark_open_dim,
         )
         list_list = opticchiasm.list_of_rotated_rect_as_list_of_dicts(rect_list)
         # print("MAKER ==>", list_list)
@@ -646,10 +655,16 @@ class Cameraman(vmqtt.VnavsNode):
                 # If an HsvSpec is in the payload, use that. Otherwise create an HsvSpec from
                 # the image at the rectangle.
                 # If the payload has a save parameter, save it in mission persistant data.
+                if "open" in self.mark_payload:
+                    self.mark_open_dim = int(self.mark_payload["open"])
+                if "minrange" in self.mark_payload:
+                    self.mark_minrange = int(self.mark_payload["minrange"])
                 hsv_spec = opticchiasm.hsv_spec_from_payload(self.mark_payload)
                 if hsv_spec is None:
                     hsv_spec = opticchiasm.next_hsv_spec_fn(
-                        this_image.im_as_hsv(), rotated_rect=self.mark_rect
+                        this_image.im_as_hsv(),
+                        rotated_rect=self.mark_rect,
+                        minrange=self.mark_minrange,
                     )
                 label = self.mark_payload.get("label")
                 if label:
@@ -697,6 +712,7 @@ class Cameraman(vmqtt.VnavsNode):
                     end_y=line_end_y,
                     kernel_dim=7,
                     iterations=1,
+                    open_dim=self.mark_open_dim,
                 )
                 if seg_list:
                     lane_lines_result[label] = (

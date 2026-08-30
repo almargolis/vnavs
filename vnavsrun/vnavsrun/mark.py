@@ -8,6 +8,10 @@ Usage:
     python -m vnavsrun.mark --rect y,x,w,h --hsv hue,huerange,sat,satrange,val,valrange
     python -m vnavsrun.mark --rect y,x,w,h --save lane_color
 
+    # Noisy mask? --open drops isolated speckle (erode+dilate) before
+    # detection; --minrange broadens the auto-sampled color match:
+    python -m vnavsrun.mark --rect y,x,w,h --open 3 --minrange 40
+
     # Two-line lane centering (follow_lane_center step): calibrate each edge
     # under its own label; the cameraman chases both every frame.
     python -m vnavsrun.mark --label left  --rect 150,10,90,50 --hsv 0,179,15,18,235,25
@@ -43,6 +47,12 @@ def build_payload(args):
 
     if args.label is not None:
         payload["label"] = args.label
+
+    if args.open_dim is not None:
+        payload["open"] = args.open_dim
+
+    if args.minrange is not None:
+        payload["minrange"] = args.minrange
 
     if args.hsv is not None:
         hsv_parts = [int(v) for v in args.hsv.split(",")]
@@ -80,6 +90,16 @@ def main():
     parser.add_argument(
         "--hsv", default=None,
         help="HSV spec as hue,huerange,saturation,saturationrange,value,valuerange",
+    )
+    parser.add_argument(
+        "--open", dest="open_dim", type=int, default=None,
+        help="Morphological-opening kernel (px) to drop isolated speckle "
+        "before line detection. 0 = off. Try 2-3; keep below the line width.",
+    )
+    parser.add_argument(
+        "--minrange", type=int, default=None,
+        help="Floor on the auto-sampled HSV channel range (default 20). "
+        "Raise for a broader, more forgiving color match.",
     )
     parser.add_argument(
         "--save", default=None,
