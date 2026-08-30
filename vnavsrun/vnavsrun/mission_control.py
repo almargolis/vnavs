@@ -237,6 +237,9 @@ class MissionControl(vmqtt.VnavsNode):
 
         buttonframe = mission_tab.add_frame(colspan=COL_SPAN_ALL)
         buttonframe.add_button(
+            "E-STOP (Esc)", command=self.on_estop, row=SAME_ROW, col=NEXT_COL
+        )
+        buttonframe.add_button(
             "Cancel", command=self.on_cancel_mission, row=SAME_ROW, col=NEXT_COL
         )
         buttonframe.add_button(
@@ -324,6 +327,9 @@ class MissionControl(vmqtt.VnavsNode):
             "STOP (Space)", command=self.on_drive_stop, row=SAME_ROW, col=NEXT_COL
         )
         btn_frame.add_button(
+            "E-STOP (Esc)", command=self.on_estop, row=SAME_ROW, col=NEXT_COL
+        )
+        btn_frame.add_button(
             "Right (D)", command=self.on_drive_right, row=SAME_ROW, col=NEXT_COL
         )
         btn_frame.add_button(
@@ -394,6 +400,9 @@ class MissionControl(vmqtt.VnavsNode):
         # Keyboard bindings
         self.tk.tkw.bind("<KeyPress>", self.on_key_press)
         self.tk.tkw.bind("<KeyRelease>", self.on_key_release)
+        # Panic key: E-stop must fire regardless of which widget has focus
+        # (on_key_press bails out early when a text entry is focused).
+        self.tk.tkw.bind_all("<Escape>", lambda e: self.on_estop())
 
         # Window close button -> stop the vehicle and exit cleanly. Without
         # this the close raises a TclError out of tk.update() that the base
@@ -692,6 +701,9 @@ class MissionControl(vmqtt.VnavsNode):
         ):
             return
         key = event.keysym.lower()
+        if key == "escape":
+            self.on_estop()
+            return
         if key == "space":
             self.on_drive_stop()
             return
@@ -752,6 +764,24 @@ class MissionControl(vmqtt.VnavsNode):
             self.mission_stage_entry.replace_value(
                 self.mission.stages_list[next_stage_ix]
             )
+
+    def on_estop(self):
+        """Immediate E-stop from the laptop. Neutralises the ESC and clears
+        the helmsman's order queue (STATE_ESTOPPED -- stays stopped until a
+        fresh moving order), cancels any running mission stage, and drops all
+        local drive state so the client loop can't re-publish a move."""
+        print("MISSION CONTROL E-STOP")
+        self.keys_held.clear()
+        self.drive_active = False
+        self.gamepad_speed = 0.0
+        self.gamepad_steer = 0.0
+        mf.publish_estop(self)
+        self.publish(
+            vconst.mission_cancel_topic,
+            {"mission_name": self.mission_name_entry.value()},
+        )
+        self.drive_status.replace_value("E-STOP")
+        self.mission_status.replace_value("E-STOP")
 
     def on_cancel_mission(self):
         print("on_cancel_mission()")

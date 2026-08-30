@@ -83,7 +83,13 @@ class Picamera2Wrapper:
         self._iso = 100
         self._shutter_speed = 0
         config_opts = {
-            "main": {"size": resolution, "format": "BGR888"},
+            # picamera2 format names are byte-order (little-endian), reversed
+            # from numpy index order: "RGB888" makes capture_array() return a
+            # BGR-ordered array -- which is what cv2 (imwrite, cvtColor) and
+            # opticchiasm (BGR2HSV) downstream all assume. "BGR888" here gave
+            # R/B-swapped JPEGs and a swapped HSV pipeline (self-consistent
+            # only because lane_color was calibrated against the same swap).
+            "main": {"size": resolution, "format": "RGB888"},
             "transform": Transform(hflip=self.hflip, vflip=self.vflip),
         }
         if controls:
