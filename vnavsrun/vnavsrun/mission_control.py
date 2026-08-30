@@ -662,22 +662,22 @@ class MissionControl(vmqtt.VnavsNode):
         self.gamepad.init()
         self.gamepad_active = True
         self.gamepad_label.replace_value(self.gamepad.get_name())
-        t = threading.Thread(target=self._gamepad_poll_loop, daemon=True)
-        t.start()
+        self._gamepad_poll_tick()
 
-    def _gamepad_poll_loop(self):
+    def _gamepad_poll_tick(self):
+        """Poll gamepad via Tkinter after() so SDL runs on the main thread."""
         DEADZONE = 0.15
-        while self.gamepad_active:
-            pygame.event.pump()
-            raw_steer = self.gamepad.get_axis(0)  # left/right
-            raw_speed = self.gamepad.get_axis(1)  # up/down (inverted)
-            if abs(raw_steer) < DEADZONE:
-                raw_steer = 0.0
-            if abs(raw_speed) < DEADZONE:
-                raw_speed = 0.0
-            self.gamepad_speed = -raw_speed  # invert: up = forward
-            self.gamepad_steer = raw_steer
-            time.sleep(0.05)  # 20 Hz
+        pygame.event.pump()
+        raw_steer = self.gamepad.get_axis(0)  # left/right
+        raw_speed = self.gamepad.get_axis(1)  # up/down (inverted)
+        if abs(raw_steer) < DEADZONE:
+            raw_steer = 0.0
+        if abs(raw_speed) < DEADZONE:
+            raw_speed = 0.0
+        self.gamepad_speed = -raw_speed  # invert: up = forward
+        self.gamepad_steer = raw_steer
+        if self.gamepad_active:
+            self.tk.tkw.after(50, self._gamepad_poll_tick)
 
     def on_stage_execute(self):
         this_stage = self.mission_stage_entry.value()
