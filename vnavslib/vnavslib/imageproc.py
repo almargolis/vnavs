@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import cv2
 
+from cvpipeline import image_filters
 from cvpipeline import opticchiasm
 from ezcomms import vnavs_const as vconst
 from ezcomms import vnavs_node as vmqtt
@@ -63,7 +64,7 @@ class FrameState:
     image_path: str = ""
     image_fn: str = ""
     this_image: object = None
-    blobs_result: dict = field(default_factory=dict)
+    hough_lines: list = field(default_factory=list)
 
 
 class ImageProc:
@@ -94,19 +95,10 @@ class ImageProc:
             self.control.iso = 800
 
     def process_frame(self, frame):
-        """Apply blob detection and pipeline steps to a captured frame."""
+        """Apply pipeline steps to a captured frame."""
         ctrl = self.control
         if frame.this_image is None:
             frame.this_image = opticchiasm.Image(opencv_fn=frame.image_path)
-        frame.blobs_result = {}
-        for label, (hsv_spec, rect) in ctrl.blob_specs.items():
-            blob_list, _ = frame.this_image.find_color_blobs(
-                hsv_spec, rect=rect, minimum_blob_area=20
-            )
-            if blob_list:
-                frame.blobs_result[label] = (
-                    opticchiasm.list_of_rotated_rect_as_list_of_dicts(blob_list)
-                )
         if ctrl.pipeline_steps:
             from cvpipeline import processsteps
             ctrl.pipeline_steps[0].source_im = frame.this_image
@@ -116,6 +108,9 @@ class ImageProc:
                 if trace is not None:
                     print(f"Pipeline step {step.ix} error: {trace}")
                     break
+            last_step = ctrl.pipeline_steps[-1]
+            if last_step.cv_filter_name == image_filters.FILTER_NAME_HOUGH_LINES_P:
+                frame.hough_lines = last_step.exec_objects
 
     def publish_frame(self, frame, burst):
         """Publish results and sync camera settings after processing a frame."""
@@ -131,7 +126,7 @@ class ImageProc:
         payload["capture_format"] = ctrl.capture_format
         payload["capture_publish"] = ctrl.capture_publish
         payload["capture_fps"] = burst.fps_rate
-        payload["blobs"] = frame.blobs_result
+        payload["blobs"] = frame.hough_lines
         ctrl.publish(vconst.cameraman_pic_ready_topic, payload)
         # Sync camera hardware with ControlState (ISO 100 ~ AnalogueGain 1.0)
         ctrl.camera.set_controls({
