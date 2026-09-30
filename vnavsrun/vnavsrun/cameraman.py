@@ -68,16 +68,10 @@ class Cameraman(vmqtt.VnavsNode):
     )
 
     # ### post_process() and post_processes are deprecated?
-    # ### self.maker_faire_2018 deprecated
 
     def __init__(self, verbose=True):
         super().__init__(
             subscriptions=[
-                vmqtt.Subscription(
-                    vconst.cameraman_mark_topic,
-                    async_delivery=True,
-                    handler=self.on_cameraman_mark,
-                ),
                 vmqtt.Subscription(
                     vconst.cameraman_orders_topic,
                     async_delivery=True,
@@ -203,18 +197,6 @@ class Cameraman(vmqtt.VnavsNode):
             self.control.cam_compiled = compile(
                 self.control.cam_script, "cvcode.py", "exec", dont_inherit=True
             )
-
-    def on_cameraman_mark(self, payload):
-        print(payload)
-        action = payload.get("action")
-        if action == "clear_all":
-            self.control.line_specs = {}
-            return
-        if action == "clear":
-            self.control.line_specs.pop(payload.get("label"), None)
-            return
-        self.control.mark_rect = opticchiasm.right_from_payload(payload)
-        self.control.mark_payload = payload
 
     def on_cameraman_blob_spec(self, payload):
         action = payload.get("action", "set")

@@ -3,14 +3,14 @@ import configparser
 import cv2
 import numpy as np
 from cvpipeline import opticchiasm as oc
+from vnavslib.imageproc import ControlState
 from vnavsrun import cameraman
 
 
 def _make_cameraman():
     """Create a Cameraman instance without calling __init__."""
     cam = object.__new__(cameraman.Cameraman)
-    cam.blob_specs = {}
-    cam.line_specs = {}
+    cam.control = ControlState()
     return cam
 
 
@@ -60,8 +60,8 @@ def test_on_cameraman_blob_spec_set():
         "x_max": 320,
     }
     cam.on_cameraman_blob_spec(payload)
-    assert "red_sign" in cam.blob_specs
-    hsv_spec, rect = cam.blob_specs["red_sign"]
+    assert "red_sign" in cam.control.blob_specs
+    hsv_spec, rect = cam.control.blob_specs["red_sign"]
     assert hsv_spec.hue == 170
     assert hsv_spec.huerange == 10
     assert hsv_spec.saturation == 200
@@ -84,54 +84,30 @@ def test_on_cameraman_blob_spec_no_rect():
         "valuerange": 50,
     }
     cam.on_cameraman_blob_spec(payload)
-    assert "green_marker" in cam.blob_specs
-    hsv_spec, rect = cam.blob_specs["green_marker"]
+    assert "green_marker" in cam.control.blob_specs
+    hsv_spec, rect = cam.control.blob_specs["green_marker"]
     assert hsv_spec.hue == 60
     assert rect is None
 
 
 def test_on_cameraman_blob_spec_clear():
     cam = _make_cameraman()
-    cam.blob_specs["red_sign"] = (
+    cam.control.blob_specs["red_sign"] = (
         oc.HsvSpec(hue=170, huerange=10),
         None,
     )
     payload = {"action": "clear", "label": "red_sign"}
     cam.on_cameraman_blob_spec(payload)
-    assert "red_sign" not in cam.blob_specs
+    assert "red_sign" not in cam.control.blob_specs
 
 
 def test_on_cameraman_blob_spec_clear_all():
     cam = _make_cameraman()
-    cam.blob_specs["red_sign"] = (oc.HsvSpec(hue=170), None)
-    cam.blob_specs["green_marker"] = (oc.HsvSpec(hue=60), None)
+    cam.control.blob_specs["red_sign"] = (oc.HsvSpec(hue=170), None)
+    cam.control.blob_specs["green_marker"] = (oc.HsvSpec(hue=60), None)
     payload = {"action": "clear_all"}
     cam.on_cameraman_blob_spec(payload)
-    assert cam.blob_specs == {}
+    assert cam.control.blob_specs == {}
 
 
-def test_on_cameraman_mark_labeled_defers_to_burst():
-    cam = _make_cameraman()
-    cam.mark_payload = None
-    payload = {"y": 150, "x": 10, "w": 90, "h": 50, "label": "left"}
-    cam.on_cameraman_mark(payload)
-    # The HSV resolution needs a captured frame, so it is deferred to
-    # image_burst(); on_cameraman_mark only stashes the payload + start box.
-    assert cam.mark_payload is payload
-    assert cam.mark_rect.x_min == 10
-    assert cam.mark_rect.x_max == 100
-    assert cam.line_specs == {}
 
-
-def test_on_cameraman_mark_clear_one_line():
-    cam = _make_cameraman()
-    cam.line_specs = {"left": ("s", "r"), "right": ("s", "r")}
-    cam.on_cameraman_mark({"action": "clear", "label": "left"})
-    assert set(cam.line_specs) == {"right"}
-
-
-def test_on_cameraman_mark_clear_all_lines():
-    cam = _make_cameraman()
-    cam.line_specs = {"left": ("s", "r"), "right": ("s", "r")}
-    cam.on_cameraman_mark({"action": "clear_all"})
-    assert cam.line_specs == {}

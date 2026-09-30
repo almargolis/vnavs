@@ -1,4 +1,3 @@
-import json
 import os
 import time
 from dataclasses import dataclass, field
@@ -8,7 +7,6 @@ import cv2
 
 from cvpipeline import opticchiasm
 from ezcomms import vnavs_const as vconst
-from ezcomms import vnavs_data as vdata
 from ezcomms import vnavs_node as vmqtt
 
 
@@ -36,14 +34,7 @@ class ControlState:
     shutter_speed: int = 0
     do_auto_iso: bool = True
     idle_image_max: int = 20
-    # Mark / vision specs (from mark messages)
-    mark_hsv_spec: object = None
-    mark_rect: object = None
-    mark_open_dim: int = 0
-    mark_minrange: int = 20
-    mark_adapt: bool = True
-    mark_payload: object = None
-    line_specs: dict = field(default_factory=dict)
+    # Vision specs (from blob spec messages)
     blob_specs: dict = field(default_factory=dict)
     # Mission state (from mission messages)
     mission_id: str = None
@@ -74,8 +65,6 @@ class FrameState:
     image_path: str = ""
     image_fn: str = ""
     this_image: object = None
-    rect_list: object = None
-    lane_lines_result: dict = field(default_factory=dict)
     blobs_result: dict = field(default_factory=dict)
 
 
@@ -106,100 +95,11 @@ class ImageProc:
         if self.control.iso > 800:
             self.control.iso = 800
 
-    def maker_faire_2018(self, im):
-        rect_list = []
-        if self.control.mark_rect is None:
-            return rect_list
-        if self.control.mark_hsv_spec is None:
-            return rect_list
-
-        kernel_dim = 7
-        iterations = 1
-        box_reps = 10
-        end_y = self.control.mark_rect.top_y(0) - (self.control.mark_rect.height * box_reps)
-        if end_y < 0:
-            end_y = 0
-
-        rect_list = im.chase_line(
-            hsvspec=self.control.mark_hsv_spec,
-            rect=self.control.mark_rect,
-            end_y=end_y,
-            kernel_dim=kernel_dim,
-            iterations=iterations,
-            open_dim=self.control.mark_open_dim,
-            adapt=self.control.mark_adapt,
-        )
-        list_list = opticchiasm.list_of_rotated_rect_as_list_of_dicts(rect_list)
-        return list_list
-
     def process_frame(self, frame):
-        """Apply mark, line, and blob detection to a captured frame."""
+        """Apply blob detection to a captured frame."""
         ctrl = self.control
-        frame.rect_list = None
-        if (
-            (len(ctrl.post_processes) > 0)
-            or (ctrl.mark_payload is not None)
-            or True
-        ):
-            if frame.this_image is None:
-                frame.this_image = opticchiasm.Image(opencv_fn=frame.image_path)
-        if ctrl.mark_payload is not None:
-            if "open" in ctrl.mark_payload:
-                ctrl.mark_open_dim = int(ctrl.mark_payload["open"])
-            if "minrange" in ctrl.mark_payload:
-                ctrl.mark_minrange = int(ctrl.mark_payload["minrange"])
-            if "adapt" in ctrl.mark_payload:
-                ctrl.mark_adapt = bool(int(ctrl.mark_payload["adapt"]))
-            hsv_spec = opticchiasm.hsv_spec_from_payload(ctrl.mark_payload)
-            if hsv_spec is None:
-                hsv_spec = opticchiasm.next_hsv_spec_fn(
-                    frame.this_image.im_as_hsv(),
-                    rotated_rect=ctrl.mark_rect,
-                    minrange=ctrl.mark_minrange,
-                )
-            label = ctrl.mark_payload.get("label")
-            if label:
-                ctrl.line_specs[label] = (hsv_spec, ctrl.mark_rect)
-            else:
-                ctrl.mark_hsv_spec = hsv_spec
-            if "save" in ctrl.mark_payload:
-                dname = ctrl.mark_payload["save"]
-                hsv_dict = {
-                    k: int(v) for k, v in hsv_spec.as_payload().items()
-                }
-                pdata = {
-                    vdata.dkey_field_name: dname,
-                    vdata.dgroup_field_name: None,
-                    vdata.dfqn_field_name: dname,
-                    vdata.dclass_field_name: "str",
-                    vdata.dpayload_field_name: {
-                        vdata.dprimitive_field_name: json.dumps(hsv_dict)
-                    },
-                }
-                print("MARK HSV SAVE", dname, hsv_dict)
-                self.control.publish(vconst.data_save_topic, {"pdata": pdata})
-            ctrl.mark_payload = None
-        frame.rect_list = self.maker_faire_2018(frame.this_image)
-        frame.lane_lines_result = {}
-        for label, (line_spec, line_rect) in ctrl.line_specs.items():
-            if (line_spec is None) or (line_rect is None):
-                continue
-            line_end_y = line_rect.top_y(0) - (line_rect.height * 10)
-            if line_end_y < 0:
-                line_end_y = 0
-            seg_list = frame.this_image.chase_line(
-                hsvspec=line_spec,
-                rect=line_rect,
-                end_y=line_end_y,
-                kernel_dim=7,
-                iterations=1,
-                open_dim=ctrl.mark_open_dim,
-                adapt=ctrl.mark_adapt,
-            )
-            if seg_list:
-                frame.lane_lines_result[label] = (
-                    opticchiasm.list_of_rotated_rect_as_list_of_dicts(seg_list)
-                )
+        if frame.this_image is None:
+            frame.this_image = opticchiasm.Image(opencv_fn=frame.image_path)
         frame.blobs_result = {}
         for label, (hsv_spec, rect) in ctrl.blob_specs.items():
             blob_list, _ = frame.this_image.find_color_blobs(
@@ -224,8 +124,6 @@ class ImageProc:
         payload["capture_format"] = ctrl.capture_format
         payload["capture_publish"] = ctrl.capture_publish
         payload["capture_fps"] = burst.fps_rate
-        payload["center_line"] = frame.rect_list
-        payload["lane_lines"] = frame.lane_lines_result
         payload["blobs"] = frame.blobs_result
         ctrl.publish(vconst.cameraman_pic_ready_topic, payload)
         # Sync camera hardware with ControlState (ISO 100 ~ AnalogueGain 1.0)
