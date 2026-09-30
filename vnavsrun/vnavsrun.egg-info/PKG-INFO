@@ -10,3 +10,17 @@ Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
+Requires-Dist: ezcomms
+Requires-Dist: cvpipeline
+Requires-Dist: geopy>=2.0.0
+Requires-Dist: pynmea2
+Requires-Dist: pyserial>=3.5
+Provides-Extra: gui
+Requires-Dist: eztk; extra == "gui"
+Requires-Dist: Pillow>=8.0.0; extra == "gui"
+Provides-Extra: raspberry-pi
+Requires-Dist: picamera>=1.13; extra == "raspberry-pi"
+Requires-Dist: spidev>=3.5; extra == "raspberry-pi"
+Provides-Extra: hardware
+Requires-Dist: pyfirmata>=1.1.0; extra == "hardware"
+Requires-Dist: sense_hat; extra == "hardware"

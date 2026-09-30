@@ -4,8 +4,10 @@ test/test_engineer_1.py
 test/test_fastmqttserver.py
 test/test_fileserver.py
 test/test_helmsman.py
+test/test_helmsman_donkeycar.py
 test/test_mission_control.py
 test/test_navigator.py
+vnavsrun/__init__.py
 vnavsrun/cameraman.py
 vnavsrun/dev_sense_hat.py
 vnavsrun/dev_spi.py
@@ -14,6 +16,7 @@ vnavsrun/fastmqttserver.py
 vnavsrun/fileserver.py
 vnavsrun/helmsman.py
 vnavsrun/helmsman_create.py
+vnavsrun/helmsman_donkeycar.py
 vnavsrun/helmsman_firmata.py
 vnavsrun/mark.py
 vnavsrun/mission_control.py
@@ -24,4 +27,6 @@ vnavsrun/translator.py
 vnavsrun.egg-info/PKG-INFO
 vnavsrun.egg-info/SOURCES.txt
 vnavsrun.egg-info/dependency_links.txt
+vnavsrun.egg-info/entry_points.txt
+vnavsrun.egg-info/requires.txt
 vnavsrun.egg-info/top_level.txt
