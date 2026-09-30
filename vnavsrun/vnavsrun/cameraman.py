@@ -188,15 +188,19 @@ class Cameraman(vmqtt.VnavsNode):
 
     def on_cameraman_process(self, payload):
         if payload["Type"] == "clear":
-            self.control.post_processes = []
-            self.control.cam_compiled = None
-            self.control.cam_script = None
-        else:
-            self.control.post_processes.append(payload)
-            self.control.cam_script = payload["cam_script"]
-            self.control.cam_compiled = compile(
-                self.control.cam_script, "cvcode.py", "exec", dont_inherit=True
-            )
+            self.control.pipeline_steps = []
+        elif "cvp_file" in payload:
+            from cvpipeline import processsteps
+            try:
+                self.control.pipeline_steps = processsteps.load_cvp_file(
+                    payload["cvp_file"]
+                )
+            except Exception as e:
+                print(f"Failed to load cvp file: {e}")
+                self.control.pipeline_steps = []
+        elif "cam_script" in payload:
+            # Legacy cam_script support
+            pass
 
     def on_cameraman_blob_spec(self, payload):
         action = payload.get("action", "set")

@@ -40,9 +40,7 @@ class ControlState:
     mission_id: str = None
     mission_logging: bool = False
     # Post-processing (from process messages)
-    post_processes: list = field(default_factory=list)
-    cam_script: str = None
-    cam_compiled: object = None
+    pipeline_steps: list = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -96,7 +94,7 @@ class ImageProc:
             self.control.iso = 800
 
     def process_frame(self, frame):
-        """Apply blob detection to a captured frame."""
+        """Apply blob detection and pipeline steps to a captured frame."""
         ctrl = self.control
         if frame.this_image is None:
             frame.this_image = opticchiasm.Image(opencv_fn=frame.image_path)
@@ -109,6 +107,15 @@ class ImageProc:
                 frame.blobs_result[label] = (
                     opticchiasm.list_of_rotated_rect_as_list_of_dicts(blob_list)
                 )
+        if ctrl.pipeline_steps:
+            from cvpipeline import processsteps
+            ctrl.pipeline_steps[0].source_im = frame.this_image
+            ctrl.pipeline_steps[0].source_path = frame.image_path
+            for step in ctrl.pipeline_steps:
+                trace, elapsed = step.execute_step(ctrl.pipeline_steps)
+                if trace is not None:
+                    print(f"Pipeline step {step.ix} error: {trace}")
+                    break
 
     def publish_frame(self, frame, burst):
         """Publish results and sync camera settings after processing a frame."""
